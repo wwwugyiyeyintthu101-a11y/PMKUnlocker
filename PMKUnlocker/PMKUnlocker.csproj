@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- PotatoNV library တွေ (x86) နဲ့ libusb-1.0.dll (32-bit) အတွက် x86 ဖြစ်ရမယ် -->
+    <PlatformTarget>x86</PlatformTarget>
+    <Version>7.2.0</Version>
+    <FileVersion>7.2.0.0</FileVersion>
+    <InformationalVersion>7.2.0-preview</InformationalVersion>
+    <Product>PMK Mobile Tool</Product>
+    <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Huawei/Honor Kirin bootloader unlock — PotatoNV-next ရဲ့ core library တွေ -->
+  <ItemGroup>
+    <Reference Include="Potato.ImageFlasher">
+      <HintPath>libs\potato\Potato.ImageFlasher.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Potato.Fastboot">
+      <HintPath>libs\potato\Potato.Fastboot.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="LibUsbDotNet.LibUsbDotNet">
+      <HintPath>libs\potato\LibUsbDotNet.LibUsbDotNet.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- libusb-1.0.dll (32-bit) ကို exe ဘေးကို copy — Potato.Fastboot က P/Invoke နဲ့ ခေါ်တယ် -->
+  <ItemGroup>
+    <None Update="libs\potato\libusb-1.0.dll">
+      <TargetPath>libusb-1.0.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- MTK helper — erase/seccfg ပြီးရင် ဖုန်းကို Android ထဲ တကယ် auto-reboot ပေးတဲ့ script
+       (mtkclient CLI ရဲ့ `reset` က power off သာ လုပ်လို့) — exe ဘေးမှာ ရှိရမယ် -->
+  <ItemGroup>
+    <Content Include="..\SHOP_SETUP.md" Link="SHOP_SETUP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Remove="bundled-tools\**\*" />
+    <Content Include="bundled-tools\**\*">
+      <TargetPath>%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <None Update="pmk_devices.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="pmk_mtk_op.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="pmk_qc_loaders.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="pmk_codenames.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- phone-model DB (4,600+ models: brand → model → chip → ops) -->
+    <None Update="pmk_models.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

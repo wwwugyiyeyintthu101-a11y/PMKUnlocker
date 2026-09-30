@@ -1,0 +1,4630 @@
+{
+    "mtk":  [
+                {
+                    "brand":  "MediaTek",
+                    "model":  "ELBRUS/MT0598",
+                    "cpu":  "ELBRUS/MT0598",
+                    "extra":  "hwcode 0x598, dacode 0x0598"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT0571",
+                    "cpu":  "MT0571",
+                    "extra":  "hwcode 0x571, dacode 0x0571"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT2523",
+                    "cpu":  "MT2523",
+                    "extra":  "hwcode 0x2523, dacode 0x2523"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT2601",
+                    "cpu":  "MT2601",
+                    "extra":  "hwcode 0x2601, dacode 0x2601"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT2625",
+                    "cpu":  "MT2625",
+                    "extra":  "hwcode 0x2625, dacode 0x2625"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT3967",
+                    "cpu":  "MT3967",
+                    "extra":  "hwcode 0x3967, dacode 0x3967"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT5932",
+                    "cpu":  "MT5932",
+                    "extra":  "hwcode 0x5932, dacode 0x5932"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6225",
+                    "cpu":  "MT6225",
+                    "extra":  "hwcode 0x6225, dacode 0x6225"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6226",
+                    "cpu":  "MT6226",
+                    "extra":  "hwcode 0x6226, dacode 0x6226"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6236",
+                    "cpu":  "MT6236",
+                    "extra":  "hwcode 0x6236, dacode 0x6236"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6238",
+                    "cpu":  "MT6238",
+                    "extra":  "hwcode 0x6238, dacode 0x6238"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6253",
+                    "cpu":  "MT6253",
+                    "extra":  "hwcode 0x6253, dacode 0x6253"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6255",
+                    "cpu":  "MT6255",
+                    "extra":  "hwcode 0x6255, dacode 0x6255"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6256",
+                    "cpu":  "MT6256",
+                    "extra":  "hwcode 0x6256, dacode 0x6256"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT625a",
+                    "cpu":  "MT625a",
+                    "extra":  "hwcode 0x625a, dacode 0x625a"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6261/MT2503",
+                    "cpu":  "MT6261/MT2503",
+                    "extra":  "hwcode 0x6261, dacode 0x6261"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6268",
+                    "cpu":  "MT6268",
+                    "extra":  "hwcode 0x6268, dacode 0x6268"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6270",
+                    "cpu":  "MT6270",
+                    "extra":  "hwcode 0x6270, dacode 0x6270"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6276",
+                    "cpu":  "MT6276",
+                    "extra":  "hwcode 0x6276, dacode 0x6276"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6280",
+                    "cpu":  "MT6280",
+                    "extra":  "hwcode 0x6280"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6291",
+                    "cpu":  "MT6291",
+                    "extra":  "hwcode 0x6291, dacode 0x6291"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6516",
+                    "cpu":  "MT6516",
+                    "extra":  "hwcode 0x6516, dacode 0x6516"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6570/MT8321",
+                    "cpu":  "MT6570/MT8321",
+                    "extra":  "hwcode 0x633, dacode 0x6570"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6571",
+                    "cpu":  "MT6571",
+                    "extra":  "hwcode 0x6571, dacode 0x6571"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6572",
+                    "cpu":  "MT6572",
+                    "extra":  "hwcode 0x6572, dacode 0x6572"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6573/MT6260",
+                    "cpu":  "MT6573/MT6260",
+                    "extra":  "hwcode 0x6573, dacode 0x6573"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6575/MT8317",
+                    "cpu":  "MT6575/MT8317",
+                    "extra":  "hwcode 0x6575, dacode 0x6575"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6577",
+                    "cpu":  "MT6577",
+                    "extra":  "hwcode 0x6577, dacode 0x6577"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6580",
+                    "cpu":  "MT6580",
+                    "extra":  "hwcode 0x6580, dacode 0x6580"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6582/MT6574/MT8382",
+                    "cpu":  "MT6582/MT6574/MT8382",
+                    "extra":  "hwcode 0x6582, dacode 0x6582"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6583/6589",
+                    "cpu":  "MT6583/6589",
+                    "extra":  "hwcode 0x6583, dacode 0x6583"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6592/MT8392",
+                    "cpu":  "MT6592/MT8392",
+                    "extra":  "hwcode 0x6592, dacode 0x6592"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6595",
+                    "cpu":  "MT6595",
+                    "extra":  "hwcode 0x6595, dacode 0x6595"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6735/T,MT8735A",
+                    "cpu":  "MT6735/T,MT8735A",
+                    "extra":  "hwcode 0x321, dacode 0x6735"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6737M/MT6735G",
+                    "cpu":  "MT6737M/MT6735G",
+                    "extra":  "hwcode 0x335, dacode 0x6735"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6739/MT6731/MT8765",
+                    "cpu":  "MT6739/MT6731/MT8765",
+                    "extra":  "hwcode 0x699, dacode 0x6739"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6750",
+                    "cpu":  "MT6750",
+                    "extra":  "hwcode 0x601, dacode 0x6755"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6752",
+                    "cpu":  "MT6752",
+                    "extra":  "hwcode 0x6752, dacode 0x6752"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6753",
+                    "cpu":  "MT6753",
+                    "extra":  "hwcode 0x337, dacode 0x6735"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6755/MT6750/M/T/S",
+                    "cpu":  "MT6755/MT6750/M/T/S (Helio P10/P15/P18)",
+                    "extra":  "hwcode 0x326, dacode 0x6755"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6757/MT6757D",
+                    "cpu":  "MT6757/MT6757D (Helio P20)",
+                    "extra":  "hwcode 0x551, dacode 0x6757"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6758",
+                    "cpu":  "MT6758 (Helio P30)",
+                    "extra":  "hwcode 0x688, dacode 0x6758"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6759",
+                    "cpu":  "MT6759 (Helio P30)",
+                    "extra":  "hwcode 0x507, dacode 0x6758"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6761/MT6762/MT3369/MT8766B/MT8761/AC8259/AC8257",
+                    "cpu":  "MT6761/MT6762/MT3369/MT8766B/MT8761/AC8259/AC8257 (Helio A20/P22/A22/A25/G25)",
+                    "extra":  "hwcode 0x717, dacode 0x6761"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6763",
+                    "cpu":  "MT6763 (Helio P23)",
+                    "extra":  "hwcode 0x690, dacode 0x6763"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6765/MT8768t",
+                    "cpu":  "MT6765/MT8768t (Helio P35/G35)",
+                    "extra":  "hwcode 0x766, dacode 0x6765"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6768/MT6769",
+                    "cpu":  "MT6768/MT6769 (Helio P65/G85 k68v1)",
+                    "extra":  "hwcode 0x707, dacode 0x6768"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6771/MT8385/MT8183/MT8666",
+                    "cpu":  "MT6771/MT8385/MT8183/MT8666 (Helio P60/P70/G80)",
+                    "extra":  "hwcode 0x788, dacode 0x6771"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6779",
+                    "cpu":  "MT6779 (Helio P90 k79v1)",
+                    "extra":  "hwcode 0x725, dacode 0x6779"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6781",
+                    "cpu":  "MT6781 (Helio G96)",
+                    "extra":  "hwcode 0x1066, dacode 0x6781"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6785",
+                    "cpu":  "MT6785 (Helio G90)",
+                    "extra":  "hwcode 0x813, dacode 0x6785"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6789/MT8781V",
+                    "cpu":  "MT6789/MT8781V (MTK Helio G99)",
+                    "extra":  "hwcode 0x1208, dacode 0x1208"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6795",
+                    "cpu":  "MT6795 (Helio X10)",
+                    "extra":  "hwcode 0x6795, dacode 0x6795"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6797/MT6767",
+                    "cpu":  "MT6797/MT6767 (Helio X23/X25/X27)",
+                    "extra":  "hwcode 0x279, dacode 0x6797"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6799",
+                    "cpu":  "MT6799 (Helio X30/X35)",
+                    "extra":  "hwcode 0x562, dacode 0x6799"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6833",
+                    "cpu":  "MT6833 (Dimensity 700 5G k6833)",
+                    "extra":  "hwcode 0x989, dacode 0x6833"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6835V/ZA",
+                    "cpu":  "MT6835V/ZA (MTK Dimensity 6100+)",
+                    "extra":  "hwcode 0x1209, dacode 0x1209"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6853",
+                    "cpu":  "MT6853 (Dimensity 720 5G)",
+                    "extra":  "hwcode 0x996, dacode 0x6853"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6855",
+                    "cpu":  "MT6855 (Dimensity 8100)",
+                    "extra":  "hwcode 0x1129, dacode 0x1129"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6873",
+                    "cpu":  "MT6873 (Dimensity 800/820 5G)",
+                    "extra":  "hwcode 0x886, dacode 0x6873"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6877/MT6877V/MT8791N",
+                    "cpu":  "MT6877/MT6877V/MT8791N (Dimensity 900/1080/7050)",
+                    "extra":  "hwcode 0x959, dacode 0x6877"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6878",
+                    "cpu":  "MT6878 (Dimensity 7300)",
+                    "extra":  "hwcode 0x1375, dacode 0x1375"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6880/MT6890 Modem",
+                    "cpu":  "MT6880/MT6890 Modem",
+                    "extra":  "hwcode 0x992, dacode 0x0992"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6885/MT6883/MT6889/MT6880/MT6890",
+                    "cpu":  "MT6885/MT6883/MT6889/MT6880/MT6890 (Dimensity 1000L/1000)",
+                    "extra":  "hwcode 0x816, dacode 0x6885"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6886",
+                    "cpu":  "MT6886 (Dimensity 7200 Ultra)",
+                    "extra":  "hwcode 0x1229, dacode 0x1229"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6891/MT6893",
+                    "cpu":  "MT6891/MT6893 (Dimensity 1200)",
+                    "extra":  "hwcode 0x950, dacode 0x6893"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6895",
+                    "cpu":  "MT6895 (Dimensity 8200)",
+                    "extra":  "hwcode 0x1172, dacode 0x1172"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6897",
+                    "cpu":  "MT6897 (Dimensity 8300 Ultra)",
+                    "extra":  "hwcode 0x1203, dacode 0x1203"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6899",
+                    "cpu":  "MT6899 (Dimensity 8400 Turbo/Ultra)",
+                    "extra":  "hwcode 0x6899, dacode 0x6899"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6983",
+                    "cpu":  "MT6983 (Dimensity 9000/9000+)",
+                    "extra":  "hwcode 0x907, dacode 0x907"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6985",
+                    "cpu":  "MT6985 (Dimensity 9200/9200+)",
+                    "extra":  "hwcode 0x1296, dacode 0x1296"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6989W",
+                    "cpu":  "MT6989W (Dimensity 9300 Plus)",
+                    "extra":  "hwcode 0x1236, dacode 0x1236"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6991",
+                    "cpu":  "MT6991 (Dimensity 9400 Ultra)",
+                    "extra":  "hwcode 0x1357, dacode 0x1357"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT6993",
+                    "cpu":  "MT6993 (Dimensity 9500)",
+                    "extra":  "hwcode 0x1471, dacode 0x1471"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT7682",
+                    "cpu":  "MT7682",
+                    "extra":  "hwcode 0x7682, dacode 0x7682"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT7686",
+                    "cpu":  "MT7686",
+                    "extra":  "hwcode 0x7686, dacode 0x7686"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8127/MT3367/AC8227L",
+                    "cpu":  "MT8127/MT3367/AC8227L",
+                    "extra":  "hwcode 0x8127, dacode 0x8127"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8135",
+                    "cpu":  "MT8135",
+                    "extra":  "hwcode 0x8135, dacode 0x8135"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8163",
+                    "cpu":  "MT8163",
+                    "extra":  "hwcode 0x8163, dacode 0x8163"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8167/MT8516/MT8362",
+                    "cpu":  "MT8167/MT8516/MT8362",
+                    "extra":  "hwcode 0x8167, dacode 0x8167"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8168/MT6357",
+                    "cpu":  "MT8168/MT6357",
+                    "extra":  "hwcode 0x8168, dacode 0x8168"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8173",
+                    "cpu":  "MT8173",
+                    "extra":  "hwcode 0x8172, dacode 0x8173"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8176",
+                    "cpu":  "MT8176",
+                    "extra":  "hwcode 0x8176, dacode 0x8173"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8195 Chromebook",
+                    "cpu":  "MT8195 Chromebook",
+                    "extra":  "hwcode 0x930, dacode 0x8195"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8512",
+                    "cpu":  "MT8512",
+                    "extra":  "hwcode 0x8512, dacode 0x8512"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8518 VoiceAssistant",
+                    "cpu":  "MT8518 VoiceAssistant",
+                    "extra":  "hwcode 0x8518, dacode 0x8518"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8590/MT7683/MT8521/MT7623",
+                    "cpu":  "MT8590/MT7683/MT8521/MT7623",
+                    "extra":  "hwcode 0x8590, dacode 0x8590"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8695",
+                    "cpu":  "MT8695",
+                    "extra":  "hwcode 0x8695, dacode 0x8695"
+                },
+                {
+                    "brand":  "MediaTek",
+                    "model":  "MT8696",
+                    "cpu":  "MT8696",
+                    "extra":  "hwcode 0x908, dacode 0x8696"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6762G (Helio G25)",
+                    "model":  "Redmi 9A (M2006C3LG)",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6762G (Helio G25)",
+                    "model":  "Redmi 9A Sport",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6765G (Helio G35)",
+                    "model":  "Redmi 9C (M2006C3LG/C3M)",
+                    "extra":  "hwcode 0x6765"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6765G (Helio G35)",
+                    "model":  "Redmi 9C NFC",
+                    "extra":  "hwcode 0x6765"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V/CB (Helio G80)",
+                    "model":  "Redmi 9 (M2004J19C)",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V (Helio G88)",
+                    "model":  "Redmi 10",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6762G (Helio G25)",
+                    "model":  "Redmi 10A",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V (Helio G88)",
+                    "model":  "Redmi 10 2022",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769Z (Helio G85)",
+                    "model":  "Redmi 12C",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "model":  "Redmi A1",
+                    "extra":  "hwcode 0x6761"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "model":  "Redmi A1+",
+                    "extra":  "hwcode 0x6761"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "model":  "Redmi A2",
+                    "extra":  "hwcode 0x6761"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "model":  "Redmi A3",
+                    "extra":  "hwcode 0x6761"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V (Helio G85)",
+                    "model":  "Redmi Note 8",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6785 (Helio G90T)",
+                    "model":  "Redmi Note 8 Pro",
+                    "extra":  "hwcode 0x6785"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V (Helio G85)",
+                    "model":  "Redmi Note 9",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V (Helio G85)",
+                    "model":  "Redmi Note 9 4G",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "model":  "Redmi Note 10 5G",
+                    "extra":  "hwcode 0x6833"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "model":  "Redmi Note 10S",
+                    "extra":  "hwcode 0x6785"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6781 (Helio G96)",
+                    "model":  "Redmi Note 11S",
+                    "extra":  "hwcode 0x6781"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "model":  "Redmi Note 11 SE",
+                    "extra":  "hwcode 0x6833"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "model":  "Redmi Note 12 4G (tapas)",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6833 (Dimensity 6080)",
+                    "model":  "Redmi Note 12 5G",
+                    "extra":  "hwcode 0x6833"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "model":  "Redmi Note 12S",
+                    "extra":  "hwcode 0x6789"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6765G (Helio G35)",
+                    "model":  "POCO C3",
+                    "extra":  "hwcode 0x6765"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6765G (Helio G35)",
+                    "model":  "POCO C31",
+                    "extra":  "hwcode 0x6765"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "JLQ JR510",
+                    "model":  "POCO C40",
+                    "extra":  "Unisoc-adjacent; check hwcode"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6769V/CB (Helio G80)",
+                    "model":  "POCO M2",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "model":  "POCO M3 Pro 5G",
+                    "extra":  "hwcode 0x6833"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6781 (Helio G96)",
+                    "model":  "POCO M4 Pro 4G",
+                    "extra":  "hwcode 0x6781"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "model":  "POCO M5",
+                    "extra":  "hwcode 0x6789"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "SD865 (QC)",
+                    "model":  "Mi 10T / Redmi K30S (MTK? check)",
+                    "extra":  "Qualcomm â€” use QC tab"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "MT6895 (Dimensity 8100)",
+                    "model":  "Xiaomi 12T",
+                    "extra":  "hwcode 0x6895"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "cpu":  "SD845 (QC)",
+                    "model":  "Pocophone F1 (beryllium)",
+                    "extra":  "Qualcomm â€” use QC tab"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A03s",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A12 (A125F)",
+                    "cpu":  "MT6769 (Helio P65/G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A12 Nacho",
+                    "cpu":  "MT6769V (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A22",
+                    "cpu":  "MT6785 (Helio G80/G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A22s 5G",
+                    "cpu":  "MT6853 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A32 4G",
+                    "cpu":  "MT6785 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy M12",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy M13",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy F12",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy J2 Core",
+                    "cpu":  "MT6737M",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy J4 Core",
+                    "cpu":  "MT6737M",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy Tab A7 Lite (SM-T225)",
+                    "cpu":  "MT8768 (Helio P22T)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A15 5G",
+                    "cpu":  "MT6833 (Dimensity 6100+)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A16",
+                    "cpu":  "MT6835 (Dimensity 6300)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A16 5G",
+                    "cpu":  "MT6835 (Dimensity 6300)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A24",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A26",
+                    "cpu":  "MT6835 (Dimensity 6300)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy A34",
+                    "cpu":  "MT6877 (Dimensity 1080)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Samsung",
+                    "model":  "Galaxy Tab S6 Lite (2024)",
+                    "cpu":  "MT6877 (Dimensity)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A15 (CPH2185)",
+                    "cpu":  "MT6762 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A15s",
+                    "cpu":  "MT6762 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A16 (CPH2269)",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A16s",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A17",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A17k",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A35",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A53 (CPH2127)",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A53s",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A56s",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A57 (CPH2387)",
+                    "cpu":  "MT6833 (Dimensity 810)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A58",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A58 5G",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A77 (CPH2478)",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A77 5G",
+                    "cpu":  "MT6833 (Dimensity 810)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A78",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "A12",
+                    "cpu":  "MT6762 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "Reno4 Z 5G",
+                    "cpu":  "MT6853 (Dimensity 800C)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "Reno6 5G (CPH2267)",
+                    "cpu":  "MT6877 (Dimensity 900)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "Reno7 5G (CPG2293)",
+                    "cpu":  "MT6877 (Dimensity 900)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "Reno8 (CPH2461)",
+                    "cpu":  "MT6877 (Dimensity 1300)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "OPPO",
+                    "model":  "Reno8 T",
+                    "cpu":  "MT6895 (Dimensity 1080)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y15 (1901)",
+                    "cpu":  "MT6762 (Helio P22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y15s",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y15t",
+                    "cpu":  "MT6765 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y16",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y17",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y21s",
+                    "cpu":  "MT6769 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y22",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y23",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y27",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y33s",
+                    "cpu":  "MT6769 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y53s",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y55s",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y72 5G",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y73",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "Y75",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "V21 5G (V2057)",
+                    "cpu":  "MT6853 (Dimensity 800U)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "vivo",
+                    "model":  "V23e",
+                    "cpu":  "MT6779 (Helio G96)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C11 (RMX3231)",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C11 2021",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C12",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C15",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C20",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C20A",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C21",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C25",
+                    "cpu":  "MT6765 (Helio G35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C25S",
+                    "cpu":  "MT6769 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C55",
+                    "cpu":  "MT6769 (Helio G88)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Narzo 20",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Narzo 30A",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Narzo 50A",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Narzo 50 5G",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Narzo 50 Pro 5G",
+                    "cpu":  "MT6853 (Dimensity 920)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "8 (RMX3085)",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "8 5G",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "8i",
+                    "cpu":  "MT6785 (Helio G96)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "8s 5G",
+                    "cpu":  "MT6853 (Dimensity 810)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "9 5G",
+                    "cpu":  "MT6833 (Dimensity 810)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "10 (RMX3630)",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "11 Pro+",
+                    "cpu":  "MT6877 (Dimensity 7050)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 6 KE7",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 6 Go",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 7 (KF6h)",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 7 Pro",
+                    "cpu":  "MT6768 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 8 (KG5j)",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 8 Pro",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 9 (KF5)",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 10",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Spark 10 5G",
+                    "cpu":  "MT6833 (Dimensity 6080)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Camon 16 (CE7)",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Camon 17",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Camon 18",
+                    "cpu":  "MT6781 (Helio G96)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Camon 19",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Camon 20",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Pova",
+                    "cpu":  "MT6768 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Pova 5G",
+                    "cpu":  "MT6833 (Dimensity 810)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Pova 3",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Pova 4",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "Pova 4 Pro",
+                    "cpu":  "MT6895 (Dimensity 8100)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 8 (X650C)",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 9",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 10",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 10 Play",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 11",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 11S",
+                    "cpu":  "MT6768 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 12",
+                    "cpu":  "MT6768 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 20",
+                    "cpu":  "MT6768 (Helio G80)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 30",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Note 8",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Note 10",
+                    "cpu":  "MT6785 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Note 11",
+                    "cpu":  "MT6785 (Helio G88)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Note 12",
+                    "cpu":  "MT6781 (Helio G96)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Note 30",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Smart 6",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Zero X Pro",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Zero 5G",
+                    "cpu":  "MT6877 (Dimensity 900)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Zero 30 5G",
+                    "cpu":  "MT6877 (Dimensity 8020)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "A16",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "P33",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "P36",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "S23",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Lava",
+                    "model":  "Z1 Pro",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Lava",
+                    "model":  "Z2",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Lava",
+                    "model":  "Z4",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Lava",
+                    "model":  "Z6",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Micromax",
+                    "model":  "In Note 1",
+                    "cpu":  "MT6768 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Micromax",
+                    "model":  "In 1b",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Symphony",
+                    "model":  "Z30",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Symphony",
+                    "model":  "Z40",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Walton",
+                    "model":  "Primo GH10",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Walton",
+                    "model":  "Primo GM8",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Walton",
+                    "model":  "Primo H8 Pro",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Ulefone",
+                    "model":  "Note 9P",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Ulefone",
+                    "model":  "Armor X5",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Ulefone",
+                    "model":  "Armor X7",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Blackview",
+                    "model":  "BV4900",
+                    "cpu":  "MT6761 (Helio A25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Blackview",
+                    "model":  "BV5100",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "X9 Pro",
+                    "cpu":  "MT6737M",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "S40",
+                    "cpu":  "MT6737M",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "S59",
+                    "cpu":  "MT6762 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "S90",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Oukitel",
+                    "model":  "C11 Pro",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Oukitel",
+                    "model":  "C15 Pro",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Oukitel",
+                    "model":  "K7 Pro",
+                    "cpu":  "MT6750T",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Cubot",
+                    "model":  "King Kong",
+                    "cpu":  "MT6737T",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Cubot",
+                    "model":  "Note 7",
+                    "cpu":  "MT6737M",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "A3",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "F1",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "F1 Play",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "S3 Pro",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Coolpad",
+                    "model":  "Legacy",
+                    "cpu":  "MT6771 (Helio P60)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Coolpad",
+                    "model":  "CP3705AS",
+                    "cpu":  "MT6580",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E7",
+                    "cpu":  "MT6762 (Helio G25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E7i Power",
+                    "cpu":  "MT6762 (Helio G25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G8 Power Lite",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G20",
+                    "cpu":  "MT6762 (Helio G25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G31",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G41",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G54",
+                    "cpu":  "MT6855 (Dimensity 7020)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G23",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G Pure",
+                    "cpu":  "MT6762 (Helio G25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G8 Play",
+                    "cpu":  "MT6768 (Helio G70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto Edge 20 Lite",
+                    "cpu":  "MT6779 (Dimensity 720)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto Edge 40",
+                    "cpu":  "MT6886 (Dimensity 8020)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto Edge 40 Neo",
+                    "cpu":  "MT6886 (Dimensity 7025)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E6 Play",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E6 Plus",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E6s",
+                    "cpu":  "MT6739",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E3",
+                    "cpu":  "MT6735",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E4",
+                    "cpu":  "MT6737",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E4 Plus",
+                    "cpu":  "MT6737",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto C",
+                    "cpu":  "MT6735",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto C Plus",
+                    "cpu":  "MT6737",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto C Play",
+                    "cpu":  "MT6735",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto E7 Power",
+                    "cpu":  "MT6762 (Helio G25)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Huawei",
+                    "model":  "Y5 (2019)",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Huawei",
+                    "model":  "Y6 (2019)",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Honor",
+                    "model":  "Honor 8A",
+                    "cpu":  "MT6761 (Helio A22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Honor",
+                    "model":  "Honor 9A",
+                    "cpu":  "MT6762 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "LG",
+                    "model":  "Q61",
+                    "cpu":  "MT6771 (Helio P70)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "LG",
+                    "model":  "K41S",
+                    "cpu":  "MT6762 (Helio P22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "LG",
+                    "model":  "K51S",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "LG",
+                    "model":  "K61",
+                    "cpu":  "MT6765 (Helio P35)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "LG",
+                    "model":  "K71",
+                    "cpu":  "MT6762 (Helio P22)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "model":  "Redmi Note 8 2021",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "hwcode 0x6768"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "model":  "Redmi Note 13 5G",
+                    "cpu":  "MT6835 (Dimensity 6080)",
+                    "extra":  "hwcode 0x6835"
+                },
+                {
+                    "brand":  "Xiaomi",
+                    "model":  "Redmi Note 14 5G",
+                    "cpu":  "MT6835 (Dimensity 7025)",
+                    "extra":  "hwcode 0x6835"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "C55",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "C65",
+                    "cpu":  "MT6769 (Helio G85)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "M4 5G",
+                    "cpu":  "MT6833 (Dimensity 700)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "M5s",
+                    "cpu":  "MT6785 (Helio G95)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "M6 Pro 5G",
+                    "cpu":  "MT6835 (Dimensity 6100+)",
+                    "extra":  "MTK Preloader"
+                },
+                {
+                    "brand":  "POCO",
+                    "model":  "M6 Pro",
+                    "cpu":  "MT6789 (Helio G99)",
+                    "extra":  "MTK Preloader"
+                }
+            ],
+    "qc":  [
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8009",
+                   "cpu":  "APQ8009",
+                   "extra":  "msm id 0x9680E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8009w",
+                   "cpu":  "APQ8009w",
+                   "extra":  "msm id 0x0520E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8016",
+                   "cpu":  "APQ8016",
+                   "extra":  "msm id 0x7060E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8017",
+                   "cpu":  "APQ8017",
+                   "extra":  "msm id 0x0550E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8026",
+                   "cpu":  "APQ8026",
+                   "extra":  "msm id 0x8040E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8036",
+                   "cpu":  "APQ8036",
+                   "extra":  "msm id 0x90C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8037",
+                   "cpu":  "APQ8037",
+                   "extra":  "msm id 0x0500E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8037",
+                   "cpu":  "APQ8037",
+                   "extra":  "msm id 0x90F0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8039",
+                   "cpu":  "APQ8039",
+                   "extra":  "msm id 0x90D0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8052",
+                   "cpu":  "APQ8052",
+                   "extra":  "msm id 0x9770E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8053",
+                   "cpu":  "APQ8053",
+                   "extra":  "msm id 0x0660E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8056",
+                   "cpu":  "APQ8056",
+                   "extra":  "msm id 0x9F00E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8062",
+                   "cpu":  "APQ8062",
+                   "extra":  "msm id 0x9120E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8064",
+                   "cpu":  "APQ8064",
+                   "extra":  "msm id 0x7190E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8074",
+                   "cpu":  "APQ8074",
+                   "extra":  "msm id 0x7B30E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8076",
+                   "cpu":  "APQ8076",
+                   "extra":  "msm id 0x9D00E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ807x",
+                   "cpu":  "APQ807x",
+                   "extra":  "msm id 0x08A0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8084",
+                   "cpu":  "APQ8084",
+                   "extra":  "msm id 0x9000E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8084",
+                   "cpu":  "APQ8084",
+                   "extra":  "msm id 0x9010E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8092",
+                   "cpu":  "APQ8092",
+                   "extra":  "msm id 0x9630E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8092",
+                   "cpu":  "APQ8092",
+                   "extra":  "msm id 0x9300E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8094",
+                   "cpu":  "APQ8094",
+                   "extra":  "msm id 0x9410E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8096SG",
+                   "cpu":  "APQ8096SG",
+                   "extra":  "msm id 0x0640E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "APQ8098",
+                   "cpu":  "APQ8098",
+                   "extra":  "msm id 0x0620E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM7227A",
+                   "cpu":  "MSM7227A",
+                   "extra":  "msm id 0x6220E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8110",
+                   "cpu":  "MSM8110",
+                   "extra":  "msm id 0x8100E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8112",
+                   "cpu":  "MSM8112",
+                   "extra":  "msm id 0x8160E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8208",
+                   "cpu":  "MSM8208",
+                   "extra":  "msm id 0x9620E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8210",
+                   "cpu":  "MSM8210",
+                   "extra":  "msm id 0x8110E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8212",
+                   "cpu":  "MSM8212",
+                   "extra":  "msm id 0x8140E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8217",
+                   "cpu":  "MSM8217",
+                   "extra":  "msm id 0x0590E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8274_AA",
+                   "cpu":  "MSM8274_AA",
+                   "extra":  "msm id 0x7BE0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8510",
+                   "cpu":  "MSM8510",
+                   "extra":  "msm id 0x8170E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8512",
+                   "cpu":  "MSM8512",
+                   "extra":  "msm id 0x8080E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8610",
+                   "cpu":  "MSM8610",
+                   "extra":  "msm id 0x8120E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8612",
+                   "cpu":  "MSM8612",
+                   "extra":  "msm id 0x8150E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8626",
+                   "cpu":  "MSM8626",
+                   "extra":  "msm id 0x8010E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8628",
+                   "cpu":  "MSM8628",
+                   "extra":  "msm id 0x9170E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8674_AA",
+                   "cpu":  "MSM8674_AA",
+                   "extra":  "msm id 0x7BD0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8810",
+                   "cpu":  "MSM8810",
+                   "extra":  "msm id 0x8130E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8905",
+                   "cpu":  "MSM8905",
+                   "extra":  "msm id 0x0940E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8909",
+                   "cpu":  "MSM8909",
+                   "extra":  "msm id 0x9600E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8909w",
+                   "cpu":  "MSM8909w",
+                   "extra":  "msm id 0x0510E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8916",
+                   "cpu":  "MSM8916",
+                   "extra":  "msm id 0x7050E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8917",
+                   "cpu":  "MSM8917",
+                   "extra":  "msm id 0x0560E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8920",
+                   "cpu":  "MSM8920",
+                   "extra":  "msm id 0x0860E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8926",
+                   "cpu":  "MSM8926",
+                   "extra":  "msm id 0x8050E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8928",
+                   "cpu":  "MSM8928",
+                   "extra":  "msm id 0x9180E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8929",
+                   "cpu":  "MSM8929",
+                   "extra":  "msm id 0x91B0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8930",
+                   "cpu":  "MSM8930",
+                   "extra":  "msm id 0x7210E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8937",
+                   "cpu":  "MSM8937",
+                   "extra":  "msm id 0x04F0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8939",
+                   "cpu":  "MSM8939",
+                   "extra":  "msm id 0x90B0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8940",
+                   "cpu":  "MSM8940",
+                   "extra":  "msm id 0x06B0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8952",
+                   "cpu":  "MSM8952",
+                   "extra":  "msm id 0x9720E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8953",
+                   "cpu":  "MSM8953",
+                   "extra":  "msm id 0x0460E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8956",
+                   "cpu":  "MSM8956",
+                   "extra":  "msm id 0x9B00E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8960",
+                   "cpu":  "MSM8960",
+                   "extra":  "msm id 0x72C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8962",
+                   "cpu":  "MSM8962",
+                   "extra":  "msm id 0x9100E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8974",
+                   "cpu":  "MSM8974",
+                   "extra":  "msm id 0x7B00E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8974AB",
+                   "cpu":  "MSM8974AB",
+                   "extra":  "msm id 0x7B40E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8974ABv3",
+                   "cpu":  "MSM8974ABv3",
+                   "extra":  "msm id 0x7BC0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8974AC",
+                   "cpu":  "MSM8974AC",
+                   "extra":  "msm id 0x6B10E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8974Pro",
+                   "cpu":  "MSM8974Pro",
+                   "extra":  "msm id 0x7B80E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8976",
+                   "cpu":  "MSM8976",
+                   "extra":  "msm id 0x9900E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8992",
+                   "cpu":  "MSM8992",
+                   "extra":  "msm id 0x9690E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8994",
+                   "cpu":  "MSM8994",
+                   "extra":  "msm id 0x9400E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8996",
+                   "cpu":  "MSM8996",
+                   "extra":  "msm id 0x9470E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8996AU",
+                   "cpu":  "MSM8996AU",
+                   "extra":  "msm id 0x06F0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8996AU",
+                   "cpu":  "MSM8996AU",
+                   "extra":  "msm id 0x0630E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8996Pro",
+                   "cpu":  "MSM8996Pro",
+                   "extra":  "msm id 0x05F0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8997",
+                   "cpu":  "MSM8997",
+                   "extra":  "msm id 0x06C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM8998_SDM835",
+                   "cpu":  "MSM8998_SDM835",
+                   "extra":  "msm id 0x05E0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM9055",
+                   "cpu":  "MSM9055",
+                   "extra":  "msm id 0x94B0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "MSM9225_1",
+                   "cpu":  "MSM9225_1",
+                   "extra":  "msm id 0x7F10E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "QCS605",
+                   "cpu":  "QCS605",
+                   "extra":  "msm id 0x0AA0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "QCS610",
+                   "cpu":  "QCS610",
+                   "extra":  "msm id 0x0011C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDA632",
+                   "cpu":  "SDA632",
+                   "extra":  "msm id 0x0BB0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDA670",
+                   "cpu":  "SDA670",
+                   "extra":  "msm id 0x0930E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDA845",
+                   "cpu":  "SDA845",
+                   "extra":  "msm id 0x08E0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM429",
+                   "cpu":  "SDM429",
+                   "extra":  "msm id 0x0BE0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM439",
+                   "cpu":  "SDM439",
+                   "extra":  "msm id 0x0BF0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM450",
+                   "cpu":  "SDM450",
+                   "extra":  "msm id 0x09A0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM630",
+                   "cpu":  "SDM630",
+                   "extra":  "msm id 0x0AC0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM632",
+                   "cpu":  "SDM632",
+                   "extra":  "msm id 0x0BA0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM636",
+                   "cpu":  "SDM636",
+                   "extra":  "msm id 0x0CC0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM660",
+                   "cpu":  "SDM660",
+                   "extra":  "msm id 0x08C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM662",
+                   "cpu":  "SDM662",
+                   "extra":  "msm id 0x14D0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM670",
+                   "cpu":  "SDM670",
+                   "extra":  "msm id 0x0910E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM710",
+                   "cpu":  "SDM710",
+                   "extra":  "msm id 0x0DB0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM845",
+                   "cpu":  "SDM845",
+                   "extra":  "msm id 0x08B0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM850",
+                   "cpu":  "SDM850",
+                   "extra":  "msm id 0x0B70E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SDM855A",
+                   "cpu":  "SDM855A",
+                   "extra":  "msm id 0x0CB0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6150",
+                   "cpu":  "SM6150",
+                   "extra":  "msm id 0x0950E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6150_IoT_High",
+                   "cpu":  "SM6150_IoT_High",
+                   "extra":  "msm id 0x1011C0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6150_IoT_Low",
+                   "cpu":  "SM6150_IoT_Low",
+                   "extra":  "msm id 0x001290E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6150p",
+                   "cpu":  "SM6150p",
+                   "extra":  "msm id 0x0EC0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6155",
+                   "cpu":  "SM6155",
+                   "extra":  "msm id 0x0F50E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM6155p",
+                   "cpu":  "SM6155p",
+                   "extra":  "msm id 0x100EE0E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM7150",
+                   "cpu":  "SM7150",
+                   "extra":  "msm id 0x0E60E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM7150p",
+                   "cpu":  "SM7150p",
+                   "extra":  "msm id 0x0E70E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM8150",
+                   "cpu":  "SM8150",
+                   "extra":  "msm id 0x0A50E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM8150p",
+                   "cpu":  "SM8150p",
+                   "extra":  "msm id 0x0A60E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM8250",
+                   "cpu":  "SM8250",
+                   "extra":  "msm id 0x1560E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM8250:CD90-PH805-1A",
+                   "cpu":  "SM8250:CD90-PH805-1A",
+                   "extra":  "msm id 0x0C30E1"
+               },
+               {
+                   "brand":  "Qualcomm",
+                   "model":  "SM8250:CD90-PH806-1A",
+                   "cpu":  "SM8250:CD90-PH806-1A",
+                   "extra":  "msm id 0x0CE0E1"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM6115 (Snapdragon 662)",
+                   "model":  "Redmi 9T",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM6115 (Snapdragon 662)",
+                   "model":  "Redmi 10C",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM7125 (Snapdragon 720G)",
+                   "model":  "Redmi Note 9S",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM7125 (Snapdragon 720G)",
+                   "model":  "Redmi Note 9 Pro",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM6150 (Snapdragon 678)",
+                   "model":  "Redmi Note 10",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM6225 (Snapdragon 680)",
+                   "model":  "Redmi Note 11",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM7150 (Snapdragon 732G)",
+                   "model":  "POCO X3 NFC",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM7125 (Snapdragon 720G)",
+                   "model":  "POCO M2 Pro",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SDM845 (Snapdragon 845)",
+                   "model":  "Pocophone F1 (beryllium)",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SDM730 (Snapdragon 730)",
+                   "model":  "Mi 9T / Redmi K20",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM7150 (Snapdragon 732G)",
+                   "model":  "Mi 11 Lite",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "cpu":  "SM8250 (Snapdragon 870)",
+                   "model":  "Mi 11X / POCO F3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S23 (SM-S911B)",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Note 9",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A02",
+                   "cpu":  "SD450",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A05",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A05s",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A13",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A14",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A15",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A25",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A36",
+                   "cpu":  "SD6 Gen 3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A70",
+                   "cpu":  "SD670",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A80",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy A90 5G",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy M51",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy M54",
+                   "cpu":  "SD780",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Flip3",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Fold3",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Flip4",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Fold4",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Flip5",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Z Fold5",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy XCover 4s",
+                   "cpu":  "SD710",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy XCover 6 Pro",
+                   "cpu":  "SD778G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Tab S9",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Note 8",
+                   "cpu":  "SD835",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy Note 10 (Snapdragon)",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S10 (Snapdragon)",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S20 (Snapdragon)",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S21 (Snapdragon)",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S22 (Snapdragon)",
+                   "cpu":  "SD8 Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Samsung",
+                   "model":  "Galaxy S24 (Snapdragon)",
+                   "cpu":  "SD8 Gen 3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 6",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 6T",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 7",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 7 Pro",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 7T",
+                   "cpu":  "SD855+",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 8",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 8 Pro",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 8T",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 9",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 9 Pro",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 9R",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 10 Pro",
+                   "cpu":  "SD8 Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 10T",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 11",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 11R",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 12",
+                   "cpu":  "SD8 Gen 3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus 12R",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord CE",
+                   "cpu":  "SD750",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord CE 2",
+                   "cpu":  "SD900",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord CE 3 Lite",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord N10",
+                   "cpu":  "SD690",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord N20",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord N30",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OnePlus",
+                   "model":  "OnePlus Nord 2",
+                   "cpu":  "MT6895 (Dimensity 1200)",
+                   "extra":  "MTK â€” MTK tab"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel",
+                   "cpu":  "SD820/821",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 2",
+                   "cpu":  "SD835",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 2 XL",
+                   "cpu":  "SD835",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 3",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 3 XL",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 3a",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 4",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 4 XL",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 4a",
+                   "cpu":  "SD730G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 5",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 5a",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 6",
+                   "cpu":  "Tensor",
+                   "extra":  "Google Tensor (QC-based)"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 6 Pro",
+                   "cpu":  "Tensor",
+                   "extra":  "Google Tensor (QC-based)"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 6a",
+                   "cpu":  "Tensor",
+                   "extra":  "Google Tensor (QC-based)"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 7",
+                   "cpu":  "Tensor G2",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 7 Pro",
+                   "cpu":  "Tensor G2",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 7a",
+                   "cpu":  "Tensor G2",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 8",
+                   "cpu":  "Tensor G3",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 8 Pro",
+                   "cpu":  "Tensor G3",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 8a",
+                   "cpu":  "Tensor G3",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 9",
+                   "cpu":  "Tensor G4",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Google",
+                   "model":  "Pixel 9 Pro",
+                   "cpu":  "Tensor G4",
+                   "extra":  "Google Tensor"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 1",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 1 III",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 1 V",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 5",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 5 III",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 5 IV",
+                   "cpu":  "SD8 Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 10 III",
+                   "cpu":  "SD690",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 10 IV",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia 10 V",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia XZ2",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia XZ3",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Sony",
+                   "model":  "Xperia PRO-I",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "Velvet",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "Wing",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "G8 ThinQ",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "G8X ThinQ",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "V50 ThinQ",
+                   "cpu":  "SD855",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "V60 ThinQ",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "LG",
+                   "model":  "Q92 5G",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Power (2021)",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Power (2022)",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Power (2023)",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Stylus",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Stylus 5G",
+                   "cpu":  "SD750",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G30",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G51",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G60",
+                   "cpu":  "SD732G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G71",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G82",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G84",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G85",
+                   "cpu":  "SD6s Gen 3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G54 5G",
+                   "cpu":  "MT6855 (Dimensity 7020)",
+                   "extra":  "MTK â€” MTK tab"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E6",
+                   "cpu":  "SD632",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E7 Plus",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Edge 30",
+                   "cpu":  "SD778G+",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Edge 30 Pro",
+                   "cpu":  "SD8 Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Edge 40 Pro",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Edge 50 Pro",
+                   "cpu":  "SD7 Gen 3",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Razr 2022",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Razr 2023",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Razr 40",
+                   "cpu":  "SD782G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Razr 40 Ultra",
+                   "cpu":  "SD8+ Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z2 Force",
+                   "cpu":  "SD835",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z3",
+                   "cpu":  "SD835",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z4",
+                   "cpu":  "SD675",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G9 Play",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G9 Power",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Fast",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Play (2021)",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Play (2022)",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Play (2023)",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Play (2024)",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G8 Power",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G8 Plus",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G Pro",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Vision",
+                   "cpu":  "SD675",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Action",
+                   "cpu":  "SD675",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Zoom",
+                   "cpu":  "SD675",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Power",
+                   "cpu":  "SD636",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Fusion",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Fusion+",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto One Hyper",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G7",
+                   "cpu":  "SD632",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G7 Power",
+                   "cpu":  "SD632",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G7 Play",
+                   "cpu":  "SD632",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G7 Plus",
+                   "cpu":  "SD636",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G5S",
+                   "cpu":  "SD430",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G5S Plus",
+                   "cpu":  "SD625",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G5",
+                   "cpu":  "SD430",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G5 Plus",
+                   "cpu":  "SD625",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G4",
+                   "cpu":  "SD617",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G4 Play",
+                   "cpu":  "SD410",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G4 Plus",
+                   "cpu":  "SD617",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G3",
+                   "cpu":  "SD410",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G2",
+                   "cpu":  "SD400",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto G",
+                   "cpu":  "SD400",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto X",
+                   "cpu":  "SD801",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto X Style",
+                   "cpu":  "SD808",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto X Play",
+                   "cpu":  "SD615",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto X Force",
+                   "cpu":  "SD810",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E",
+                   "cpu":  "SD410",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E2",
+                   "cpu":  "SD410",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E5",
+                   "cpu":  "SD425",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E5 Play",
+                   "cpu":  "SD425",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto E5 Plus",
+                   "cpu":  "SD450",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z",
+                   "cpu":  "SD820",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z Play",
+                   "cpu":  "SD625",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto Z2 Play",
+                   "cpu":  "SD626",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Motorola",
+                   "model":  "Moto X4",
+                   "cpu":  "SD630",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "POCO F3",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "POCO F5",
+                   "cpu":  "SD7+ Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "POCO X5",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "POCO X5 Pro",
+                   "cpu":  "SD782G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi 12 5G",
+                   "cpu":  "SD4 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi Note 10 5G",
+                   "cpu":  "MT6833 (Dimensity 700)",
+                   "extra":  "MTK â€” MTK tab"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi Note 11S",
+                   "cpu":  "MT6781 (Helio G96)",
+                   "extra":  "MTK â€” MTK tab"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi Note 13 4G",
+                   "cpu":  "SD685",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi Note 13 Pro 5G",
+                   "cpu":  "SD7s Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi Note 14 4G",
+                   "cpu":  "SD685",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi K40",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi K50",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Redmi K60 Pro",
+                   "cpu":  "SD8 Gen 2",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Black Shark 4",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Black Shark 5 Pro",
+                   "cpu":  "SD8 Gen 1",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Mi 10T / Mi 10T Pro",
+                   "cpu":  "SD865",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Mi 10 Lite",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "Mi Note 10 Lite",
+                   "cpu":  "SD730",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Xiaomi",
+                   "model":  "12T",
+                   "cpu":  "MT6895 (Dimensity 8100)",
+                   "extra":  "MTK â€” MTK tab"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "A55 (CPH2263)",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "A36",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "A96",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "F19",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "F19s",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "Reno5 5G (CPH2151)",
+                   "cpu":  "SD765G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "OPPO",
+                   "model":  "Reno8 T 5G",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y20 (V2029)",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y20s",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y20t",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y21 (V2117)",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y35",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y36",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y50",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y55",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "Y70",
+                   "cpu":  "SD662",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "V21e",
+                   "cpu":  "SD720G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "X50 Lite",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "vivo",
+                   "model":  "X60 Pro",
+                   "cpu":  "SD888",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "C15 Qualcomm",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "C17",
+                   "cpu":  "SD460",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "C67",
+                   "cpu":  "SD685",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "Narzo 20A",
+                   "cpu":  "SD665",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "9",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "9i",
+                   "cpu":  "SD680",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "9 Pro",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "GT Neo2",
+                   "cpu":  "SD870",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Realme",
+                   "model":  "GT Master",
+                   "cpu":  "SD778G",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "G50",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "G60",
+                   "cpu":  "SD695",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "G100",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "X10",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "X20",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "XR20",
+                   "cpu":  "SD480",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "8.1",
+                   "cpu":  "SD710",
+                   "extra":  "Qualcomm EDL"
+               },
+               {
+                   "brand":  "Nokia",
+                   "model":  "9 PureView",
+                   "cpu":  "SD845",
+                   "extra":  "Qualcomm EDL"
+               }
+           ],
+    "spd":  [
+                {
+                    "brand":  "Alldocube",
+                    "model":  "for android10 iplay 50 repack",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Alldocube",
+                    "model":  "iplay 50 EN 20230801",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Alldocube",
+                    "model":  "iplay 50 mini EN 20230527 EMMC",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Baidu",
+                    "model":  "Qinghe V20",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "bihee",
+                    "model":  "a89 v3",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Blackview",
+                    "model":  "A85",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Coolpad",
+                    "model":  "x10",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "T10 EMMC",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Doogee",
+                    "model":  "T10s",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "GIONEE",
+                    "model":  "GT9",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "a5pro",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "a5procc",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "a7",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "a7cc",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "h60",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "hi reader",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "HNR551T",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "q5",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Hisense",
+                    "model":  "v40 HLTE229",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "HMD",
+                    "model":  "Pulse series",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "i15pro",
+                    "model":  "",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "IIIF150",
+                    "model":  "B2",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "hot 12 play nfc",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "hot 12 pro",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Infinix",
+                    "model":  "Hot 30i base230522",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "P40+ base230619 v2",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "S23 base230605",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "Vision 3",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "vision 3 plus",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Itel",
+                    "model":  "vision 5 plus",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "K-TouchBeeA7",
+                    "model":  "",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "MeiBlue",
+                    "model":  "10 10s",
+                    "cpu":  "UMS312 (Tiger T310)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "MeiBlue",
+                    "model":  "for android9 10 10 10s repack",
+                    "cpu":  "UMS312 (Tiger T310)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "e13 v2",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "g04",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "g14",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Motorola",
+                    "model":  "Moto G20",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Nokia",
+                    "model":  "C3",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Nokia",
+                    "model":  "G21",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "OYSIN",
+                    "model":  "m60p v5000",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "PCCY13Pro",
+                    "model":  "by tg@riziqw",
+                    "cpu":  "UMS312 (Tiger T310)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Qin",
+                    "model":  "F21pro+",
+                    "cpu":  "UMS312 (Tiger T310)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C11 2021 RMX3231 Narzo 50i RMX3235",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C21y RMX3261 RMX3263",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C25y RMX3269 by tg@R0rt1z2",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C31 RMX3501",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C33 RMX3624",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C35 RMX3511",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C51 RMX3830",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "C53 RMX3760 RMX3762",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "narzo 50i prime RMX3506",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Realme",
+                    "model":  "Note 50 RMX3834",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "RG",
+                    "model":  "556",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "RG",
+                    "model":  "CUBE",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "RYHT",
+                    "model":  "X90",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "TCL",
+                    "model":  "t508n v6",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "KL4",
+                    "cpu":  "UMS9230E (Tiger T612)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Tecno",
+                    "model":  "spark 8c",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "tyyh2020",
+                    "model":  "",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "tyyh2021",
+                    "model":  "",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "A15",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "Active T1",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "Umidigi",
+                    "model":  "G1 Max",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "universal",
+                    "model":  "unlock dramtype1",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "universal",
+                    "model":  "unlock dramtype2",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "universal",
+                    "model":  "unlock EMMC",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "universal",
+                    "model":  "unlock UFS.dangerous",
+                    "cpu":  "UMS9230 (Tiger T606)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "xiaolajiao20",
+                    "model":  "",
+                    "cpu":  "UD710 (Tiger T710)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Axon20 4G A2121E P618A01",
+                    "cpu":  "UMS512 (Tiger T618)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade A31",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade A5 2019",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade A51",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade A52",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade A7 2019",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Blade v2020 smart",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "universal",
+                    "cpu":  "UMS9620 (Tiger T760)",
+                    "extra":  ""
+                },
+                {
+                    "brand":  "ZTE",
+                    "model":  "Voyage 40se v4",
+                    "cpu":  "SC9863A",
+                    "extra":  ""
+                }
+            ],
+    "samsung":  [
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 7570",
+                        "cpu":  "Exynos 7570",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 7870",
+                        "cpu":  "Exynos 7870",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 7885",
+                        "cpu":  "Exynos 7885",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 7904",
+                        "cpu":  "Exynos 7904",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 850",
+                        "cpu":  "Exynos 850",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9610",
+                        "cpu":  "Exynos 9610",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9611",
+                        "cpu":  "Exynos 9611",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9810",
+                        "cpu":  "Exynos 9810",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9820",
+                        "cpu":  "Exynos 9820",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9825",
+                        "cpu":  "Exynos 9825",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 9830",
+                        "cpu":  "Exynos 9830",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 990",
+                        "cpu":  "Exynos 990",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 1080",
+                        "cpu":  "Exynos 1080",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 1280",
+                        "cpu":  "Exynos 1280",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 1380",
+                        "cpu":  "Exynos 1380",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 2100",
+                        "cpu":  "Exynos 2100",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 2200",
+                        "cpu":  "Exynos 2200",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "Exynos 2400",
+                        "cpu":  "Exynos 2400",
+                        "extra":  "Exynos SoC"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A515 (Galaxy A51)",
+                        "cpu":  "Exynos 9611",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A715 (Galaxy A71)",
+                        "cpu":  "Snapdragon 730 (SM7150)",
+                        "extra":  "Qualcomm variant"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A525 (Galaxy A52)",
+                        "cpu":  "Snapdragon 720G (SM7125)",
+                        "extra":  "Qualcomm variant"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A536 (Galaxy A53)",
+                        "cpu":  "Exynos 1280",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A546 (Galaxy A54)",
+                        "cpu":  "Exynos 1380",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A125 (Galaxy A12)",
+                        "cpu":  "Exynos 850 / Helio P35 (MT6765)",
+                        "extra":  "region variants"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A135 (Galaxy A13)",
+                        "cpu":  "Exynos 850",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-A047 (Galaxy A04s)",
+                        "cpu":  "Exynos 850",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G950 (Galaxy S8)",
+                        "cpu":  "Exynos 8895",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G965 (Galaxy S9+)",
+                        "cpu":  "Exynos 9810",
+                        "extra":  "Snapdragon 845 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G973 (Galaxy S10)",
+                        "cpu":  "Exynos 9820",
+                        "extra":  "Snapdragon 855 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G780 (Galaxy S20 FE)",
+                        "cpu":  "Snapdragon 865 (SM8250)",
+                        "extra":  "Exynos 990 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G991 (Galaxy S21)",
+                        "cpu":  "Exynos 2100",
+                        "extra":  "Snapdragon 888 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-G998 (Galaxy S21 Ultra)",
+                        "cpu":  "Exynos 2100",
+                        "extra":  "Snapdragon 888 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-S901 (Galaxy S22)",
+                        "cpu":  "Snapdragon 8 Gen 1 (SM8450)",
+                        "extra":  "Exynos 2200 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-S911 (Galaxy S23)",
+                        "cpu":  "Snapdragon 8 Gen 2 (SM8550)",
+                        "extra":  ""
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-S921 (Galaxy S24)",
+                        "cpu":  "Exynos 2400",
+                        "extra":  "Snapdragon 8 Gen 3 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-N975 (Galaxy Note 10+)",
+                        "cpu":  "Exynos 9825",
+                        "extra":  "Snapdragon 855 in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-N986 (Galaxy Note 20 Ultra)",
+                        "cpu":  "Exynos 990",
+                        "extra":  "Snapdragon 865+ in some regions"
+                    },
+                    {
+                        "brand":  "Samsung",
+                        "model":  "SM-J730 (Galaxy J7 Pro)",
+                        "cpu":  "Exynos 7870",
+                        "extra":  ""
+                    }
+                ]
+}

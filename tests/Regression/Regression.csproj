@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
+    <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
+    <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
+    <Compile Include="../../PMKUnlocker/KernelExploit.cs" Link="KernelExploit.cs" />
+  </ItemGroup>
+</Project>

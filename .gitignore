@@ -1,0 +1,23 @@
+# build outputs
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# large runtime binaries / tools (kept on disk, not tracked)
+bundled-tools/
+edl/
+installer/
+Downloads/
+release-candidates/
+review-publish/
+video-review/
+
+# runtime data
+**/licenses.json
+
+# logs & temp
+*.log
+*.tmp
+~$*
