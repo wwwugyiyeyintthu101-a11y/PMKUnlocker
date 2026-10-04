@@ -9729,16 +9729,52 @@ namespace PMKUnlocker
             Log("========================================================", Color.FromArgb(0, 180, 255));
             Log("   XIAOMI TEMP ROOT (" + mode.ToUpperInvariant() + ")", Color.White);
             Log("========================================================", Color.FromArgb(0, 180, 255));
-            Log("[i] " + (string.IsNullOrWhiteSpace(model) ? "?" : model) +
-                "  brand=" + (string.IsNullOrWhiteSpace(brand) ? "?" : brand) +
-                (string.IsNullOrWhiteSpace(miui) ? "" : "  MIUI=" + miui), Color.Cyan);
-            Log("[i] FP: Android=" + (string.IsNullOrWhiteSpace(fp.Android) ? "?" : fp.Android) +
-                "  sdk=" + (string.IsNullOrWhiteSpace(fp.Sdk) ? "?" : fp.Sdk) +
-                "  kernel=" + (string.IsNullOrWhiteSpace(fp.Kernel) ? "?" : fp.Kernel) +
-                (string.IsNullOrWhiteSpace(fp.Patch) ? "" : "  patch=" + fp.Patch) +
-                (string.IsNullOrWhiteSpace(fp.Soc) ? "" : "  soc=" + fp.Soc), Color.Cyan);
+            // ---- Device Check (72FLASHER-style structured log) ----
+            string sel = (await ExecuteCommandQuickAsync("adb.exe", "shell getenforce")).Trim();
+            string up = (await ExecuteCommandQuickAsync("adb.exe", "shell cat /proc/uptime")).Trim();
+            string bootU = up.Length > 0 ? up.Split(' ')[0].Trim() : "";
+            string blLocked = Prop("ro.boot.flash.locked");
+            string blState = blLocked == "1" ? "locked" : blLocked == "0" ? "unlocked" : Prop("ro.boot.verifiedbootstate");
+            string slot = Prop("ro.boot.slot_suffix").TrimStart('_');
+
+            void DLine(string label, string value, Color? color = null)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                Log(label + ":" + value, color ?? Color.Gainsboro);
+            }
+            Log("Device Check", Color.FromArgb(0, 180, 255));
+            DLine("Brand", brand);
+            DLine("Model", model);
+            DLine("Product", Prop("ro.product.name"));
+            DLine("Marketname", Prop("ro.product.marketname", "ro.product.vendor.marketname"));
+            DLine("OS version", Prop("ro.build.version.incremental"));
+            DLine("Region", Prop("ro.miui.region", "ro.product.locale.region"));
+            DLine("Hardware", Prop("ro.hardware"));
+            DLine("Soc manufacturer", Prop("ro.soc.manufacturer"));
+            DLine("Soc model", Prop("ro.soc.model"));
+            DLine("Serialno", Prop("ro.serialno"));
+            DLine("Version", fp.Android);
+            DLine("SdkVersion", fp.Sdk);
+            DLine("Android Cpu", Prop("ro.product.cpu.abi"));
+            DLine("Android platform", Prop("ro.board.platform"));
+            DLine("Board name", Prop("ro.product.board"));
+            DLine("Kernel", fp.Kernel);
+            DLine("Security patch", fp.Patch);
+            DLine("Software version", Prop("ro.build.display.id"));
+            DLine("Time Zone", Prop("persist.sys.timezone"));
+            DLine("Selinux State", sel,
+                sel.Equals("Enforcing", StringComparison.OrdinalIgnoreCase) ? Color.Orange :
+                sel.Equals("Permissive", StringComparison.OrdinalIgnoreCase) ? Color.LightGreen : (Color?)null);
+            DLine("Root Access", hasRoot ? "Success" : "Denied",
+                hasRoot ? Color.LightGreen : Color.OrangeRed);
+            DLine("bootloader state", blState,
+                blState == "unlocked" ? Color.LightGreen : Color.OrangeRed);
+            DLine("Crypto State", Prop("ro.crypto.state"));
+            DLine("Activated slot", slot);
+            DLine("Since boot", bootU);
             Log("[i] Exploit manifest: " + manifestPath, Color.Gray);
             Log("[i] Exploit status: " + exploitStatus, exploitMatch != null ? Color.LightGreen : Color.Gray);
+            Log("Temp Root is running. Do not disconnect device.", Color.Orange);
 
             // Step A: su prompt — screen ပေါ် Allow စောင့် (temp root)
             if (!hasRoot)
@@ -9808,6 +9844,8 @@ namespace PMKUnlocker
                 Log(edge, edgeC);
                 Log("      ✅   TEMP ROOT အောင်မြင်ပါတယ်", Color.LightGreen);
                 Log(edge, edgeC);
+                Log("Temp root completed successfully.", Color.LightGreen);
+                Log("Root Access: Success", Color.LightGreen);
                 Log("      ဖုန်း     : " + (string.IsNullOrWhiteSpace(model) ? "?" : model) +
                     (string.IsNullOrWhiteSpace(fp.Codename) ? "" : "   ·   " + fp.Codename), Color.White);
                 Log("      Android  : " + (string.IsNullOrWhiteSpace(fp.Android) ? "?" : fp.Android) +
