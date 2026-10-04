@@ -1883,10 +1883,6 @@ namespace PMKUnlocker
                     }
                 };
                 devicePollTimer.Start();
-
-                // auto-update: ၅ စက္ကန့်အကြာ background check
-                // (pmk_update_repo.txt ကွက်ရင် ဘာမှမလုပ်; offline ရင် silent)
-                _ = RunAutoUpdateCheckAsync();
             };
 
             logLayout = new TableLayoutPanel
@@ -6088,25 +6084,7 @@ namespace PMKUnlocker
         }
 
         // ================= AUTO-UPDATE (GitHub Releases) =================
-        private async Task RunAutoUpdateCheckAsync()
-        {
-            try
-            {
-                // login မှာ စခဲ့တဲ့ check ရလဒ်ယူ (ပြီးပြီဆို ထပ်မစစ် — HTTP call တစ်ခါပဲ)
-                UpdateInfo info = null;
-                if (UpdateChecker.PendingCheck != null)
-                    info = await UpdateChecker.TakePendingAsync(15000);
-                else if (!UpdateChecker.SessionChecked)
-                {
-                    await Task.Delay(5000);
-                    info = await UpdateChecker.CheckAsync();
-                }
-                if (info != null && UpdateChecker.ClaimPrompt())
-                    await PromptAndUpdateAsync(info);
-            }
-            catch { }   // offline / repo မပြင်ဆင်ထား → silent
-        }
-
+        // auto-check = login gate (LoginForm.EnforceUpdateGateAsync) မှာပဲ — Form1 မှာ manual check ပဲကျန်
         private async Task CheckForUpdatesAsync()
         {
             if (string.IsNullOrWhiteSpace(UpdateChecker.Repo))
@@ -6138,7 +6116,6 @@ namespace PMKUnlocker
 
         private async Task PromptAndUpdateAsync(UpdateInfo info)
         {
-            UpdateChecker.PromptShown = true;   // auto/manual ဘယ်ဟာကဖြစ်ဖြစ် တစ်ကြိမ်ပဲ ထပ်မပေါ်စေ
             DialogResult r = MessageBox.Show(this,
                 "New version available: v" + info.Version + "  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
                 (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +

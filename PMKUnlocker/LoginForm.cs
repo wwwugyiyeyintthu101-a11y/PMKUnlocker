@@ -48,7 +48,7 @@ public class LoginForm : Form
         // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
         try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
         // Remember-me token ရှိရင် form ပေါ်ပြီးချင်း password မထည့်ဘဲ ဝင်ကြည့်မယ်
-        // + update check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login ပြီးမှ result သုံး)
+        // + update gate check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login gate က စောင့်ယူ)
         Shown += async (_, _) =>
         {
             try
@@ -456,7 +456,7 @@ public class LoginForm : Form
 
             CompleteLogin(email2, loginRes);
             await Task.Delay(300); // brief success pause
-            await PromptUpdateIfReadyAsync();   // update ရှိရင် Form1 မဖွင့်ခင် မေး
+            if (!await EnforceUpdateGateAsync()) return;   // update gate — block ဆို app ပိတ်
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -473,38 +473,56 @@ public class LoginForm : Form
         }
     }
 
-    // login OK ပြီး Form1 မဖွင့်ခင် update prompt — Shown မှာ စခဲ့တဲ့ check အဆင်သင့်ဖြစ်ရင်ပဲ မေး
-    // (offline/မပြီးရင် Form1 က ဆက်စောင့်မယ်) — failure ဆို login ဆက်
-    private async Task PromptUpdateIfReadyAsync()
+    // ===== LOGIN UPDATE GATE =====
+    // update ရှိ → update လုပ်ရမယ် (No နှိပ်ရင် app ပိတ်); check fail/offline → strict block;
+    // နောက်ဆုံး version ဆို Form1 ဝင်ခွင့်ပေး → true — failure ဆို ဘယ်တော့မှ false မပြန် (app ပိတ်)
+    private async Task<bool> EnforceUpdateGateAsync()
     {
+        UpdateInfo info;
         try
         {
-            UpdateInfo info = await UpdateChecker.TakePendingAsync(1500);
-            if (info == null) return;
-            if (!UpdateChecker.ClaimPrompt()) return;
-
-            DialogResult r = MessageBox.Show(this,
-                "New version available: v" + info.Version + "  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
-                (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +
-                "Download and install now?\nThe tool will close, install, then reopen.",
-                "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            if (r != DialogResult.Yes) return;
-
-            string oldTitle = Text;
-            try
-            {
-                string setup = await UpdateChecker.DownloadAsync(info, pct => Text = "Downloading update... " + pct + "%");
-                UpdateChecker.StartInstallAndExit(setup);
-                Environment.Exit(0);
-            }
-            catch (Exception ex)
-            {
-                Text = oldTitle;
-                MessageBox.Show(this, "Update failed:\n" + ex.Message,
-                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            lblStatus.ForeColor = TextMuted;
+            lblStatus.Text = "Checking for updates...";
+            info = await UpdateChecker.AwaitCheckForGateAsync(25000);
         }
-        catch { }   // check fail → login ဆက်
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                "Update check failed:\n" + ex.Message + "\n\n" +
+                "Cannot verify the latest version — the tool will close.",
+                "Update required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Environment.Exit(0);
+            return false;
+        }
+        if (info == null) return true;   // နောက်ဆုံး version (သို့) update source off
+
+        DialogResult r = MessageBox.Show(this,
+            "A new version (v" + info.Version + ") is required.  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
+            (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +
+            "Download and install now?\nClick No to exit the tool.",
+            "Update required", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+        if (r != DialogResult.Yes)
+        {
+            Environment.Exit(0);
+            return false;
+        }
+
+        string oldTitle = Text;
+        try
+        {
+            string setup = await UpdateChecker.DownloadAsync(info, pct => Text = "Downloading update... " + pct + "%");
+            UpdateChecker.StartInstallAndExit(setup);
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            Text = oldTitle;
+            MessageBox.Show(this, "Update download failed:\n" + ex.Message + "\n\n" +
+                "The tool will close — relaunch to try again.",
+                "Update required", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Environment.Exit(0);
+        }
+        return false;
     }
 
     // login OK → Form1 ကိုပြဖို့ fields ဖြည့်
@@ -546,7 +564,7 @@ public class LoginForm : Form
             {
                 CompleteLogin(email, res);
                 await Task.Delay(300);
-                await PromptUpdateIfReadyAsync();   // update ရှိရင် Form1 မဖွင့်ခင် မေး
+                if (!await EnforceUpdateGateAsync()) return;   // update gate — block ဆို app ပိတ်
                 DialogResult = DialogResult.OK;
                 Close();
                 return;

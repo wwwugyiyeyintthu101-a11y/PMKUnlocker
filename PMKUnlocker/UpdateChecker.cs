@@ -14,9 +14,10 @@ internal sealed class UpdateInfo
     public string Notes { get; set; } = "";
 }
 
-// GitHub Releases auto-update
-//   repo: %LocalAppData%\PMKMobileTool\pmk_update_repo.txt ထဲမှာ "owner/repo" (ဒါမှမဟုတ် full https://github.com/owner/repo)
-//   ဖိုင်ကွက်ရင် check အားလုံး ပိတ်ထားမယ်
+// GitHub Releases auto-update — login gate (update မလုပ်ဘဲ အထဲမဝင်ရ)
+//   default repo: wwwugyiyeyintthu101-a11y/PMKUnlocker (file မရှိရင် ဒါသုံး)
+//   override: %LocalAppData%\PMKMobileTool\pmk_update_repo.txt ထဲ "owner/repo" (ဒါမှမဟုတ် full https://github.com/owner/repo)
+//   "off" / "none" / "disable" → check ပိတ် (dev only — gate လည်း ပိတ်သွားမယ်)
 //   Release တစ်ခုမှာ asset ၂ ခု တင်ရမယ်:
 //     - PMKMobileTool-<ver>-Setup.exe
 //     - update.json  = { "version": "7.3.0", "url": "...Setup.exe", "sha256": "<hex>", "notes": "..." }
@@ -24,30 +25,25 @@ internal static class UpdateChecker
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    // login stage မှာ စတင်တဲ့ check — Form1 ပွင့်ပြီး result ပြန်သုံးဖို့ (HTTP call တစ်ခါပဲ)
+    internal const string DefaultRepo = "wwwugyiyeyintthu101-a11y/PMKUnlocker";
+
+    // login stage မှာ စတင်တဲ့ check — gate က ဒါကိုပဲ စောင့်ယူ (HTTP call တစ်ခါပဲ)
     internal static Task<UpdateInfo?>? PendingCheck;
-    // session တစ်ခုမှာ update prompt တစ်ခါပဲ ပေါ်အောင်
-    internal static bool PromptShown;
-    // login မှာ check ပြီးသွားပြီ (update ရှိ/မရှိ) — Form1 ထပ်မစစ်ဖို့
-    internal static bool SessionChecked;
 
-    internal static bool ClaimPrompt()
-    {
-        if (PromptShown) return false;
-        PromptShown = true;
-        return true;
-    }
-
-    // pending check ရလဒ်ကို maxWaitMs စက္ကန့် စောင့်ယူ — မပြီးရင် null (task ကျန်ခဲ့ရင် နောက်သူ ပြန်ယူနိုင်)
-    // ပြီးသွားရင် consume + SessionChecked; offline (fault) ဆို exception ပြန် (caller က catch)
-    internal static async Task<UpdateInfo?> TakePendingAsync(int maxWaitMs)
+    // login gate — update ရှိရင် UpdateInfo; နောက်ဆုံး version (သို့) repo off → null (ဝင်ခွင့်ပေး)
+    // check fail / timeout / offline → exception (caller က strict block)
+    internal static async Task<UpdateInfo?> AwaitCheckForGateAsync(int maxWaitMs)
     {
         Task<UpdateInfo?>? t = PendingCheck;
-        if (t == null) return null;
-        if (await Task.WhenAny(t, Task.Delay(maxWaitMs)) != t) return null;
+        if (t == null)
+        {
+            if (string.IsNullOrWhiteSpace(Repo)) return null;   // update source off
+            t = CheckAsync();
+        }
         PendingCheck = null;
-        SessionChecked = true;
-        return await t;
+        if (await Task.WhenAny(t, Task.Delay(maxWaitMs)) != t)
+            throw new TimeoutException("update check timed out (" + (maxWaitMs / 1000) + "s)");
+        return await t;   // fault (offline / HTTP error) → propagates
     }
 
     internal static string RepoFile => ShopServices.DataPath("pmk_update_repo.txt");
@@ -56,9 +52,20 @@ internal static class UpdateChecker
     {
         get
         {
-            try { if (File.Exists(RepoFile)) return File.ReadAllText(RepoFile).Trim(); }
+            try
+            {
+                if (File.Exists(RepoFile))
+                {
+                    string s = File.ReadAllText(RepoFile).Trim();
+                    if (s.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+                        s.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+                        s.Equals("disable", StringComparison.OrdinalIgnoreCase))
+                        return "";
+                    if (s.Length > 0) return s;
+                }
+            }
             catch { }
-            return "";
+            return DefaultRepo;
         }
     }
 
