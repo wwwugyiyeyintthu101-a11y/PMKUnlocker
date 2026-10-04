@@ -42,7 +42,7 @@ internal static class UpdateChecker
     // ပြီးသွားရင် consume + SessionChecked; offline (fault) ဆို exception ပြန် (caller က catch)
     internal static async Task<UpdateInfo?> TakePendingAsync(int maxWaitMs)
     {
-        Task<UpdateInfo?> t = PendingCheck;
+        Task<UpdateInfo?>? t = PendingCheck;
         if (t == null) return null;
         if (await Task.WhenAny(t, Task.Delay(maxWaitMs)) != t) return null;
         PendingCheck = null;
