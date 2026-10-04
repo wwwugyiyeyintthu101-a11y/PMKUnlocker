@@ -290,7 +290,7 @@ public class LoginForm : Form
             }
             else if (!string.IsNullOrEmpty(savedSecret))
             {
-                // ယခင် version (password blob) — ဒီတစ်ခါ login ပြီးရင် token အသစ်နဲ့ ပြောင်းသိမ်းမယ်
+                // password blob — prefill (auto-login မရှိ — Login နှိပ်မှ ဝင်ရ)
                 txtPassword.Text = savedSecret;
                 chkRemember.Checked = true;
             }
@@ -423,12 +423,9 @@ public class LoginForm : Form
             }
 
             string email2 = txtEmail.Text.Trim();
-            // Remember me → password မသိမ်းဘဲ server token ကိုပဲ DPAPI နဲ့သိမ်း
+            // Remember me → password ကို DPAPI နဲ့ သိမ်း (next launch မှာ prefill — Login နှိပ်ရုံ)
             if (chkRemember.Checked)
-            {
-                if (!string.IsNullOrEmpty(loginRes.AutoToken))
-                    LocalLogin.SaveRememberedToken(email2, loginRes.AutoToken);
-            }
+                LocalLogin.SaveRemembered(email2, txtPassword.Text);
             else LocalLogin.ClearRemembered();
 
             CompleteLogin(email2, loginRes);
