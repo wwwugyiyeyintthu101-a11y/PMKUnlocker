@@ -251,6 +251,10 @@ internal static class ReviewSafety
             }
             finally { liveQuick.TryRemove(pid, out _); }
         }
-        catch { return ""; }
+        catch (Exception ex)
+        {
+            Debug.WriteLine("RunQuickAsync [" + fileName + " " + arguments + "]: " + ex.Message);
+            return "";
+        }
     }
 }

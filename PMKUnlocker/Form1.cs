@@ -2549,7 +2549,14 @@ namespace PMKUnlocker
                             }
                             else
                             {
-                                process.WaitForExit();
+                                // timeoutSec=0 = unlimited — ဒါပေမဲ့ hang child အတွက် 6 နာရီ safety cap ထား
+                                // (STOP က activeProcess ကို kill လို့ ချက်ချင်းထွက်တယ်; legit flash/backup က ဒါထက် မကြာဘူး)
+                                if (!process.WaitForExit(6 * 60 * 60 * 1000))
+                                {
+                                    timedOut = true;
+                                    try { process.Kill(entireProcessTree: true); } catch { }
+                                    try { process.WaitForExit(5000); } catch { }
+                                }
                             }
                             exitCode = process.ExitCode;
                         }
@@ -2676,7 +2683,7 @@ namespace PMKUnlocker
             {
                 RestorePartitionRows();
                 SetProgress(0, "Failed", "0 MB/s");
-                Log("[FAIL] " + taskTitle + " — timed out after " + timeoutSec + "s (process killed).", Color.OrangeRed);
+                Log("[FAIL] " + taskTitle + " — timed out after " + (timeoutSec > 0 ? timeoutSec + "s" : "6h hard cap") + " (process killed).", Color.OrangeRed);
                 DumpRawOutput("[*] Raw command output (last 30 lines):");
                 if (!quiet)
                 {
