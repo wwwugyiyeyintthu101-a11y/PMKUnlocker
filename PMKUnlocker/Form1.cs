@@ -135,6 +135,7 @@ namespace PMKUnlocker
         private Label lblPlatformStatus;
         private Label lblBattery;
         private Button btnThemeToggle;
+        private Button btnCheckUpdate;
         private bool lightTheme = false;
         private string lastVbmetaBackupPath = "";
         private readonly HashSet<string> warnedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -639,6 +640,11 @@ namespace PMKUnlocker
             if (toolTipMain != null)
                 Tip(btnThemeToggle, "Switch between Dark and Light theme.");
 
+            btnCheckUpdate = Create3DButton("Update", 760, 12, 90, 34, ButtonTheme.Cyan);
+            btnCheckUpdate.Click += async (s, e) => await CheckForUpdatesAsync();
+            if (toolTipMain != null)
+                Tip(btnCheckUpdate, "Check GitHub Releases for a newer version (manual check).");
+
             // Login email + ကျန်ရက် + clock — header ညာဘက် stack (overlap မဖြစ်အောင်)
             lblLicenseInfo = MakeLicenseLabel();
 
@@ -689,7 +695,7 @@ namespace PMKUnlocker
             panelRightInfo.Controls.Add(panelLicenseBadge); // Top
             panelTopHeader.Controls.Add(panelRightInfo);
 
-            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery, btnThemeToggle });
+            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery, btnThemeToggle, btnCheckUpdate });
 
             // ================= 2. TAB CONTROL =================
             // အပေါ်ဘက် split panel ထဲမှာ ဖြည့်ထားတယ် (window resize လုပ်ရင် အလိုအလျောက် လိုက်ပြောင်း)
@@ -1877,6 +1883,10 @@ namespace PMKUnlocker
                     }
                 };
                 devicePollTimer.Start();
+
+                // auto-update: ၅ စက္ကန့်အကြာ background check
+                // (pmk_update_repo.txt ကွက်ရင် ဘာမှမလုပ်; offline ရင် silent)
+                _ = RunAutoUpdateCheckAsync();
             };
 
             logLayout = new TableLayoutPanel
@@ -6075,6 +6085,73 @@ namespace PMKUnlocker
                 c.Location = new Point(10 + (i % cols) * 165, 26 + (i / cols) * 43);
             }
             return p;
+        }
+
+        // ================= AUTO-UPDATE (GitHub Releases) =================
+        private async Task RunAutoUpdateCheckAsync()
+        {
+            try
+            {
+                await Task.Delay(5000);
+                UpdateInfo info = await UpdateChecker.CheckAsync();
+                if (info != null) await PromptAndUpdateAsync(info);
+            }
+            catch { }   // offline / repo မပြင်ဆင်ထား → silent
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            if (string.IsNullOrWhiteSpace(UpdateChecker.Repo))
+            {
+                MessageBox.Show(this,
+                    "Update source not configured.\n\nPut \"owner/repo\" (or full https://github.com/owner/repo) in:\n" +
+                    UpdateChecker.RepoFile,
+                    "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                UpdateInfo info = await UpdateChecker.CheckAsync();
+                if (info == null)
+                {
+                    MessageBox.Show(this,
+                        "You are on the latest version (v" + UpdateChecker.CurrentVersion + ").",
+                        "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                await PromptAndUpdateAsync(info);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Update check failed:\n" + ex.Message,
+                    "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private async Task PromptAndUpdateAsync(UpdateInfo info)
+        {
+            DialogResult r = MessageBox.Show(this,
+                "New version available: v" + info.Version + "  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
+                (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +
+                "Download and install now?\nThe tool will close, install, then reopen.",
+                "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (r != DialogResult.Yes) return;
+
+            Log("[*] Downloading update v" + info.Version + "...", Color.Cyan);
+            try
+            {
+                string setup = await UpdateChecker.DownloadAsync(info, pct => Log("    " + pct + "%", Color.Gray));
+                Log("[OK] SHA-256 verified. Installing v" + info.Version + "...", Color.LightGreen);
+                SaveSettings();
+                UpdateChecker.StartInstallAndExit(setup);
+                Environment.Exit(0);
+            }
+            catch (Exception ex)
+            {
+                Log("[!] Update failed: " + ex.Message, Color.Red);
+                MessageBox.Show(this, "Update failed:\n" + ex.Message,
+                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private Button Create3DButton(string text, int x, int y, int width, int height, ButtonTheme theme)
