@@ -9,7 +9,7 @@
 bundled-tools/
 tools/
 edl/
-installer/
+installer/output/
 Downloads/
 release-candidates/
 review-publish/
