@@ -18,7 +18,6 @@ public class LoginForm : Form
     private bool loading;
     private System.Windows.Forms.Timer loadTimer;
     private int loadFrames;
-    private string pendingAutoToken = "";   // remember-me token → Shown မှာ အလိုအလျောက်ဝင်မယ်
 
     // login OK ပြီးရင် Form1 ကို ပြဖို့
     public string LoginEmail { get; private set; } = "";
@@ -47,9 +46,9 @@ public class LoginForm : Form
         InitializeUi();
         // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
         try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
-        // Remember-me token ရှိရင် form ပေါ်ပြီးချင်း password မထည့်ဘဲ ဝင်ကြည့်မယ်
+        // auto-login မရှိ — Login button နှိပ်မှဝင်ရ (remember-me က email/prefill ပဲ)
         // + update gate check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login gate က စောင့်ယူ)
-        Shown += async (_, _) =>
+        Shown += (_, _) =>
         {
             try
             {
@@ -57,7 +56,6 @@ public class LoginForm : Form
                     UpdateChecker.PendingCheck = UpdateChecker.CheckAsync();
             }
             catch { }
-            await TryTokenAutoLoginAsync();
         };
     }
 
@@ -307,8 +305,7 @@ public class LoginForm : Form
             if (!string.IsNullOrEmpty(saved)) txtEmail.Text = saved;
             if (savedIsToken)
             {
-                // token mode — password မသိမ်းတော့; Shown မှာ အလိုအလျောက် token login
-                pendingAutoToken = savedSecret;
+                // token mode — password မသိမ်းတော့ (auto-login ပိတ်ထား — Login နှိပ်မှ ဝင်ရ)
                 chkRemember.Checked = true;
             }
             else if (!string.IsNullOrEmpty(savedSecret))
@@ -537,62 +534,6 @@ public class LoginForm : Form
         string days = res.DaysLeft > 0 ? " · " + res.DaysLeft + "d left" : "";
         lblStatus.ForeColor = Success;
         lblStatus.Text = "Login OK" + plan + days;
-    }
-
-    // Remember-me token auto login — form ပေါ်တာနဲ့ ချက်ချင်း (password မထည့်ရ)
-    private async Task TryTokenAutoLoginAsync()
-    {
-        string token = pendingAutoToken;
-        pendingAutoToken = "";
-        if (string.IsNullOrEmpty(token) || loading) return;
-
-        string email = txtEmail.Text.Trim();
-        loading = true;
-        btnLogin.Enabled = false;
-        loadFrames = 0;
-        loadTimer.Start();
-        txtEmail.Enabled = false;
-        txtPassword.Enabled = false;
-        chkRemember.Enabled = false;
-        lnkRegister.Enabled = false;
-        lblStatus.ForeColor = TextMuted;
-        lblStatus.Text = "Auto login (remember me)...";
-        try
-        {
-            var res = await LicenseClient.TokenLoginAsync(email, token);
-            if (res.Ok)
-            {
-                CompleteLogin(email, res);
-                await Task.Delay(300);
-                if (!await EnforceUpdateGateAsync()) return;   // update gate — block ဆို app ပိတ်
-                DialogResult = DialogResult.OK;
-                Close();
-                return;
-            }
-
-            if (!res.Offline)
-            {
-                // token ငြင်းခံရ (server ပြောင်း/ပိတ်/password ပြောင်း) → session ဖျက်ပြီး password နဲ့ပြန်ဝင်
-                LocalLogin.ClearRemembered();
-                chkRemember.Checked = false;
-            }
-            lblStatus.ForeColor = Danger;
-            lblStatus.Text = string.IsNullOrEmpty(res.Message)
-                ? "Session ကုန် — password ဖြင့် ပြန်ဝင်ပါ"
-                : res.Message;
-            txtPassword.Focus();
-        }
-        finally
-        {
-            loadTimer.Stop();
-            loading = false;
-            btnLogin.Enabled = true;
-            txtEmail.Enabled = true;
-            txtPassword.Enabled = true;
-            chkRemember.Enabled = true;
-            lnkRegister.Enabled = true;
-            btnLogin.Invalidate();
-        }
     }
 
     [System.Runtime.InteropServices.DllImport("gdi32.dll")]
