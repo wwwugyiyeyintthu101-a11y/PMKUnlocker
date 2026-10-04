@@ -6092,9 +6092,17 @@ namespace PMKUnlocker
         {
             try
             {
-                await Task.Delay(5000);
-                UpdateInfo info = await UpdateChecker.CheckAsync();
-                if (info != null) await PromptAndUpdateAsync(info);
+                // login မှာ စခဲ့တဲ့ check ရလဒ်ယူ (ပြီးပြီဆို ထပ်မစစ် — HTTP call တစ်ခါပဲ)
+                UpdateInfo info = null;
+                if (UpdateChecker.PendingCheck != null)
+                    info = await UpdateChecker.TakePendingAsync(15000);
+                else if (!UpdateChecker.SessionChecked)
+                {
+                    await Task.Delay(5000);
+                    info = await UpdateChecker.CheckAsync();
+                }
+                if (info != null && UpdateChecker.ClaimPrompt())
+                    await PromptAndUpdateAsync(info);
             }
             catch { }   // offline / repo မပြင်ဆင်ထား → silent
         }
@@ -6130,6 +6138,7 @@ namespace PMKUnlocker
 
         private async Task PromptAndUpdateAsync(UpdateInfo info)
         {
+            UpdateChecker.PromptShown = true;   // auto/manual ဘယ်ဟာကဖြစ်ဖြစ် တစ်ကြိမ်ပဲ ထပ်မပေါ်စေ
             DialogResult r = MessageBox.Show(this,
                 "New version available: v" + info.Version + "  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
                 (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +

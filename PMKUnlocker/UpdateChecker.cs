@@ -24,6 +24,32 @@ internal static class UpdateChecker
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+    // login stage မှာ စတင်တဲ့ check — Form1 ပွင့်ပြီး result ပြန်သုံးဖို့ (HTTP call တစ်ခါပဲ)
+    internal static Task<UpdateInfo?>? PendingCheck;
+    // session တစ်ခုမှာ update prompt တစ်ခါပဲ ပေါ်အောင်
+    internal static bool PromptShown;
+    // login မှာ check ပြီးသွားပြီ (update ရှိ/မရှိ) — Form1 ထပ်မစစ်ဖို့
+    internal static bool SessionChecked;
+
+    internal static bool ClaimPrompt()
+    {
+        if (PromptShown) return false;
+        PromptShown = true;
+        return true;
+    }
+
+    // pending check ရလဒ်ကို maxWaitMs စက္ကန့် စောင့်ယူ — မပြီးရင် null (task ကျန်ခဲ့ရင် နောက်သူ ပြန်ယူနိုင်)
+    // ပြီးသွားရင် consume + SessionChecked; offline (fault) ဆို exception ပြန် (caller က catch)
+    internal static async Task<UpdateInfo?> TakePendingAsync(int maxWaitMs)
+    {
+        Task<UpdateInfo?> t = PendingCheck;
+        if (t == null) return null;
+        if (await Task.WhenAny(t, Task.Delay(maxWaitMs)) != t) return null;
+        PendingCheck = null;
+        SessionChecked = true;
+        return await t;
+    }
+
     internal static string RepoFile => ShopServices.DataPath("pmk_update_repo.txt");
 
     internal static string Repo

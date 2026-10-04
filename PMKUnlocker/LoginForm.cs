@@ -48,7 +48,17 @@ public class LoginForm : Form
         // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
         try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
         // Remember-me token ရှိရင် form ပေါ်ပြီးချင်း password မထည့်ဘဲ ဝင်ကြည့်မယ်
-        Shown += async (_, _) => await TryTokenAutoLoginAsync();
+        // + update check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login ပြီးမှ result သုံး)
+        Shown += async (_, _) =>
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(UpdateChecker.Repo))
+                    UpdateChecker.PendingCheck = UpdateChecker.CheckAsync();
+            }
+            catch { }
+            await TryTokenAutoLoginAsync();
+        };
     }
 
     // Windows 10/11 dark title bar
@@ -76,7 +86,7 @@ public class LoginForm : Form
     {
         SuspendLayout();
 
-        Text = "PMK Mobile Tool [ PMK ] v7.2";
+        Text = "PMK Mobile Tool [ PMK ] v7.3";
         ClientSize = new Size(460, 460);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -446,6 +456,7 @@ public class LoginForm : Form
 
             CompleteLogin(email2, loginRes);
             await Task.Delay(300); // brief success pause
+            await PromptUpdateIfReadyAsync();   // update ရှိရင် Form1 မဖွင့်ခင် မေး
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -460,6 +471,40 @@ public class LoginForm : Form
             lnkRegister.Enabled = true;
             btnLogin.Invalidate();
         }
+    }
+
+    // login OK ပြီး Form1 မဖွင့်ခင် update prompt — Shown မှာ စခဲ့တဲ့ check အဆင်သင့်ဖြစ်ရင်ပဲ မေး
+    // (offline/မပြီးရင် Form1 က ဆက်စောင့်မယ်) — failure ဆို login ဆက်
+    private async Task PromptUpdateIfReadyAsync()
+    {
+        try
+        {
+            UpdateInfo info = await UpdateChecker.TakePendingAsync(1500);
+            if (info == null) return;
+            if (!UpdateChecker.ClaimPrompt()) return;
+
+            DialogResult r = MessageBox.Show(this,
+                "New version available: v" + info.Version + "  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
+                (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +
+                "Download and install now?\nThe tool will close, install, then reopen.",
+                "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (r != DialogResult.Yes) return;
+
+            string oldTitle = Text;
+            try
+            {
+                string setup = await UpdateChecker.DownloadAsync(info, pct => Text = "Downloading update... " + pct + "%");
+                UpdateChecker.StartInstallAndExit(setup);
+                Environment.Exit(0);
+            }
+            catch (Exception ex)
+            {
+                Text = oldTitle;
+                MessageBox.Show(this, "Update failed:\n" + ex.Message,
+                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        catch { }   // check fail → login ဆက်
     }
 
     // login OK → Form1 ကိုပြဖို့ fields ဖြည့်
@@ -501,6 +546,7 @@ public class LoginForm : Form
             {
                 CompleteLogin(email, res);
                 await Task.Delay(300);
+                await PromptUpdateIfReadyAsync();   // update ရှိရင် Form1 မဖွင့်ခင် မေး
                 DialogResult = DialogResult.OK;
                 Close();
                 return;
