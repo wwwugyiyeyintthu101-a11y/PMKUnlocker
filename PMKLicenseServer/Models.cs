@@ -16,6 +16,9 @@ sealed class Account
     public bool Pending { get; set; } // self-register → admin approve မှ active
     public string Note { get; set; } = "";
     public string CreatedAt { get; set; } = "";
+    // Remember-me auto-login token (password ကို client မှာ မသိမ်းတော့ပါ)
+    public string AutoToken { get; set; } = "";
+    public string AutoTokenAt { get; set; } = "";
 }
 
 sealed class RegisterReq
@@ -34,6 +37,8 @@ sealed class LoginReq
 {
     public string? Email { get; set; }
     public string? Password { get; set; }
+    public string? Token { get; set; }   // remember-me auto-login (password အစား)
+    public bool Remember { get; set; }   // password login + remember → auto-token ပြန်ထုတ်
 }
 
 sealed class LoginRes
@@ -43,6 +48,7 @@ sealed class LoginRes
     public string Plan { get; set; } = "";
     public string ExpiresAt { get; set; } = "";
     public int DaysLeft { get; set; }
+    public string AutoToken { get; set; } = ""; // remember=true ဖြင့် password login အောင်မြင်ရင်
 }
 
 sealed class UpsertReq

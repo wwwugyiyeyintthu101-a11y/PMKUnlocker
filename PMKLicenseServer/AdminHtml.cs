@@ -40,7 +40,7 @@ internal static class AdminHtml
 
 <div class="card">
   <label>Admin Key (X-Admin-Key)</label>
-  <input id="key" type="password" value="pmk-admin-2026" placeholder="pmk-admin-2026" autocomplete="off"/>
+  <input id="key" type="password" value="" placeholder="admin key (adminkey.txt)" autocomplete="off"/>
   <button class="sec" onclick="loadList()">Load list</button>
   <button class="sec" onclick="search()">Search email</button>
   <div class="msg" id="msg"></div>

@@ -18,6 +18,7 @@ video-review/
 # runtime data
 **/licenses.json
 **/hwparam.json
+**/adminkey.txt
 
 # logs & temp
 *.log

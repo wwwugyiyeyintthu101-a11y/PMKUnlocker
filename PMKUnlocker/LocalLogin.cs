@@ -90,18 +90,19 @@ internal static class LocalLogin
         email = "";
         try
         {
-            if (!TryRemembered(out email, out string password)) return false;
-            // server check is caller's job (LicenseClient)
-            return !string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(password);
+            if (!TryRemembered(out email, out string secret, out _)) return false;
+            return !string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(secret);
         }
         catch { ClearRemembered(); return false; }
     }
 
-    // Remember-me blob (DPAPI) → email + password (LicenseClient online check အတွက်)
-    internal static bool TryRemembered(out string email, out string password)
+    // Remember-me blob (DPAPI) → email + secret.
+    // secret ပုံစံ: "2:<token>" (server ထုတ်သော auto-login token — လက်ရှိ) သို့ မဟုတ် password (ယခင် version)
+    internal static bool TryRemembered(out string email, out string secret, out bool isToken)
     {
         email = "";
-        password = "";
+        secret = "";
+        isToken = false;
         try
         {
             if (!File.Exists(SessionPath)) return false;
@@ -110,15 +111,29 @@ internal static class LocalLogin
             int nl = plain.IndexOf('\n');
             if (nl <= 0) return false;
             email = plain[..nl];
-            password = plain[(nl + 1)..];
-            return email.Length > 0 && password.Length > 0;
+            secret = plain[(nl + 1)..];
+            if (secret.StartsWith("2:", StringComparison.Ordinal))
+            {
+                isToken = true;
+                secret = secret[2..];
+            }
+            return email.Length > 0 && secret.Length > 0;
         }
         catch { ClearRemembered(); return false; }
     }
 
+    // Password (legacy auto-login / local login) — အသစ်မှာ SaveRememberedToken သုံးပါ
     internal static void SaveRemembered(string email, string password)
     {
         string plain = email.Trim() + "\n" + password;
+        byte[] blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), null, DataProtectionScope.CurrentUser);
+        File.WriteAllBytes(SessionPath, blob);
+    }
+
+    // လက်ရှိ remember-me — password မသိမ်းတော့ဘဲ server token ကိုပဲ DPAPI နဲ့သိမ်း
+    internal static void SaveRememberedToken(string email, string token)
+    {
+        string plain = email.Trim() + "\n2:" + token;
         byte[] blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), null, DataProtectionScope.CurrentUser);
         File.WriteAllBytes(SessionPath, blob);
     }
@@ -130,7 +145,7 @@ internal static class LocalLogin
 
     internal static string? SavedRememberedEmail()
     {
-        return TryRemembered(out string email, out _) ? email : null;
+        return TryRemembered(out string email, out _, out _) ? email : null;
     }
 
     private static string HashPassword(string password, string salt)

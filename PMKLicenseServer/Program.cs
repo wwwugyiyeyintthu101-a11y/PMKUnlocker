@@ -6,7 +6,30 @@ using PMKLicenseServer;
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-string adminKey = builder.Configuration["AdminKey"] ?? "pmk-admin-2026";
+// Admin key: config မှာ ပေးထားမှ သုံးမယ် — မပေး/known-default ဆို random 256-bit ထုတ်ပြီး
+// adminkey.txt (source control မပါ) မှာ သိမ်းမယ်၊ console မှာလည်း ပြမယ်။
+const string LegacyDefaultKey = "pmk-admin-2026"; // ယခင် hardcode — ယခု အသုံးမပြုတော့
+string adminKey = builder.Configuration["AdminKey"] ?? "";
+string keyFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json"))!, "adminkey.txt");
+if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
+{
+    try
+    {
+        if (File.Exists(keyFile))
+        {
+            string k = File.ReadAllText(keyFile).Trim();
+            if (k.Length >= 32) adminKey = k;
+        }
+    }
+    catch { }
+    if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
+    {
+        adminKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        try { File.WriteAllText(keyFile, adminKey); } catch { }
+        Console.WriteLine("=== Admin key generated (stored in " + keyFile + ") ===");
+        Console.WriteLine(adminKey);
+    }
+}
 string dataFile = Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json");
 var jsonOpts = new JsonSerializerOptions
 {
@@ -16,8 +39,43 @@ var jsonOpts = new JsonSerializerOptions
 var apiJsonOpts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 var lockObj = new object();
 
-string HashPassword(string password, string salt) =>
-    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(salt + ":" + password)));
+// PBKDF2-SHA256 (100k) — ရှေးဟောင်း SHA-256 hash များကို verify ပြီး login အောင်မြင်ရင် auto-upgrade
+const int Pbkdf2Iterations = 100_000;
+
+string HashPassword(string password, string salt)
+{
+    byte[] dk = Rfc2898DeriveBytes.Pbkdf2(
+        password, Encoding.UTF8.GetBytes(salt + ":"), Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
+    return "P2$" + Pbkdf2Iterations + "$" + Convert.ToHexString(dk);
+}
+
+bool FixedHexEq(string a, string b)
+{
+    if (a.Length != b.Length) return false;
+    // hex case ကွာနိုင် (legacy hand-edited DB) → case မသတ်မှတ်ဘဲ နှိုင်း
+    return CryptographicOperations.FixedTimeEquals(
+        Encoding.UTF8.GetBytes(a.ToUpperInvariant()),
+        Encoding.UTF8.GetBytes(b.ToUpperInvariant()));
+}
+
+// returns (ok, needsUpgrade) — needsUpgrade = ရှေး format (plain SHA-256) ဖြင့် ဝင်မိခြင်း
+(bool Ok, bool NeedsUpgrade) VerifyPassword(string password, string salt, string stored)
+{
+    if (stored.StartsWith("P2$", StringComparison.Ordinal))
+    {
+        string[] parts = stored.Split('$');
+        if (parts.Length != 3 || !int.TryParse(parts[1], out int iter) || iter <= 0)
+            return (false, false);
+        byte[] dk = Rfc2898DeriveBytes.Pbkdf2(
+            password, Encoding.UTF8.GetBytes(salt + ":"), iter, HashAlgorithmName.SHA256, 32);
+        return (FixedHexEq(Convert.ToHexString(dk), parts[2]), false);
+    }
+
+    // legacy: SHA256(salt + ":" + password)
+    string legacy = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(salt + ":" + password)));
+    bool ok = FixedHexEq(legacy, stored);
+    return (ok, ok);
+}
 
 bool IsValidEmail(string email)
 {
@@ -71,8 +129,14 @@ string NormalizePlan(string plan)
 DateTime ExpiryFrom(DateTime from, string plan) =>
     from.AddMonths(MonthsForPlan(plan));
 
-bool IsAdmin(HttpContext ctx) =>
-    ctx.Request.Headers["X-Admin-Key"].ToString() == adminKey;
+bool IsAdmin(HttpContext ctx)
+{
+    if (string.IsNullOrWhiteSpace(adminKey)) return false; // key မရှိ → လုံးဝ ပိတ်
+    string got = ctx.Request.Headers["X-Admin-Key"].ToString();
+    if (got.Length == 0 || got.Length != adminKey.Length) return false;
+    return CryptographicOperations.FixedTimeEquals(
+        Encoding.UTF8.GetBytes(got), Encoding.UTF8.GetBytes(adminKey));
+}
 
 IResult J(object o) => Results.Json(o, apiJsonOpts);
 
@@ -120,7 +184,9 @@ app.MapPost("/api/login", (LoginReq req) =>
 {
     string email = (req.Email ?? "").Trim();
     string password = req.Password ?? "";
-    if (!IsValidEmail(email) || string.IsNullOrEmpty(password))
+    bool viaTokenLogin = !string.IsNullOrEmpty(req.Token);
+    // token login = password မလို; password login = password လို
+    if (!IsValidEmail(email) || (!viaTokenLogin && string.IsNullOrEmpty(password)))
         return J(new LoginRes { Ok = false, Message = "Email/Password မှန်မှန် ထည့်ပါ" });
 
     var db = LoadDb();
@@ -133,8 +199,33 @@ app.MapPost("/api/login", (LoginReq req) =>
     if (acc.Blocked)
         return J(new LoginRes { Ok = false, Message = "Account ပိတ်ထားပါ (blocked)" });
 
-    if (!string.Equals(acc.PassHash, HashPassword(password, acc.Salt), StringComparison.Ordinal))
-        return J(new LoginRes { Ok = false, Message = "Password မမှန်ပါ" });
+    string newToken = "";
+    bool viaToken = viaTokenLogin;
+    if (viaToken)
+    {
+        // remember-me token login — password မလို
+        if (string.IsNullOrEmpty(acc.AutoToken) || !FixedHexEq(req.Token!, acc.AutoToken))
+            return J(new LoginRes { Ok = false, Message = "Session သက်တမ်းကုန်ပြီ — password ဖြင့် ပြန်ဝင်ပါ" });
+    }
+    else
+    {
+        var (okPwd, needsUpgrade) = VerifyPassword(password, acc.Salt, acc.PassHash);
+        if (!okPwd)
+            return J(new LoginRes { Ok = false, Message = "Password မမှန်ပါ" });
+        if (needsUpgrade)
+        {
+            // ရှေး SHA-256 format → PBKDF2 အသစ်ပြောင်း (password အသစ်ထည့းစရာမလို)
+            acc.PassHash = HashPassword(password, acc.Salt);
+            SaveDb(db);
+        }
+        if (req.Remember)
+        {
+            newToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            acc.AutoToken = newToken;
+            acc.AutoTokenAt = DateTime.UtcNow.ToString("o");
+            SaveDb(db);
+        }
+    }
 
     if (string.IsNullOrEmpty(acc.ExpiresAt))
         return J(new LoginRes { Ok = false, Message = "Expiry မသတ်မှတ်ရသေးပါ — admin approve လုပ်ပါ" });
@@ -156,7 +247,8 @@ app.MapPost("/api/login", (LoginReq req) =>
         Message = "OK",
         Plan = acc.Plan,
         ExpiresAt = acc.ExpiresAt,
-        DaysLeft = daysLeft
+        DaysLeft = daysLeft,
+        AutoToken = newToken
     });
 });
 
@@ -231,6 +323,8 @@ app.MapPost("/api/admin/upsert", (HttpContext ctx, UpsertReq req) =>
             return J(new { ok = false, message = "Password အနည်းဆုံး 4 လုံး" });
         acc.Salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         acc.PassHash = HashPassword(req.Password, acc.Salt);
+        acc.AutoToken = ""; // password ပြောင်း → remember-me session အဟောင်း ဖျက်
+        acc.AutoTokenAt = "";
     }
     if (!string.IsNullOrEmpty(req.Plan))
         acc.Plan = plan;
@@ -298,6 +392,7 @@ app.MapPost("/api/admin/block", (HttpContext ctx, BlockReq req) =>
         string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
     if (acc == null) return J(new { ok = false, message = "Email မတွေ့ပါ" });
     acc.Blocked = req.Blocked;
+    if (req.Blocked) { acc.AutoToken = ""; acc.AutoTokenAt = ""; } // block → session ဖျက်
     SaveDb(db);
     return J(new
     {

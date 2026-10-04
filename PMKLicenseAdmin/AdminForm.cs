@@ -53,12 +53,9 @@ public class AdminForm : Form
 
         var pnlConn = MakeCard(12, 56, 1076, 96);
         var lblKey = MakeLabel("Admin Key (X-Admin-Key)", 14, 12);
-        txtKey = MakeBox(14, 34, 280, "admin-key");
+        // Admin key — source မှာ hardcode မလုပ်တော့; server ထုတ်လိုက်သော adminkey.txt ကနေ ကူးထည့်ပါ
+        txtKey = MakeBox(14, 34, 280, "admin key (adminkey.txt)");
         txtKey.UseSystemPasswordChar = true;
-        txtKey.GotFocus -= PlaceholderGotFocus;
-        txtKey.LostFocus -= PlaceholderLostFocus;
-        txtKey.Text = "pmk-admin-2026";
-        txtKey.ForeColor = Fg;
 
         var lblSrv = MakeLabel("ဆာဗာ URL", 310, 12);
         txtServer = MakeBox(310, 34, 360, "http://127.0.0.1:5260");
@@ -285,7 +282,14 @@ public class AdminForm : Form
     }
 
     private string BaseUrl => (txtServer.Text ?? "").Trim().TrimEnd('/');
-    private string AdminKey => (txtKey.Text ?? "").Trim();
+    private string AdminKey
+    {
+        get
+        {
+            string k = (txtKey.Text ?? "").Trim();
+            return k == "admin key (adminkey.txt)" ? "" : k; // placeholder မပို့ရ
+        }
+    }
     private string Email => FieldVal(txtEmail, "user@gmail.com");
     private string Pass => FieldVal(txtPass, "စကားဝှက်");
     private string Note => FieldVal(txtNote, "ဆိုင်မှတ်စု");

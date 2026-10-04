@@ -18,6 +18,7 @@ public class LoginForm : Form
     private bool loading;
     private System.Windows.Forms.Timer loadTimer;
     private int loadFrames;
+    private string pendingAutoToken = "";   // remember-me token → Shown မှာ အလိုအလျောက်ဝင်မယ်
 
     // login OK ပြီးရင် Form1 ကို ပြဖို့
     public string LoginEmail { get; private set; } = "";
@@ -46,6 +47,8 @@ public class LoginForm : Form
         InitializeUi();
         // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
         try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
+        // Remember-me token ရှိရင် form ပေါ်ပြီးချင်း password မထည့်ဘဲ ဝင်ကြည့်မယ်
+        Shown += async (_, _) => await TryTokenAutoLoginAsync();
     }
 
     // Windows 10/11 dark title bar
@@ -289,11 +292,21 @@ public class LoginForm : Form
         panelBody.Controls.Add(panelCard);
 
         // Prefill remember-me
-        if (LocalLogin.TryRemembered(out string saved, out string savedPw))
+        if (LocalLogin.TryRemembered(out string saved, out string savedSecret, out bool savedIsToken))
         {
             if (!string.IsNullOrEmpty(saved)) txtEmail.Text = saved;
-            if (!string.IsNullOrEmpty(savedPw)) txtPassword.Text = savedPw;
-            chkRemember.Checked = true;
+            if (savedIsToken)
+            {
+                // token mode — password မသိမ်းတော့; Shown မှာ အလိုအလျောက် token login
+                pendingAutoToken = savedSecret;
+                chkRemember.Checked = true;
+            }
+            else if (!string.IsNullOrEmpty(savedSecret))
+            {
+                // ယခင် version (password blob) — ဒီတစ်ခါ login ပြီးရင် token အသစ်နဲ့ ပြောင်းသိမ်းမယ်
+                txtPassword.Text = savedSecret;
+                chkRemember.Checked = true;
+            }
         }
         else
         {
@@ -379,6 +392,7 @@ public class LoginForm : Form
         try
         {
             // minimum loading UX so user sees spinner
+            bool remember = chkRemember.Checked;   // UI thread မှာယူ (background မှာ Control မထိ)
             var work = Task.Run(async () =>
             {
                 string email = txtEmail.Text.Trim();
@@ -390,7 +404,8 @@ public class LoginForm : Form
                     return (reg, (LicenseClient.Result)null);
                 }
 
-                var result = await LicenseClient.LoginAsync(email, pw);
+                // remember=true → server က auto-login token ပြန်ပေးမယ် (password မသိမ်းရ)
+                var result = await LicenseClient.LoginAsync(email, pw, remember);
                 return ((LicenseClient.Result)null, result);
             });
 
@@ -421,22 +436,87 @@ public class LoginForm : Form
             }
 
             string email2 = txtEmail.Text.Trim();
-            string pw2 = txtPassword.Text;
-            if (chkRemember.Checked) LocalLogin.SaveRemembered(email2, pw2);
+            // Remember me → password မသိမ်းဘဲ server token ကိုပဲ DPAPI နဲ့သိမ်း
+            if (chkRemember.Checked)
+            {
+                if (!string.IsNullOrEmpty(loginRes.AutoToken))
+                    LocalLogin.SaveRememberedToken(email2, loginRes.AutoToken);
+            }
             else LocalLogin.ClearRemembered();
 
-            LoginEmail = email2;
-            LoginPlan = loginRes.Plan;
-            LoginExpiresAt = loginRes.ExpiresAt;
-            LoginDaysLeft = loginRes.DaysLeft;
-
-            string plan = string.IsNullOrEmpty(loginRes.Plan) ? "" : " [" + loginRes.Plan + "]";
-            string days = loginRes.DaysLeft > 0 ? " · " + loginRes.DaysLeft + "d left" : "";
-            lblStatus.ForeColor = Success;
-            lblStatus.Text = "Login OK" + plan + days;
+            CompleteLogin(email2, loginRes);
             await Task.Delay(300); // brief success pause
             DialogResult = DialogResult.OK;
             Close();
+        }
+        finally
+        {
+            loadTimer.Stop();
+            loading = false;
+            btnLogin.Enabled = true;
+            txtEmail.Enabled = true;
+            txtPassword.Enabled = true;
+            chkRemember.Enabled = true;
+            lnkRegister.Enabled = true;
+            btnLogin.Invalidate();
+        }
+    }
+
+    // login OK → Form1 ကိုပြဖို့ fields ဖြည့်
+    private void CompleteLogin(string email, LicenseClient.Result res)
+    {
+        LoginEmail = email;
+        LoginPlan = res.Plan;
+        LoginExpiresAt = res.ExpiresAt;
+        LoginDaysLeft = res.DaysLeft;
+
+        string plan = string.IsNullOrEmpty(res.Plan) ? "" : " [" + res.Plan + "]";
+        string days = res.DaysLeft > 0 ? " · " + res.DaysLeft + "d left" : "";
+        lblStatus.ForeColor = Success;
+        lblStatus.Text = "Login OK" + plan + days;
+    }
+
+    // Remember-me token auto login — form ပေါ်တာနဲ့ ချက်ချင်း (password မထည့်ရ)
+    private async Task TryTokenAutoLoginAsync()
+    {
+        string token = pendingAutoToken;
+        pendingAutoToken = "";
+        if (string.IsNullOrEmpty(token) || loading) return;
+
+        string email = txtEmail.Text.Trim();
+        loading = true;
+        btnLogin.Enabled = false;
+        loadFrames = 0;
+        loadTimer.Start();
+        txtEmail.Enabled = false;
+        txtPassword.Enabled = false;
+        chkRemember.Enabled = false;
+        lnkRegister.Enabled = false;
+        lblStatus.ForeColor = TextMuted;
+        lblStatus.Text = "Auto login (remember me)...";
+        try
+        {
+            var res = await LicenseClient.TokenLoginAsync(email, token);
+            if (res.Ok)
+            {
+                CompleteLogin(email, res);
+                await Task.Delay(300);
+                DialogResult = DialogResult.OK;
+                Close();
+                return;
+            }
+
+            if (!res.Offline)
+            {
+                // token ငြင်းခံရ (server ပြောင်း/ပိတ်/password ပြောင်း) → session ဖျက်ပြီး password နဲ့ပြန်ဝင်
+                LocalLogin.ClearRemembered();
+                chkRemember.Checked = false;
+            }
+            lblStatus.ForeColor = Danger;
+            lblStatus.Text = string.IsNullOrEmpty(res.Message)
+                ? "Session ကုန် — password ဖြင့် ပြန်ဝင်ပါ"
+                : res.Message;
+            txtPassword.Focus();
         }
         finally
         {
