@@ -541,7 +541,7 @@ namespace PMKUnlocker
 
         private void SetupProfessionalUI()
         {
-            this.Text = "PMK Mobile Tool V7.2";
+            this.Text = "PMK Mobile Tool V7.3";
             this.Size = new Size(1400, 900);
             // PC တိုင်းနဲ့ အဆင်ပြေအောင် — window ကို ဆွဲကြီး/ကျုံ့ လို့မရစေရ၊ maximize လည်း ပိတ်
             this.FormBorderStyle = FormBorderStyle.FixedSingle;

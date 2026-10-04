@@ -8,9 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- PotatoNV library တွေ (x86) နဲ့ libusb-1.0.dll (32-bit) အတွက် x86 ဖြစ်ရမယ် -->
     <PlatformTarget>x86</PlatformTarget>
-    <Version>7.2.0</Version>
-    <FileVersion>7.2.0.0</FileVersion>
-    <InformationalVersion>7.2.0-preview</InformationalVersion>
+    <Version>7.3.0</Version>
+    <FileVersion>7.3.0.0</FileVersion>
+    <InformationalVersion>7.3.0-preview</InformationalVersion>
     <Product>PMK Mobile Tool</Product>
     <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
     <ApplicationIcon>pmk.ico</ApplicationIcon>
