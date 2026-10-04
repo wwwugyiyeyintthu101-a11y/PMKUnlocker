@@ -1,7 +1,7 @@
 #nullable disable
 namespace PMKUnlocker;
 
-// MST-style login — polished purple card design
+// PMK-style login — polished purple card design
 public class LoginForm : Form
 {
     private TextBox txtEmail;
@@ -41,7 +41,12 @@ public class LoginForm : Form
     private static readonly Color Success     = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger      = Color.FromArgb(255, 110, 110);
 
-    public LoginForm() => InitializeUi();
+    public LoginForm()
+    {
+        InitializeUi();
+        // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
+        try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
+    }
 
     // Windows 10/11 dark title bar
     [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]

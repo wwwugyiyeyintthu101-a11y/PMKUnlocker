@@ -148,8 +148,6 @@ namespace PMKUnlocker
         private Button btnQcFullBackup;
         private Button btnQcEfsBackup;
         private Button btnQcReset;
-        private Button btnQcSetModule;
-        private Button btnQcSetLoader;
         // EDL auto-auth session (Unlock Tool style) — COM port တစ်ခုအတွက် တစ်ခါသာ
         private string qcAuthedPort { get => qcLoaderSession.Port; set => qcLoaderSession.Port = value; }
         private bool qcAuthed { get => qcLoaderSession.Authenticated; set => qcLoaderSession.Authenticated = value; }
@@ -204,6 +202,7 @@ namespace PMKUnlocker
         private Button btnSamDownloadPit;
         private Button btnSpdPickFirmware, btnSpdDirectFlash;
         private Button btnSpdReadGpt, btnSpdReadPart, btnSpdWritePart, btnSpdErasePart;
+        private Button btnSpdDiagFrp, btnSpdDiagUserlock;
 
         // Samsung PIT (binary) ဖတ်ထားတဲ့ entry စာရင်း — .tar ထဲက .img တွေကို partition နာမည်နဲ့
         // တွဲဖို့ (Flash Filename → Partition Name) သုံးတယ်။
@@ -230,6 +229,23 @@ namespace PMKUnlocker
         private string edlLoaderPath { get => qcLoaderSession.LoaderPath; set => qcLoaderSession.LoaderPath = value; }
         private string edlSigPath = "";        // pmk_paths.txt line 4 — optional custom SIG file
         private const string edlLegacySlot = "";   // pmk_paths.txt line 3 — အရင် PotatoNV GUI path အတွက် နေရာ (မဖျက်ရ၊ format မပြောင်းရ)
+
+        // MTK/SPD picker ရွေးထားတဲ့ loader/DA/auth/preloader ဖိုင်များ — pmk_paths.txt line 5-8
+        private string mtkDaPath = "";
+        private string mtkAuthPath = "";
+        private string mtkPreloaderPath = "";
+        private string spdLoaderPath = "";
+        private string _spdSelectedModel = "";   // SPD tab ရဲ့ ရွေးထားတဲ့ model — loader folder တိုက်စစ်ဖို့
+        private Control qcFileRow;   // QC LOADER PICKER ထဲက Loader file row (Load တစ်ခါပဲ ထည့်)
+        // file picker rows — theme toggle အခါ refresh ဖို့ (row panel → Show action)
+        private readonly Dictionary<Panel, Action> fileRowRefresh = new();
+
+        // file row color တွေ — light/dark theme အလိုက်
+        private Color RowLabelBg => lightTheme ? Color.FromArgb(216, 223, 237) : Color.FromArgb(30, 34, 41);
+        private Color RowFieldBg => lightTheme ? Color.FromArgb(245, 248, 253) : Color.FromArgb(24, 27, 33);
+        private Color RowLabelText => lightTheme ? Color.FromArgb(45, 52, 66) : Color.FromArgb(205, 216, 232);
+        private Color RowHint => lightTheme ? Color.FromArgb(56, 64, 78) : Color.FromArgb(185, 200, 224);
+        private Color RowLoaded => lightTheme ? Color.FromArgb(0, 105, 50) : Color.LightGreen;
 
         // Kirin bootloader manifest (manifest.xml) ဖတ်ထားတာ
         private class KirinImage
@@ -264,6 +280,8 @@ namespace PMKUnlocker
 
         private volatile bool workflowDidOp = false;
         private bool workflowFailed;
+        // parser ကို ဘယ် task ထဲမှာ run ဖြစ်နေလဲ သိအောင် — QC/MTK log wording ခွဲသုံးဖို့
+        private string currentTaskTitle = "";
 
         // MTK/QC op ပြီးရင် Auto reboot checkbox ပေါ်မူတည်ပြီး ဖုန်းကို reboot ပြန်ပို့တယ်
         // (BROM/EDL mode ကနေ Android ပြန်ဝင်အောင်)။
@@ -281,7 +299,12 @@ namespace PMKUnlocker
                     Environment.SetEnvironmentVariable("PMK_MTK_SERIAL", serial);
                 }
                 Log("[*] Auto reboot after successful " + platform + " operation.", Color.Orange);
-                await ExecuteCommandCleanAsync("python", arguments, "Auto Reboot (" + platform + ")", quiet: true);
+                // timeoutSec: edl.py reset က device reboot ပြီးမှ port မှာ hang နေတတ်တယ် —
+                // 60s ကျော်ရင် kill ပြီး device drop = reboot complete အဖြစ် သတ်မှတ် (UI မချိတ်ကျစေရ)
+                bool rebooted = await ExecuteCommandCleanAsync("python", arguments, "Auto Reboot (" + platform + ")",
+                    quiet: true, timeoutSec: 60, timeoutMeansSuccess: true);
+                // reboot ပြီးရင် device ပြန် boot/ADB ပြန်တက်လာမလား background မှာစောင့်ပြီး log ပြ
+                if (rebooted && !stopRequested) _ = WaitAndroidAfterRebootAsync();
             }
             finally
             {
@@ -293,7 +316,45 @@ namespace PMKUnlocker
             }
         }
 
-        private async Task RunFlashWorkflowAsync(Func<Task> action, bool autoRebootAfter = true)
+        // Reboot ပြီးရင် device ပြန် boot လာ/ADB ပြန်တက်လာမလား စောင့်ပြီး log ပြတယ် —
+        // (UI မ block — devicePollTimer က header label ကို ဆက် update နေမယ်)
+        private async Task WaitAndroidAfterRebootAsync()
+        {
+            try
+            {
+                Log("[*] Waiting for device to boot back into Android...", Color.Cyan);
+                for (int i = 0; i < 60; i++)   // 5s × 60 = 300s (wipe ပြီး first boot ကြာနိုင်)
+                {
+                    await Task.Delay(5000);
+                    if (stopRequested || IsDisposed) return;
+                    string adbRes = await ExecuteCommandQuickAsync("adb.exe", "devices", 5000);
+                    if (!string.IsNullOrEmpty(adbRes) && adbRes.Contains("\tdevice"))
+                    {
+                        string model = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.product.model", 5000)).Trim();
+                        Log("[OK] Device back online: ADB -> " + (string.IsNullOrWhiteSpace(model) ? "Android device" : model), Color.LightGreen);
+                        _ = CheckAllDevicesAsync(false);
+                        return;
+                    }
+                    if (!string.IsNullOrEmpty(adbRes) && adbRes.Contains("\tunauthorized"))
+                    {
+                        Log("[OK] Device back online: ADB unauthorized — ဖုန်း screen မှာ USB debugging ခွင့်ပြုပါ။", Color.Yellow);
+                        _ = CheckAllDevicesAsync(false);
+                        return;
+                    }
+                    string fbRes = await ExecuteCommandQuickAsync("fastboot.exe", "devices", 3000);
+                    if (!string.IsNullOrEmpty(fbRes) && fbRes.Contains("fastboot"))
+                    {
+                        Log("[OK] Device back online: FASTBOOT", Color.DeepSkyBlue);
+                        _ = CheckAllDevicesAsync(false);
+                        return;
+                    }
+                }
+                Log("[!] Device not back after 300s — screen ပေါ်ကြည့်ပါ / USB ပြန်ဆွဲပါ။", Color.Orange);
+            }
+            catch { }
+        }
+
+        private async Task RunFlashWorkflowAsync(Func<Task> action, bool autoRebootAfter = true, bool? forceReboot = null)
         {
             if (isTaskRunning || flashWorkflowRunning)
             {
@@ -306,7 +367,8 @@ namespace PMKUnlocker
                 return;
             }
             string rebootPlatform = tabControl.SelectedTab == tabMtk ? "MTK" : tabControl.SelectedTab == tabQc ? "QC" : "";
-            bool rebootEnabled = rebootPlatform == "MTK" ? chkMtkAutoReboot.Checked : rebootPlatform == "QC" && chkQcAutoReboot.Checked;
+            // forceReboot = op တစ်ခုအတွက် checkbox ကို ကျော်ပြီး reboot အတိအကျ သတ်မှတ် (ဥပမာ QC Userlock Reset)
+            bool rebootEnabled = forceReboot ?? (rebootPlatform == "MTK" ? chkMtkAutoReboot.Checked : rebootPlatform == "QC" && chkQcAutoReboot.Checked);
             string rebootArguments = rebootPlatform == "MTK" ? BuildMtkOpArgs("reset") :
                 rebootPlatform == "QC" && !string.IsNullOrEmpty(edlScriptPath) ? BuildEdlArgs("reset --resetmode=reset") : "";
             string rebootSerial = Environment.GetEnvironmentVariable("PMK_MTK_SERIAL");
@@ -378,6 +440,8 @@ namespace PMKUnlocker
             licDays = days;
 
             InitializeComponent();
+            // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
+            try { var ic = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); if (ic != null) Icon = ic; } catch { }
             try { ShopServices.MigrateSettings(Application.StartupPath); }
             catch (Exception ex) { Debug.WriteLine("Settings migration: " + ex.Message); }
             LoadEdlPaths();
@@ -457,7 +521,7 @@ namespace PMKUnlocker
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold)
             };
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(lbl,
+                Tip(lbl,
                     "Logged in: " + licEmail + "\r\nPlan: " + licPlan +
                     "\r\nExpires: " + licExpires + "\r\nDays left: " + licDays);
             return lbl;
@@ -482,7 +546,7 @@ namespace PMKUnlocker
 
         private void SetupProfessionalUI()
         {
-            this.Text = "PMK Mobile Tool v7.2 Preview - Firmware & Diagnostics";
+            this.Text = "PMK Mobile Tool V7.2";
             this.Size = new Size(1400, 900);
             // PC တိုင်းနဲ့ အဆင်ပြေအောင် — window ကို ဆွဲကြီး/ကျုံ့ လို့မရစေရ၊ maximize လည်း ပိတ်
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -535,13 +599,13 @@ namespace PMKUnlocker
             // ကိုယ်တိုင် auto-detect လုပ်တယ် (MTK COM port ရှိရင် serial၊ မရှိရင် USB)။
             // အတင်းရွေးချင်ရင် env: PMK_MTK_SERIAL=off (USB) သို့မဟုတ် PMK_MTK_SERIAL=COM5။
             toolTipMain = new ToolTip();
-            toolTipMain.SetToolTip(btnOpenDeviceManager,
+            Tip(btnOpenDeviceManager,
                 "Windows Device Manager ဖွင့်တယ်။\r\n" +
                 "MTK transport (USB / serial-VCOM) ကို tool က auto-detect လုပ်တယ် —\r\n" +
                 "MediaTek device ရဲ့ COM port ရှိရင် serial၊ မရှိရင် USB (libusb/WinUSB) သုံးတယ်။\r\n" +
                 "အတင်းရွေးချင်ရင် env: PMK_MTK_SERIAL=off | COM5");
-            toolTipMain.SetToolTip(btnRefreshPorts, "Rescan serial COM ports (MTK Preloader / VCOM / SPD / HiSilicon).");
-            toolTipMain.SetToolTip(btnDrivers, "Scan known USB VIDs and install INF driver folders.");
+            Tip(btnRefreshPorts, "Rescan serial COM ports (MTK Preloader / VCOM / SPD / HiSilicon).");
+            Tip(btnDrivers, "Scan known USB VIDs and install INF driver folders.");
 
             lblDeviceModeStatus = new Label
             {
@@ -574,12 +638,12 @@ namespace PMKUnlocker
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(lblBattery, "ADB device battery level (auto-refresh with device poll)");
+                Tip(lblBattery, "ADB device battery level (auto-refresh with device poll)");
 
             btnThemeToggle = Create3DButton("🌙 Dark", 660, 12, 90, 34, ButtonTheme.Purple);
             btnThemeToggle.Click += (s, e) => ToggleTheme();
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnThemeToggle, "Switch between Dark and Light theme.");
+                Tip(btnThemeToggle, "Switch between Dark and Light theme.");
 
             chkDryRun = new CheckBox
             {
@@ -589,7 +653,7 @@ namespace PMKUnlocker
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold)
             };
-            toolTipMain.SetToolTip(chkDryRun,
+            Tip(chkDryRun,
                 "Dry-run mode: device command တွေ မပို့ပါ။ တကယ်လုပ်ရန် Dry-run ကို ပိတ်ပါ။");
 
             // Login email + ကျန်ရက် + clock — header ညာဘက် stack (overlap မဖြစ်အောင်)
@@ -605,7 +669,7 @@ namespace PMKUnlocker
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold)
             };
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(lblClock, "Current date/time (local)");
+                Tip(lblClock, "Current date/time (local)");
             clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             clockTimer.Tick += (_, _) => UpdateClock();
             clockTimer.Start();
@@ -689,7 +753,7 @@ namespace PMKUnlocker
             btnAdbPartitions = Create3DButton("📂 Partitions (ROOT)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnAdbPartitions.Click += BtnAdbPartitions_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnAdbPartitions,
+                Tip(btnAdbPartitions,
                     "Root ရှိရင် /dev/block/by-name partition list ပြမယ်။\r\n" +
                     "ရွေးထားတဲ့ partition ကို mount -o remount,rw နဲ့ Read-Write လုပ်နိုင်တယ်။");
 
@@ -754,7 +818,7 @@ namespace PMKUnlocker
                     return;
                 }
 
-                string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+                string id = (await ProbeSuAsync()).Trim();
                 if (!id.Contains("uid=0"))
                 {
                     MessageBox.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
@@ -862,7 +926,7 @@ namespace PMKUnlocker
             // LOCK group 3-col က tab ညာဘက် cut ဖြစ် — APPS row2 col0 (FRP ဘေး) ထဲ ထည့်
             btnXiaomiTempRootFrp = Create3DButton("📱 Xiaomi Temp Root", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
             btnXiaomiTempRootFrp.Click += BtnXiaomiTempRootFrp_Click;
-            toolTipMain.SetToolTip(btnXiaomiTempRootFrp,
+            Tip(btnXiaomiTempRootFrp,
                 "ADB → su temp root / kernel exploit (exploits\\manifest.json) ရယူပြီး ရပ်မယ် — FRP ကို FRP Reset (ROOT) နဲ့ ဆက်မယ်။");
             grpAdbApps.Controls.Add(btnXiaomiTempRootFrp);
             btnXiaomiTempRootFrp.Location = new Point(10, 26 + UiRowStep);             // FRP Reset ဘေး (col0 row2)
@@ -882,7 +946,7 @@ namespace PMKUnlocker
             btnMtkReadBrom = Create3DButton("🔍 Read Info / GPT", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnMtkReadBrom.Click += BtnMtkReadBrom_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkReadBrom, "Read device info + GPT partition map via mtk.exe printgpt.");
+                Tip(btnMtkReadBrom, "Read device info + GPT partition map via mtk.exe printgpt.");
 
             // Unlock Tool ပုံစံ — NV Backup / NV Erase / NV Restore
             btnMtkNvBackup = Create3DButton("💾 NV Backup", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
@@ -895,12 +959,12 @@ namespace PMKUnlocker
             btnMtkNvRestore.Click += BtnMtkNvRestore_Click;
             if (toolTipMain != null)
             {
-                toolTipMain.SetToolTip(btnMtkNvBackup,
+                Tip(btnMtkNvBackup,
                     "Backup: nvram, nvdata, nvcfg, proinfo\r\n" +
                     "GPT size verify + per-file MB log.");
-                toolTipMain.SetToolTip(btnMtkNvErase,
+                Tip(btnMtkNvErase,
                     "Format nvram + nvdata only (IMEI/baseband will be lost — backup first).");
-                toolTipMain.SetToolTip(btnMtkNvRestore,
+                Tip(btnMtkNvRestore,
                     "Restore NV backup folder: writes every known NV .bin found\r\n" +
                     "(nvram/nvdata/nvcfg/proinfo/persist/seccfg/protect*/preloader).");
             }
@@ -915,41 +979,41 @@ namespace PMKUnlocker
             btnMtkFullDump = Create3DButton("📦 Full ROM Dump", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnMtkFullDump.Click += BtnMtkFullDump_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkFullDump, "Dump ALL partitions (mtk.exe rl) + auto scatter — needs lots of disk space.");
+                Tip(btnMtkFullDump, "Dump ALL partitions (mtk.exe rl) + auto scatter — needs lots of disk space.");
 
             btnMtkNormalDump = Create3DButton("📁 Normal ROM Dump", UiX(1), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Green);
             btnMtkNormalDump.Click += BtnMtkNormalDump_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkNormalDump, "Dump essential partitions only (boot, recovery, vbmeta, dtbo, super…).");
+                Tip(btnMtkNormalDump, "Dump essential partitions only (boot, recovery, vbmeta, dtbo, super…).");
 
             // Safe Bundle — tab ညာဘက် overflow မဖြစ်အောင် BACKUP(3col) ထဲ မထည့်ဘဲ UNLOCK ရဲ့ နောက်ဆုံး cell မှာ
             btnMtkSafeBackup = Create3DButton("🛡 Safe Bundle", UiX(3), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Green);
             btnMtkSafeBackup.Click += BtnMtkSafeBackup_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkSafeBackup,
+                Tip(btnMtkSafeBackup,
                     "One-click critical backup: nvram, nvdata, nvcfg, proinfo, persist, seccfg,\r\n" +
                     "boot, vbmeta, vbmeta_system, vbmeta_vendor — GPT size verify + folder open.");
 
             btnMtkUnlockBL = Create3DButton("🔓 Unlock Bootloader", UiX(2), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnMtkUnlockBL.Click += BtnMtkUnlockBL_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkUnlockBL, "da seccfg unlock — wipes userdata. Auto reboot follows the Auto reboot checkbox.");
+                Tip(btnMtkUnlockBL, "da seccfg unlock — wipes userdata. Auto reboot follows the Auto reboot checkbox.");
 
             btnMtkRelockBL = Create3DButton("🔒 Relock Bootloader", UiX(0), UiY(2), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnMtkRelockBL.Click += BtnMtkRelockBL_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkRelockBL, "da seccfg lock — relock bootloader (may wipe again on some devices).");
+                Tip(btnMtkRelockBL, "da seccfg lock — relock bootloader (may wipe again on some devices).");
 
             // Column 3 — Userlock / FRP (screen lock နဲ့ Google account lock ဖျက်ခြင်း)
             btnMtkUserlockReset = Create3DButton("🔑 Userlock Reset", UiX(1), UiY(2), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnMtkUserlockReset.Click += BtnMtkUserlockReset_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkUserlockReset, "Erase userdata + metadata — removes screen lock. ALL user data wiped.");
+                Tip(btnMtkUserlockReset, "Erase userdata + metadata — removes screen lock. ALL user data wiped.");
 
             btnMtkFrpRemove = Create3DButton("🔓 FRP Remove", UiX(2), UiY(2), UiBtnW, UiBtnH, ButtonTheme.Red);
             btnMtkFrpRemove.Click += BtnMtkFrpRemove_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnMtkFrpRemove, "Erase frp + config — Google account lock. User data kept.");
+                Tip(btnMtkFrpRemove, "Erase frp + config — Google account lock. User data kept.");
 
             // Orange State / DM-Verity — vbmeta disabled-flags image ရေးခြင်း
             btnMtkOrangeStateFix = Create3DButton("🟠 Orange State Fix", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
@@ -1119,7 +1183,7 @@ namespace PMKUnlocker
             btnQcReadInfo = Create3DButton("🔍 Read Info / GPT", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnQcReadInfo.Click += BtnQcReadInfo_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnQcReadInfo, "Qualcomm: edl.py printgpt — read device info + partition map.");
+                Tip(btnQcReadInfo, "Qualcomm: edl.py printgpt — read device info + partition map.");
 
             btnQcFullBackup = Create3DButton("💾 Full Backup", UiX(2), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnQcFullBackup.Click += BtnQcFullBackup_Click;
@@ -1127,14 +1191,8 @@ namespace PMKUnlocker
             btnQcEfsBackup = Create3DButton("📂 EFS Backup", UiX(3), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnQcEfsBackup.Click += BtnQcEfsBackup_Click;
 
-            btnQcSetModule = Create3DButton("📦 EDL Module", UiX(1), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Orange);
-            btnQcSetModule.Click += BtnQcSetModule_Click;
-
             btnQcSaveGpt = Create3DButton("📋 Save GPT + XML", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
             btnQcSaveGpt.Click += BtnQcSaveGpt_Click;
-
-            btnQcSetLoader = Create3DButton("🧩 Firehose Loader", UiX(2), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Purple);
-            btnQcSetLoader.Click += BtnQcSetLoader_Click;
 
             btnQcFrpRemove = Create3DButton("🔓 FRP Remove", UiX(3), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Red);
             btnQcFrpRemove.Click += BtnQcFrpRemove_Click;
@@ -1172,7 +1230,7 @@ namespace PMKUnlocker
             btnQcStartFlash = Create3DButton("◉ FLASH", UiX(0) + 510, UiY(2) + 16, 175, 36, ButtonTheme.Red);
             btnQcStartFlash.Click += BtnQcStartFlash_Click;
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnQcStartFlash, "Flash rawprogram XML partitions via fh_loader (EDL 9008). Requires COM port + firmware folder.");
+                Tip(btnQcStartFlash, "Flash rawprogram XML partitions via fh_loader (EDL 9008). Requires COM port + firmware folder.");
 
             // ---- Flash Option row (MobileSea ပုံစံ) ----
             chkQcBackupEfsFirst = new CheckBox
@@ -1215,14 +1273,15 @@ namespace PMKUnlocker
             Panel grpQcInfo = CreateGroupPanel("INFO", UiX(0), UiY(0), 2, btnQcReadInfo, btnQcReset);
             Panel grpQcBackup = CreateGroupPanel("BACKUP", UiX(0) + 360, UiY(0), 3, btnQcSaveGpt, btnQcFullBackup, btnQcEfsBackup);
             Panel grpQcUnlock = CreateGroupPanel("UNLOCK", UiX(0), UiY(2), 2, btnQcFrpRemove, btnQcUserlockReset);
-            Panel grpQcSetup = CreateGroupPanel("SETUP", UiX(0) + 345, UiY(2), 2, btnQcSetModule, btnQcSetLoader);
+            // SETUP group (📦 EDL Module / 🧩 Firehose Loader) — user request နဲ့ ဖယ်လိုက်
+            // (loader ရွေးဖို့ = အပေါ်က LOADER PICKER၊ edl.py path = auto-find + dialog)
 
             // ---- Firehose Loader Brand/Model picker (pmk_qc_loaders.json) ----
             // QC tab ရဲ့ အပေါ်ဆုံးတန်း — device list Brand/Model/Detect ကို အစားထိုး
             grpQcLoaderPicker = new Panel
             {
                 Location = new Point(15, 11),
-                Size = new Size(930, 44),
+                Size = new Size(930, 76),   // row1 Brand/Model + row2 Loader file row (ပုံတူ layout)
                 BackColor = Color.FromArgb(23, 26, 32),
                 Tag = "grp"
             };
@@ -1247,7 +1306,7 @@ namespace PMKUnlocker
             chkQcAutoReboot.Location = new Point(UiX(0) + 697, UiY(4) + 78);
 
             tabQc.Controls.AddRange(new Control[] {
-    grpQcInfo, grpQcBackup, grpQcUnlock, grpQcSetup, grpQcLoaderPicker,
+    grpQcInfo, grpQcBackup, grpQcUnlock, grpQcLoaderPicker,
     lblQcFlashTitle, txtQcFirmware, btnQcPickFirmware, btnQcStartFlash, chkQcAutoReboot,
     chkQcBackupEfsFirst, chkQcSkipUserdata, chkQcResetFrpAfter
 });
@@ -1288,7 +1347,7 @@ namespace PMKUnlocker
             btnSamSoftBrick = Create3DButton("🧱 SoftBrick Fix", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnSamSoftBrick.Click += async (s, e) => await RunSamsungSoftBrickAsync();
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(btnSamSoftBrick,
+                Tip(btnSamSoftBrick,
                     "Download mode error screen (softbrick) အတွက် Odin protocol flash-count reset။\r\n" +
                     "Firmware ပြန်ထည့်စရာမလို — reset ပြီးရင် Download mode ပုံမှန်ပြန်ဝင်တယ်။\r\n" +
                     "Vol+/- + USB → Warning → Vol+ နဲ့ Download mode ဝင်ပြီး နှိပ်ပါ။");
@@ -1433,9 +1492,18 @@ namespace PMKUnlocker
             btnSpdErasePart = Create3DButton("🗑️ Erase Part", UiX(3), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Red);
             btnSpdErasePart.Click += BtnSpdErasePart_Click;
 
+            // UNLOCK (Diag) — spd_dump diag channel (Channel9) ကနေ FDL erase။
+            // EFT/ResearchDownload "Diag mode" လိုပဲ — persist/frp = FRP၊ userdata = userlock
+            btnSpdDiagFrp = Create3DButton("🔐 FRP (Diag)", UiX(0) + 510, UiY(2) + 69, UiBtnW, UiBtnH, ButtonTheme.Red);
+            btnSpdDiagFrp.Click += BtnSpdDiagFrp_Click;
+
+            btnSpdDiagUserlock = Create3DButton("🔒 Userlock+FRP", UiX(0) + 675, UiY(2) + 69, UiBtnW, UiBtnH, ButtonTheme.Orange);
+            btnSpdDiagUserlock.Click += BtnSpdDiagUserlock_Click;
+
             Panel grpSpdInfo = CreateGroupPanel("INFO", UiX(0), UiY(0), 1, btnSpdInfo);
             Panel grpSpdUnlock = CreateGroupPanel("UNLOCK", UiX(0) + 195, UiY(0), 1, btnSpdFrp);
             Panel grpSpdReboot = CreateGroupPanel("REBOOT", UiX(0) + 390, UiY(0), 2, btnSpdReboot, btnSpdFastboot);
+            Panel grpSpdDiag = CreateGroupPanel("UNLOCK (Diag)", UiX(0) + 510, UiY(2) + 69, 2, btnSpdDiagFrp, btnSpdDiagUserlock);
             Panel grpSpdPart = CreateGroupPanel("PARTITIONS (spd_dump)", UiX(0), UiY(4) + 56, 4,
                                                 btnSpdReadGpt, btnSpdReadPart, btnSpdWritePart, btnSpdErasePart);
 
@@ -1446,7 +1514,7 @@ namespace PMKUnlocker
             lblSpdHint.Location = new Point(UiX(0), UiY(2) + 50);
 
             tabSpd.Controls.AddRange(new Control[] {
-    grpSpdInfo, grpSpdUnlock, grpSpdReboot, grpSpdPart,
+    grpSpdInfo, grpSpdUnlock, grpSpdReboot, grpSpdPart, grpSpdDiag,
     lblSpdFlashTitle, txtSpdFirmware, btnSpdPickFirmware, btnSpdDirectFlash
 });
             // --- 8. HISILICON (HUAWEI / HONOR) TAB — PotatoNV core နဲ့ Kirin unlock ---
@@ -1675,7 +1743,7 @@ namespace PMKUnlocker
             };
             txtPartFilter.TextChanged += (s, e) => ApplyPartitionFilter();
             if (toolTipMain != null)
-                toolTipMain.SetToolTip(txtPartFilter, "Partition name filter — type to show only matching rows (nvram, boot, vbmeta…)");
+                Tip(txtPartFilter, "Partition name filter — type to show only matching rows (nvram, boot, vbmeta…)");
             panelPartitionHeader.Controls.Add(txtPartFilter);
 
             panelPartBtns = new FlowLayoutPanel
@@ -1769,27 +1837,11 @@ namespace PMKUnlocker
             SyncPlatformBar();
             splitMain.Panel2.Controls.Add(topLayout);   // ညာဘက် — platform bar + tab + partition
 
-            // Partition list က MTK tab မှာသာ အဓိပ္ပာယ် ရှိတယ် (mtk.exe နဲ့ ဖတ်/ရေး/ဖျက်) —
-            // အဲဒီ tab မှာသာ ပြ။ ဖျောက်တဲ့အခါ row ကိုပါ ကျုံ့ပေးလို့ တခြား tab ရဲ့ ခလုတ်တွေ နေရာ ပိုရတယ်။
-            Action syncPartitionPanel = () =>
-            {
-                // tabSamsung/tabSpd/tabAdb ကိုပါ ထည့် — ADB ROOT partitions က main grid မှာ ပြ
-                bool show = (tabControl.SelectedTab == tabMtk ||
-                             tabControl.SelectedTab == tabQc ||
-                             tabControl.SelectedTab == tabSamsung ||
-                             tabControl.SelectedTab == tabSpd ||
-                             tabControl.SelectedTab == tabAdb);
-                panelPartition.Visible = show;
-                topLayout.RowStyles[2].Height = show ? 250F : 0F;
-
-                // Tab အလိုက် အမြင့် ချိန် — ခလုတ်တွေရဲ့ အောက်မှာ နေရာလွတ်ကြီး မကျန်စေရ
-                // (user က splitter ကို လက်နဲ့ ဆွဲထားရင် သူ့ဆက်တင် အတိုင်း ထား)
-                if (!userAdjustedSplit)
-                {
-                    try { splitMain.SplitterDistance = (int)(splitMain.Width * 0.30); } catch { }
-                }
-            };
-            tabControl.SelectedIndexChanged += (s, e) => syncPartitionPanel();
+            // Partition box — tab content အောက်မှာ ကပ်ပြီး ကျန်တဲ့ နေရာအကုန် ယူ
+            // (height fixed 250 မဟုတ် — tab အလိုက် content အမြင့် ပေါ် မူတည်)
+            // tabSamsung/tabSpd/tabAdb ကိုပါ ထည့် — ADB ROOT partitions က main grid မှာ ပြ
+            tabControl.SelectedIndexChanged += (s, e) => SyncPartitionPanel(true);
+            topLayout.Resize += (s, e) => SyncPartitionPanel(false);
             tabControl.SelectedIndexChanged += (s, e) =>
             {
                 if (tabControl.SelectedTab == null || lblPlatformStatus == null) return;
@@ -1798,7 +1850,7 @@ namespace PMKUnlocker
             // SplitterMoving က user လက်နဲ့ ဆွဲတဲ့အခါသာ ဖြစ်တယ် (programmatic မှာ မဖြစ်) —
             // ဒါကြောင့် tab အလိုက် အလိုအလျောက် ချိန်တာကို မပိတ်စေရ
             splitMain.SplitterMoving += (s, e) => userAdjustedSplit = true;
-            syncPartitionPanel();
+            SyncPartitionPanel(true);
 
             // Form ရဲ့ တကယ့် အမြင့် ရပြီးမှ splitter ကို tab အလိုက် ပြန်ချိန်
             // (constructor ထဲမှာ ခေါ်တုန်း splitMain.Height က မှန်နေပြီးသား မဟုတ်လို့)
@@ -1816,13 +1868,15 @@ namespace PMKUnlocker
                         userAdjustedSplit = false;
                         splitMain.SplitterDistance = (int)(splitMain.Width * 0.30);
                     }
-                    syncPartitionPanel();
+                    SyncPartitionPanel(true);
                 }
                 catch { }
 
                 // COM port list ကို "Scan Port" မနှိပ်ဘဲ အလိုအလျောက် refresh (၃ စက္ကန့်တစ်ခါ)
                 // — ဖုန်း ချိတ်/ဖြုတ်လုပ်တာနဲ့ port က ချက်ချင်း ပေါ်လာအောင်။
                 BuildDevicePickers();      // MTK/QC/Samsung/SPD tab တစ်ခုစီမှာ Brand → Model → CPU list
+                SyncPartitionPanel(false); // content host တွေ ပြောင်းပြီးမှ row အမြင့် ပြန်ချိန်
+                ApplyDoubleBuffering();    // tab switch white flicker ကာ
                 RefillPortCombo();
                 RefreshMtkDetection();   // background (PowerShell) — UI မဟန်းအောင်
                 devicePollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
@@ -1885,6 +1939,8 @@ namespace PMKUnlocker
                     var process = activeProcess;
                     try { if (process != null && !process.HasExited) process.Kill(true); }
                     catch (InvalidOperationException) { }
+                    // RunQuickAsync processes (adb wait-for-device etc.) ကိုပါ ရပ်
+                    try { ReviewSafety.KillAllQuick(); } catch { }
                     Log("[!] Operation Stopped by User.", Color.OrangeRed);
                     SetProgress(0, "Stopped", "0 MB/s");
                 }
@@ -2070,18 +2126,25 @@ namespace PMKUnlocker
         // ================= PROGRESS BAR CONTROLLER =================
         private void SetProgress(int percent, string status, string speed = "")
         {
-            if (pbarOperation.InvokeRequired)
+            // output thread က app ပိတ်ပြီးဆုံးချိန် call ရင် crash မဖြစ်အောင်
+            if (pbarOperation == null || pbarOperation.IsDisposed || !pbarOperation.IsHandleCreated) return;
+            try
             {
-                pbarOperation.Invoke(new Action(() => SetProgress(percent, status, speed)));
-                return;
-            }
+                if (pbarOperation.InvokeRequired)
+                {
+                    pbarOperation.Invoke(new Action(() => SetProgress(percent, status, speed)));
+                    return;
+                }
 
-            pbarOperation.Value = Math.Min(100, Math.Max(0, percent));
-            lblProgressStatus.Text = status + " (" + percent.ToString() + "%)";
-            if (!string.IsNullOrEmpty(speed))
-            {
-                lblSpeedBadge.Text = "Speed: " + speed;
+                pbarOperation.Value = Math.Min(100, Math.Max(0, percent));
+                lblProgressStatus.Text = status + " (" + percent.ToString() + "%)";
+                if (!string.IsNullOrEmpty(speed))
+                {
+                    lblSpeedBadge.Text = "Speed: " + speed;
+                }
             }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
 
         private void ResetProgress()
@@ -2211,7 +2274,17 @@ namespace PMKUnlocker
 
             if (rawLine.Contains("Device detected :)"))
             {
-                Log("[OK] Waiting for device... Connected", Color.LightGreen);
+                // edl.py (QC) နဲ့ mtkclient က "Device detected :)" တူတယ် — task context ပေါ်
+                // မူတည်ပြီး စာသားခွဲပြ (QC log မှာ "Waiting for device" ဆိုတာ ရှုပ်တယ်)
+                if (currentTaskTitle.Contains("Qualcomm", StringComparison.OrdinalIgnoreCase) ||
+                    currentTaskTitle.Contains("(QC)", StringComparison.Ordinal))
+                {
+                    Log("[+] Firehose: device connected.", Color.LightGreen);
+                }
+                else
+                {
+                    Log("[OK] Waiting for device... Connected", Color.LightGreen);
+                }
                 SetProgress(20, "Connected");
             }
             else if (rawLine.Contains("Waiting for PreLoader VCOM") && !rawLine.Contains("...."))
@@ -2320,25 +2393,28 @@ namespace PMKUnlocker
             if (string.IsNullOrWhiteSpace(partName)) return;
 
             string humanSize = FormatBytes(lengthHex);
-            loadedPartitions.Add(new PartitionMeta { Name = partName, HumanSize = humanSize, Offset = offset, LengthHex = lengthHex });
-
+            // list mutation ကို UI thread ပဲ လုပ် — output thread က Add လုပ်နေစဉ် UI က
+            // enumerate လုပ်ရင် "Collection was modified" crash ဖြစ်နိုင်လို့ invoke ထဲမှာပဲ ထည့်
             if (dgvPartitions.InvokeRequired)
             {
                 dgvPartitions.Invoke(new Action(() =>
                 {
+                    loadedPartitions.Add(new PartitionMeta { Name = partName, HumanSize = humanSize, Offset = offset, LengthHex = lengthHex });
                     dgvPartitions.Rows.Add(false, partName, humanSize, offset, "", "");
                     ApplyPartitionFilter();
                 }));
             }
             else
             {
+                loadedPartitions.Add(new PartitionMeta { Name = partName, HumanSize = humanSize, Offset = offset, LengthHex = lengthHex });
                 dgvPartitions.Rows.Add(false, partName, humanSize, offset, "", "");
                 ApplyPartitionFilter();
             }
         }
 
         private async Task<bool> ExecuteCommandCleanAsync(string fileName, string arguments, string taskTitle,
-            bool clearPartitions = false, bool showRawOutput = false, bool quiet = false)
+            bool clearPartitions = false, bool showRawOutput = false, bool quiet = false,
+            Func<List<string>, bool> tolerateRaw = null, int timeoutSec = 0, bool timeoutMeansSuccess = false)
         {
             if (!IsDryRun)
             {
@@ -2347,13 +2423,14 @@ namespace PMKUnlocker
             }
             if (IsDryRun) Log("[DRY-RUN] Not executed: " + taskTitle + " | " + fileName + " " + arguments, Color.Cyan);
             bool ok = await ReviewSafety.ExecuteUnlessDryRunAsync(IsDryRun,
-                () => ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet));
+                () => ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess));
             if (flashWorkflowContext.Value && !ok) workflowFailed = true;
             return ok;
         }
 
         private async Task<bool> ExecuteCommandCoreAsync(string fileName, string arguments, string taskTitle,
-            bool clearPartitions, bool showRawOutput, bool quiet)
+            bool clearPartitions, bool showRawOutput, bool quiet, Func<List<string>, bool> tolerateRaw = null,
+            int timeoutSec = 0, bool timeoutMeansSuccess = false)
         {
             if (isTaskRunning || (flashWorkflowRunning && !flashWorkflowContext.Value))
             {
@@ -2364,7 +2441,19 @@ namespace PMKUnlocker
             if (flashWorkflowContext.Value && stopRequested) return false;
             isTaskRunning = true;
             if (!flashWorkflowContext.Value) stopRequested = false;
+            currentTaskTitle = taskTitle;
+            // row တွေ snapshot ယူပြီး clear — command က row အသစ် မပြန်ရင် ပြန်ထိုးပေးတယ်
+            // (flash/preflight fail ဖြစ်ရင် ယခင် partition list ပျောက်မသွားစေရ)
+            List<PartitionMeta> partitionSnapshot = clearPartitions ? new List<PartitionMeta>(loadedPartitions) : null;
             if (clearPartitions) ClearPartitionData();
+
+            void RestorePartitionRows()
+            {
+                if (partitionSnapshot == null || partitionSnapshot.Count == 0 || loadedPartitions.Count > 0) return;
+                foreach (PartitionMeta pm in partitionSnapshot) AddPartitionRow(pm.Name, pm.Offset, pm.LengthHex);
+                partitionSnapshot = null;
+                Log("[i] GPT/size ကနေ row မရလို့ ယခင် partition list ကို ပြန်ပြတယ်.", Color.Gray);
+            }
             if (flashWorkflowContext.Value) workflowDidOp = true;
 
             if (!quiet)
@@ -2377,6 +2466,7 @@ namespace PMKUnlocker
             SetProgress(10, "Initializing");
 
             int exitCode = -1;
+            bool timedOut = false;
             string failure = null;
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -2468,7 +2558,21 @@ namespace PMKUnlocker
                             if (stopRequested) { try { process.Kill(true); } catch (InvalidOperationException) { } }
                             process.BeginOutputReadLine();
                             process.BeginErrorReadLine();
-                            process.WaitForExit();
+                            // timeoutSec > 0 ဆို child process ကို စောင့်ပြီး ကြာလွန်းရင် kill —
+                            // (edl.py/mtkclient က device reboot ပြီးမှ hang နေတတ်တယ် → UI အမြဲတမ်း lock)
+                            if (timeoutSec > 0)
+                            {
+                                if (!process.WaitForExit(timeoutSec * 1000))
+                                {
+                                    timedOut = true;
+                                    try { process.Kill(entireProcessTree: true); } catch { }
+                                    try { process.WaitForExit(5000); } catch { }
+                                }
+                            }
+                            else
+                            {
+                                process.WaitForExit();
+                            }
                             exitCode = process.ExitCode;
                         }
                     }
@@ -2532,23 +2636,38 @@ namespace PMKUnlocker
 
             if (failure != null)
             {
+                RestorePartitionRows();
                 SetProgress(0, "Failed", "0 MB/s");
                 Log("[✘] " + taskTitle + " could not be started: " + failure, Color.Red);
                 Log("[*] Check that " + fileName + " is installed and reachable.", Color.Orange);
                 if (rawSnapshot.Count > 0) DumpRawOutput("[*] Raw command output (last 30 lines):");
                 if (!quiet) Log("========================================================", Color.FromArgb(0, 180, 255));
+                LogHistory(taskTitle + " (could not start)", false, Math.Round(sw.Elapsed.TotalSeconds));
                 return false;
             }
 
             if (stopRequested)
             {
+                RestorePartitionRows();
                 Log("[!] " + taskTitle + " was stopped before it finished.", Color.OrangeRed);
                 if (!quiet) Log("========================================================", Color.FromArgb(0, 180, 255));
+                LogHistory(taskTitle + " (stopped)", false, Math.Round(sw.Elapsed.TotalSeconds));
                 return false;
+            }
+
+            // timeout ဖြစ်ပေမဲ့ caller က "device drop = done" သတ်မှတ်ထားတဲ့ command (auto reboot) → success
+            if (timedOut && timeoutMeansSuccess)
+            {
+                RestorePartitionRows();
+                SetProgress(100, "Completed", "Done");
+                Log("[i] " + taskTitle + " — " + timeoutSec + "s timeout; process killed (device rebooted/dropped, treated as OK).", Color.Gray);
+                LogHistory(taskTitle + " (timeout)", true, Math.Round(sw.Elapsed.TotalSeconds));
+                return true;
             }
 
             if (exitCode == 0)
             {
+                RestorePartitionRows();
                 SetProgress(100, "Completed", "Done");
                 if (!quiet)
                 {
@@ -2560,6 +2679,37 @@ namespace PMKUnlocker
                 return true;
             }
 
+            // fail ဖြစ်ပေမဲ့ caller က tolerate လုပ်ထားတဲ့ error pattern (ဥပမာ partition မရှိ) → skip အဖြစ် သတ်မှတ်
+            if (exitCode != 0 && tolerateRaw != null && tolerateRaw(rawSnapshot))
+            {
+                RestorePartitionRows();
+                SetProgress(100, "Skipped", "Done");
+                Log("[i] " + taskTitle + " — expected condition (partition not present), skipped (OK).", Color.Gray);
+                if (!quiet)
+                {
+                    Log("Elapsed time : " + Math.Round(sw.Elapsed.TotalSeconds) + " seconds", Color.Gray);
+                    Log("========================================================", Color.FromArgb(0, 180, 255));
+                }
+                LogHistory(taskTitle + " (skipped)", true, Math.Round(sw.Elapsed.TotalSeconds));
+                return true;
+            }
+
+            if (timedOut)
+            {
+                RestorePartitionRows();
+                SetProgress(0, "Failed", "0 MB/s");
+                Log("[FAIL] " + taskTitle + " — timed out after " + timeoutSec + "s (process killed).", Color.OrangeRed);
+                DumpRawOutput("[*] Raw command output (last 30 lines):");
+                if (!quiet)
+                {
+                    Log("Elapsed time : " + Math.Round(sw.Elapsed.TotalSeconds) + " seconds", Color.Gray);
+                    Log("========================================================", Color.FromArgb(0, 180, 255));
+                }
+                LogHistory(taskTitle, false, Math.Round(sw.Elapsed.TotalSeconds));
+                return false;
+            }
+
+            RestorePartitionRows();
             SetProgress(0, "Failed", "0 MB/s");
             Log("[FAIL] " + taskTitle + " (exit code " + exitCode + ")" + ExitCodeNote(exitCode), Color.OrangeRed);
             DumpRawOutput("[*] Raw command output (last 30 lines):");
@@ -2824,9 +2974,21 @@ namespace PMKUnlocker
                                 CreateNoWindow = true
                             };
                             using var p = Process.Start(psi);
-                            string stdout = await p.StandardOutput.ReadToEndAsync();
-                            string stderr = await p.StandardError.ReadToEndAsync();
-                            await p.WaitForExitAsync();
+                            // ReadToEnd/WaitForExit က unbounded — pnputil hang ရင် button အမြဲ disabled ဖြစ်မသွားအောင်300s cap
+                            var pnOutTask = p.StandardOutput.ReadToEndAsync();
+                            var pnErrTask = p.StandardError.ReadToEndAsync();
+                            using (var pnCts = new CancellationTokenSource(TimeSpan.FromSeconds(300)))
+                            {
+                                try { await p.WaitForExitAsync(pnCts.Token); }
+                                catch (OperationCanceledException)
+                                {
+                                    try { p.Kill(entireProcessTree: true); } catch { }
+                                    Append("[!] pnputil — 300s timeout, process killed.");
+                                    return;
+                                }
+                            }
+                            string stdout = await pnOutTask;
+                            string stderr = await pnErrTask;
                             foreach (string ln in (stdout + "\n" + stderr).Split('\n'))
                             {
                                 string t = ln.Trim();
@@ -2915,6 +3077,48 @@ namespace PMKUnlocker
         {
             if (c == null || !themePaintWired.Add(c)) return;
             c.Paint += PaintThemePanel;
+        }
+
+        // Tab switch မှာ အဖြူပေါ်တတ်တာ (single-buffer erase flicker) ကာ —
+        // WinForms TabControl/TabPage/TableLayoutPanel/SplitContainer က double-buffer မဟုတ်
+        private static void SetDoubleBuffered(Control c)
+        {
+            if (c == null) return;
+            try
+            {
+                typeof(Control).InvokeMember("DoubleBuffered",
+                    System.Reflection.BindingFlags.SetProperty |
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic,
+                    null, c, new object[] { true });
+            }
+            catch { }
+        }
+
+        private void ApplyDoubleBuffering()
+        {
+            if (tabControl == null) return;
+            SetDoubleBuffered(tabControl);
+            foreach (TabPage tp in tabControl.TabPages) SetDoubleBuffered(tp);
+            SetDoubleBuffered(rootLayout);
+            SetDoubleBuffered(topLayout);
+            SetDoubleBuffered(logLayout);
+            SetDoubleBuffered(panelLogArea);
+            if (splitMain != null)
+            {
+                SetDoubleBuffered(splitMain);
+                SetDoubleBuffered(splitMain.Panel1);
+                SetDoubleBuffered(splitMain.Panel2);
+            }
+            SetDoubleBuffered(panelTopHeader);
+            SetDoubleBuffered(platformBar);
+            SetDoubleBuffered(panelLogButtons);
+            SetDoubleBuffered(panelProgress);
+            SetDoubleBuffered(panelPartition);
+            SetDoubleBuffered(panelPartitionHeader);
+            SetDoubleBuffered(panelPartBtns);
+            foreach (var kv in _pickerHost) SetDoubleBuffered(kv.Value);
+            foreach (var kv in fileRowRefresh) SetDoubleBuffered(kv.Key);
         }
 
         private void PaintThemePanel(object s, PaintEventArgs e)
@@ -3107,6 +3311,17 @@ namespace PMKUnlocker
                 }
             }
 
+            // file picker rows (QC Loader / MTK DA·Auth·Preloader / SPD Loader) — theme အလိုက် bg + state
+            foreach (var kv in fileRowRefresh)
+            {
+                Panel rp = kv.Key;
+                if (rp.IsDisposed) continue;
+                rp.BackColor = RowFieldBg;
+                if (rp.Controls.Count > 0 && rp.Controls[0] is Label rlb) { rlb.BackColor = RowLabelBg; rlb.ForeColor = RowLabelText; }
+                if (rp.Controls.Count > 1 && rp.Controls[1] is Label rfld) rfld.BackColor = RowFieldBg;
+                try { kv.Value(); } catch { }
+            }
+
             if (dgvPartitions != null)
             {
                 dgvPartitions.BackgroundColor = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(20, 22, 26);
@@ -3135,6 +3350,7 @@ namespace PMKUnlocker
             }
 
             // force repaint of 3D / group panels
+            ApplyDoubleBuffering();   // theme ပြောင်းပြီး flicker မကျန်အောင်
             foreach (Control c in themePaintWired)
                 c.Invalidate();
             this.Invalidate(true);
@@ -3399,7 +3615,7 @@ namespace PMKUnlocker
         // ADB root partition r/w/e — /dev/block/by-name/<name> ကို su + dd နဲ့
         private async Task<bool> RunAdbRootPartitionOpAsync(string op, string partition, string filePath, string title)
         {
-            string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
                 Log("[!] " + title + ": root (su) မရပါ — Xiaomi Temp Root / Magisk / KernelSU စမ်းပါ", Color.OrangeRed);
@@ -3638,7 +3854,7 @@ namespace PMKUnlocker
                 MessageBox.Show("ADB device not found.", "Mount RW", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
                 MessageBox.Show("Root (su) မရပါ။\n\n• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ",
@@ -4320,9 +4536,31 @@ namespace PMKUnlocker
 
             Log(" Loading Partition Table... Ok", Color.White);
 
+            // ၃။။ fh_loader.exe က 2GB ကျော် image ကို "Read 0 bytes" error နဲ့ မရေးနိုင်လို့ —
+            // system.img စလိုက် (>2GB) တွေကို chunk ခွဲပြီး program entry အများကြီးထုတ်မယ်။
+            string flashXmlFile = finalXmlFile;
+            try
+            {
+                string splitXmlPath = Path.Combine(qcFirmwareFolder,
+                    Path.GetFileNameWithoutExtension(finalXmlFile) + ReviewSafety.SplitXmlSuffix);
+                int added = ReviewSafety.SplitOversizedImages(finalXmlFile, qcFirmwareFolder, splitXmlPath,
+                    msg => Log(msg, Color.Orange));
+                if (added > 0)
+                {
+                    flashXmlFile = splitXmlPath;
+                    Log($" Large image split applied ({added} program entries)... Ok", Color.LightGreen);
+                }
+            }
+            catch (Exception ex)
+            {
+                workflowFailed = true;
+                Log("[FAIL] Large image split failed; flash cancelled: " + ex.Message, Color.Red);
+                return;
+            }
+
             // ၄။ Main Flash Execution
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            string sendXmlParam = Path.GetFileName(finalXmlFile) + (!string.IsNullOrEmpty(patchFile) ? $",{patchFile}" : "");
+            string sendXmlParam = Path.GetFileName(flashXmlFile) + (!string.IsNullOrEmpty(patchFile) ? $",{patchFile}" : "");
 
             // Flash ပြီးမှ FRP Reset/Reboot လုပ်မည်ဖြစ်၍ reset flag ကို နောက်ဆုံးမှ သီးသန့်ပို့ပါမည်
             string fhArgs = $"--port=\\\\.\\{port} --sendxml=\"{sendXmlParam}\" --search_path=\"{qcFirmwareFolder}\" --noprompt --showpercentagecomplete --zlpawarehost=1 --memoryname={memoryType}";
@@ -4744,6 +4982,10 @@ namespace PMKUnlocker
 
         private string FindSpdDump()
         {
+            var tools = ShopServices.LoadTools();
+            if (tools.TryGetValue("spd_dump.exe", out string configured) && File.Exists(configured)) return configured;
+            string sprd = Path.Combine(Application.StartupPath, "spd", "sprd", "spd_dump.exe");
+            if (File.Exists(sprd)) return sprd;
             string s = FindFileInToolFolders("spd_dump.exe");
             return string.IsNullOrEmpty(s) ? "spd_dump" : s;
         }
@@ -4794,14 +5036,22 @@ namespace PMKUnlocker
         {
             string fdl1 = "", fdl2 = "";
 
-            // ၁။ PAC ဖြည်ထားတာ ရှိရင် အရင်သုံးပါ
+            // ၀။ SPD Loader row (user pick) — filename ထဲ fdl2 ပါရင် fdl2 အဖြစ်၊ မဟုတ်ရင် fdl1 override
+            if (!string.IsNullOrEmpty(spdLoaderPath) && File.Exists(spdLoaderPath))
+            {
+                string ln = Path.GetFileName(spdLoaderPath).ToLowerInvariant();
+                if (ln.Contains("fdl2")) fdl2 = spdLoaderPath;
+                else fdl1 = spdLoaderPath;
+            }
+
+            // ၁။ PAC ဖြည်ထားတာ ရှိရင် အရင်သုံးပါ (user pick ရှိရင် အဲဒါပဲ ကျန်)
             if (Directory.Exists(spdExtractDir))
             {
                 foreach (string f in Directory.GetFiles(spdExtractDir))
                 {
                     string n = Path.GetFileName(f).ToLowerInvariant();
-                    if (n.Contains("fdl1")) fdl1 = f;
-                    else if (n.Contains("fdl2")) fdl2 = f;
+                    if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = f;
+                    else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = f;
                 }
             }
 
@@ -4811,14 +5061,61 @@ namespace PMKUnlocker
                 string loadersRoot = Path.Combine(Application.StartupPath, "spd", "loaders");
                 if (Directory.Exists(loadersRoot))
                 {
-                    // loaders အောက်ရှိ folder များနှင့် subfolder များထဲမှ fdl1 နှင့် fdl2 ကို Auto ရှာပါ
-                    foreach (string file in Directory.GetFiles(loadersRoot, "*.bin", SearchOption.AllDirectories))
-                    {
-                        string n = Path.GetFileName(file).ToLowerInvariant();
-                        if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
-                        else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
+                    // ရွေးထားတဲ့ chipset ကို loader folder နဲ့ တိုက်စစ်ပါ (SpdModelMatchesLoader နဲ့ တူညီစွာ)
+                    string selModel = _spdSelectedModel.Trim();
+                    string matchedDir = "";
 
-                        if (!string.IsNullOrEmpty(fdl1) && !string.IsNullOrEmpty(fdl2)) break;
+                    if (!string.IsNullOrEmpty(selModel))
+                    {
+                        foreach (string dir in Directory.GetDirectories(loadersRoot))
+                        {
+                            string dn = Path.GetFileName(dir).ToLowerInvariant();
+                            int u = dn.IndexOf('_');
+                            string chip = new string((u > 0 ? dn.Substring(0, u) : dn)
+                                .Where(c => char.IsLetterOrDigit(c)).ToArray());
+                            if (chip.Length > 0 && SpdModelMatchesLoader(selModel, new List<string> { chip }))
+                            {
+                                matchedDir = dir;
+                                break;
+                            }
+                        }
+                    }
+
+                    // တိုက်မတွေ့ရင် ပထမဆုံး folder ကို သုံး
+                    if (string.IsNullOrEmpty(matchedDir))
+                    {
+                        var dirs = Directory.GetDirectories(loadersRoot);
+                        if (dirs.Length > 0)
+                        {
+                            matchedDir = dirs[0];
+                            if (!string.IsNullOrEmpty(selModel))
+                                Log("[!] FDL loader မရှိတဲ့ chipset: " + selModel +
+                                    " — အရန်အဖြင့် " + Path.GetFileName(matchedDir) + " သုံးမှာ မှားနိုင်", Color.Orange);
+                        }
+                    }
+
+                    // matched folder ထဲက fdl1/fdl2 ကို ရှာ — "-sign" ကို ဦးစွာယူ (secure boot device များအတွက်)
+                    if (!string.IsNullOrEmpty(matchedDir))
+                    {
+                        foreach (string file in Directory.GetFiles(matchedDir, "*.bin")
+                            .OrderByDescending(f => f.ToLowerInvariant().Contains("-sign")))
+                        {
+                            string n = Path.GetFileName(file).ToLowerInvariant();
+                            if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
+                            else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
+                        }
+                    }
+
+                    // ၄။ မတွေ့ရင် အကုန်ရှာ (fallback)
+                    if (string.IsNullOrEmpty(fdl1) || string.IsNullOrEmpty(fdl2))
+                    {
+                        foreach (string file in Directory.GetFiles(loadersRoot, "*.bin", SearchOption.AllDirectories))
+                        {
+                            string n = Path.GetFileName(file).ToLowerInvariant();
+                            if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
+                            else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
+                            if (!string.IsNullOrEmpty(fdl1) && !string.IsNullOrEmpty(fdl2)) break;
+                        }
                     }
                 }
             }
@@ -5076,6 +5373,73 @@ namespace PMKUnlocker
 
             bool ok = await ExecuteCommandCleanAsync(spd, args, "SPD - Erase [" + part.Trim() + "]", false, true);
             if (ok) Log("[OK] Erased [" + part.Trim() + "] Successfully!", Color.LightGreen);
+        }
+
+        // ================= UNLOCK (Diag) — spd_dump diag channel ကနေ FDL erase =================
+        // Industry "Diag mode" (EFT/ResearchDownload) နဲ့ တူညီတဲ့ flow: FDL1/FDL2 load → exec →
+        // partition erase → reset။ spd_dump က SPRD diag driver (Channel9) ကိုသုံးပြီး port ကို
+        // auto ရှာတယ် (serial select မလို)။ skip_confirm=1 default မို့ batch erase မှာ prompt မတက်ဘူး၊
+        // မရှိတဲ့ partition ဆိုရင် "part not exist" ပြပြီး နောက် command ကို continue လုပ်တယ်။
+        //   • FRP   = persist (Hovatek ResearchDownload erase-persist နည်း) + frp fallback
+        //   • Userlock = userdata + cache format (data wipe — Yes/No dialog နဲ့ အရင်မေး)
+
+        private async void BtnSpdDiagFrp_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(spdFirmwareFile) && File.Exists(spdFirmwareFile))
+                await EnsurePacExtractedAsync();
+
+            string spd = FindSpdDump();
+
+            if (MessageBox.Show(
+                "FRP Reset (Diag mode)?\n\n" +
+                "persist / frp partition ကို erase ပြီး phone ကို reboot လုပ်မည်။\n\n" +
+                "Device: Power off → Vol- (သို့) Vol+ နှိပ်ထားပြီး USB ချိတ်ပါ။",
+                "FRP Reset (Diag)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+            Log("   SPD - FRP RESET (DIAG MODE)", Color.White);
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+            Log("[*] Waiting for device... (Power off, hold Vol- or Vol+ and connect USB)", Color.Orange);
+            Log("[*] Erasing persist / frp...", Color.OrangeRed);
+
+            string args = BuildSpdFdlPrefix() + " e persist e frp reset";
+            bool ok = await ExecuteCommandCleanAsync(spd, args, "SPD - FRP Reset (Diag)", false, true);
+            if (ok)
+            {
+                Log("[OK] FRP Reset job finished!", Color.LightGreen);
+                Log("[i] Phone reboot ပြီးရင် setup wizard မှာ FRP ပျက်/မပျက် စစ်ပါ (log ထဲ 'part not exist' ပါရင် အဲ့ partition မရှိတာ)", Color.Gray);
+            }
+        }
+
+        private async void BtnSpdDiagUserlock_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(spdFirmwareFile) && File.Exists(spdFirmwareFile))
+                await EnsurePacExtractedAsync();
+
+            string spd = FindSpdDump();
+
+            if (MessageBox.Show(
+                "Userlock + FRP Reset (Diag mode)?\n\n" +
+                "⚠ userdata (data) + cache + persist/frp ကို erase မည် —\n" +
+                "ဖုန်းထဲက Data နဲ့ Lock အကုန် ပျက်သွားမယ်!\n\n" +
+                "Device: Power off → Vol- (သို့) Vol+ နှိပ်ထားပြီး USB ချိတ်ပါ။",
+                "Userlock + FRP Reset (Diag)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+            Log("   SPD - USERLOCK + FRP RESET (DIAG MODE)", Color.White);
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+            Log("[*] Waiting for device... (Power off, hold Vol- or Vol+ and connect USB)", Color.Orange);
+            Log("[*] Erasing userdata / cache / persist / frp...", Color.OrangeRed);
+
+            string args = BuildSpdFdlPrefix() + " e userdata e cache e persist e frp reset";
+            bool ok = await ExecuteCommandCleanAsync(spd, args, "SPD - Userlock + FRP Reset (Diag)", false, true);
+            if (ok)
+            {
+                Log("[OK] Userlock + FRP Reset job finished!", Color.LightGreen);
+                Log("[i] First boot 1-3 မိနစ်ကြာနိုင်တယ် — setup wizard မှာ lock/migration ပျက်သွားတာ စစ်ပါ", Color.Gray);
+            }
         }
 
         // ================= MTK OP + AUTO REBOOT =================
@@ -5679,7 +6043,12 @@ namespace PMKUnlocker
         private string GetMtkTransportParam()
         {
             string auto = DetectMtkComPort();
-            return string.IsNullOrEmpty(auto) ? "" : " --serialport " + auto;
+            string s = string.IsNullOrEmpty(auto) ? "" : " --serialport " + auto;
+            // MTK picker ရွေးထားတဲ့ DA / Auth / Preloader — mtkclient global options (subcommand မတိုင်ခင် ထည့်ရ)
+            if (File.Exists(mtkDaPath)) s += " --loader \"" + mtkDaPath + "\"";
+            if (File.Exists(mtkAuthPath)) s += " --auth \"" + mtkAuthPath + "\"";
+            if (File.Exists(mtkPreloaderPath)) s += " --preloader \"" + mtkPreloaderPath + "\"";
+            return s;
         }
 
         // MediaTek device (VID_0E8D) ရဲ့ COM port — background refresh လုပ်ထားတဲ့ cache ကနေ
@@ -5860,24 +6229,79 @@ namespace PMKUnlocker
                     b.ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             };
 
+            // MST-style log: op button နှိပ်တိုင်း ယခင် log ရှင်း — caller ရဲ့ Click handler မတိုင်ခင်
+            // ရှင်းအောင် ဒီမှာ အရင် subscribe လုပ်ထားတယ် (handler အစဉ်လိုက် run ဖြစ်လို့)
+            // log utility (Export/STOP/Clear/theme) + file/folder picker တွေက မရှင်း
+            // (export က ရှိရင်ဖတ်ရ/ picker cancel လုပ်ရင် log မဆုံးရ)
+            string capLog = text ?? "";
+            btn.Click += (s, e) =>
+            {
+                if (suppressNextLogClear) { suppressNextLogClear = false; return; }
+                string ct = capLog;
+                if (ct.IndexOf("STOP", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Clear Log", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Export Log", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Light", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Close", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Browse", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Folder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Scatter", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("PAC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Open", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ct.IndexOf("Device Model", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return;
+                ClearLogForNewOp();
+            };
+
             return btn;
+        }
+
+        // MST-style log: op button တစ်ခု နှိပ်တိုင်း ယခင် log ရှင်းပြီး ဒီ op ရဲ့ log ပဲ ပြ
+        // (chip က target button ကို PerformClick ခေါ်ရင် ထပ်မရှင်းအောင် flag နဲ့ တား)
+        private bool suppressNextLogClear;
+
+        private void ClearLogForNewOp()
+        {
+            if (rtbLog == null || rtbLog.IsDisposed || !rtbLog.IsHandleCreated) return;
+            if (rtbLog.InvokeRequired)
+            {
+                try { rtbLog.Invoke((Action)ClearLogForNewOp); } catch { }
+                return;
+            }
+            rtbLog.Clear();
+        }
+
+        // null/handle-မရှိ control ကို tooltip ပေးရင် crash မဖြစ်အောင် (9/23 startup crash ×4)
+        private void Tip(Control control, string text)
+        {
+            if (control == null || control.IsDisposed || toolTipMain == null) return;
+            try { toolTipMain.SetToolTip(control, text); } catch { }
         }
 
         private void Log(string message, Color? color = null)
         {
-            if (rtbLog.InvokeRequired)
+            // form/log box ပိတ်ပြီးသား သို့ handle မတည်ရသေးရင် thread-pool
+            // output က crash မဖြစ်အောင် ကာတယ် (9/30 ObjectDisposedException ×2)
+            if (rtbLog == null || rtbLog.IsDisposed || !rtbLog.IsHandleCreated) return;
+            try
             {
-                rtbLog.Invoke(new Action(() => Log(message, color)));
-                return;
+                if (rtbLog.InvokeRequired)
+                {
+                    rtbLog.Invoke(new Action(() => Log(message, color)));
+                    return;
+                }
+
+                rtbLog.SelectionStart = rtbLog.TextLength;
+                rtbLog.SelectionLength = 0;
+                rtbLog.SelectionColor = color ?? Color.FromArgb(0, 255, 128);
+
+                rtbLog.AppendText(message + "\r\n");
+                rtbLog.SelectionColor = rtbLog.ForeColor;
+                rtbLog.ScrollToCaret();
             }
-
-            rtbLog.SelectionStart = rtbLog.TextLength;
-            rtbLog.SelectionLength = 0;
-            rtbLog.SelectionColor = color ?? Color.FromArgb(0, 255, 128);
-
-            rtbLog.AppendText(message + "\r\n");
-            rtbLog.SelectionColor = rtbLog.ForeColor;
-            rtbLog.ScrollToCaret();
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         }
 
         private string FormatBytes(string hexLength)
@@ -5962,8 +6386,21 @@ namespace PMKUnlocker
                     using (Process p = Process.Start(psi))
                     {
                         if (p == null) return;
-                        outText = p.StandardOutput.ReadToEnd();
-                        p.WaitForExit(8000);
+                        // အရင် ReadToEnd (unbounded) က pipe ပိတ်သွားရင် အမြဲတမ်း block →
+                        // mtkDetectBusy lock အမြဲကျန် → session အတွင်း MTK detect သေ + orphan powershell။
+                        // read ကို async drain လုပ်ပြီး exit ကို 8s နဲ့ bound ထားတယ်။
+                        Task<string> readTask = p.StandardOutput.ReadToEndAsync();
+                        bool exited = p.WaitForExit(8000);
+                        if (!exited)
+                        {
+                            try { p.Kill(entireProcessTree: true); } catch { }
+                            try { readTask.Wait(1000); } catch { }
+                            outText = "";
+                        }
+                        else
+                        {
+                            outText = readTask.Result;
+                        }
                     }
 
                     // PID တစ်ခုချင်းစီအလိုက် driver service တွေကို စုတယ် (composite device ဆိုရင်
@@ -6217,6 +6654,104 @@ namespace PMKUnlocker
             if (page == null || !_pickerHost.TryGetValue(page, out host) || host == null || host.Top == offset) return;
             host.Height += host.Top - offset;
             host.Top = offset;
+            // content ရွှေ့လိုက်လို့ partition box ရဲ့ အပေါ်ဆုံး နေရာ ပြောင်း → row အမြင့် ပြန်ချိန်
+            SyncPartitionPanel(false);
+        }
+
+        // ===== Partition box layout — tab အလိုက် content အမြင့် တိုင်းပြီး =====
+        // content အောက်မှာ ကပ်၊ ကျန်တဲ့ နေရာအကုန် partition grid က ယူ
+        // (fixed 250F မဟုတ် — ချဲ့/ကျုံးလို့ရအောင် row2 ကို Percent လုပ်)
+        private void SyncPartitionPanel(bool fixSplitter)
+        {
+            if (topLayout == null || tabControl == null || panelPartition == null) return;
+
+            TabPage page = tabControl.SelectedTab;
+            // tabHisi မှာ partition grid မသုံးလို့ မပြ — ကျန်တဲ့ tab အားလုံး ပြ
+            bool show = (page == tabMtk || page == tabQc || page == tabSamsung ||
+                         page == tabSpd || page == tabAdb);
+            panelPartition.Visible = show;
+
+            if (show)
+            {
+                int needed = TabNeededHeight(page);
+                int total = topLayout.ClientSize.Height;
+                if (total > 200)
+                {
+                    // platform bar (44) + partition အနည်းဆုံး (120) ချန်ပြီး tab row ကို ကန့်သတ် —
+                    // window သေးရင် partition ပျောက်မသွားအောင် (content ပဲ အောက်က ဖြတ်ခံရ)
+                    int maxRow = total - 44 - 120;
+                    if (needed > maxRow) needed = Math.Max(160, maxRow);
+                }
+                // row style ပြောင်းတာက layout churn ဖြစ်ပြီး tab switch white flash ရှုပ် —
+                // suspend ထားပြီး resume တစ်ခါတည်းနဲ့ တစ်ခါတည်း relayout
+                topLayout.SuspendLayout();
+                try
+                {
+                    if (topLayout.RowStyles[1].SizeType != SizeType.Absolute || topLayout.RowStyles[1].Height != needed)
+                        topLayout.RowStyles[1] = new RowStyle(SizeType.Absolute, needed);
+                    if (topLayout.RowStyles[2].SizeType != SizeType.Percent)
+                        topLayout.RowStyles[2] = new RowStyle(SizeType.Percent, 100F);
+                }
+                finally { topLayout.ResumeLayout(true); }
+            }
+            else
+            {
+                if (topLayout.RowStyles[1].SizeType != SizeType.Percent)
+                    topLayout.RowStyles[1] = new RowStyle(SizeType.Percent, 100F);
+                if (topLayout.RowStyles[2].SizeType != SizeType.Absolute || topLayout.RowStyles[2].Height != 0F)
+                    topLayout.RowStyles[2] = new RowStyle(SizeType.Absolute, 0F);
+            }
+
+            // user က splitter ကို လက်နဲ့ ဆွဲထားရင် သူ့ဆက်တင် အတိုင်း ထား
+            // (tab switch တိုင်း 30% ပြန်ချိန် — resize မှာ မချိန်ဘူး, user proportion မပျက်အောင်)
+            // ပြောင်းစရာမလိုရင် မထိ — SplitContainer resize က white flash အဓိက အကြောင်းရင်း
+            if (fixSplitter && !userAdjustedSplit && splitMain != null)
+            {
+                try
+                {
+                    int want = (int)(splitMain.Width * 0.30);
+                    if (Math.Abs(splitMain.SplitterDistance - want) > 2)
+                        splitMain.SplitterDistance = want;
+                }
+                catch { }
+            }
+        }
+
+        // tab content ရဲ့ အောက်ဆုံး အမြင့် (TabPage coords) + tab header — row1 အတွက် လိုအပ်တဲ့ အမြင့်
+        private int TabNeededHeight(TabPage page)
+        {
+            if (page == null) return 300;
+
+            int bottom = 0;
+            Panel host = null;
+            _pickerHost.TryGetValue(page, out host);
+
+            // picker row (Brand/Model/Detect labels) — host မဟုတ်တဲ့ direct children
+            foreach (Control c in page.Controls)
+            {
+                if (!c.Visible || c == host) continue;
+                if (c.Bottom > bottom) bottom = c.Bottom;
+            }
+
+            // content host ထဲက အစစ်အမှန် content (groups + flash block) — host.Top ပါ ပေါင်း
+            if (host != null && host.Visible)
+            {
+                int inner = 0;
+                foreach (Control c in host.Controls)
+                    if (c.Visible && c.Bottom > inner) inner = c.Bottom;
+                int inPage = host.Top + inner;
+                if (inPage > bottom) bottom = inPage;
+            }
+
+            // tab header အမြင့် — runtime တိုင်း (DPI/custom draw ကြောင့် constant မယူ)
+            int pageTop = 30;
+            try
+            {
+                int y = tabControl.DisplayRectangle.Y;
+                if (y > 1) pageTop = y;
+            }
+            catch { }
+            return pageTop + bottom + 8;   // +8 = partition header နဲ့ content ကြား gap
         }
 
         // control က root (TabPage) ထဲမှာ ပါ/မပါ
@@ -6270,7 +6805,7 @@ namespace PMKUnlocker
             // 44 no-impl op တွေအတွက် ထပ် map — demo/sim/imei/rpmb/account တွေက server/hardware ကိုယ်ရေး လိုလို့ ကျန်
             new[] { "adb enable", "Enable ADB" },
             new[] { "make root", "Xiaomi Temp Root" },
-            new[] { "auth bypass", "Firehose Loader" },
+            // "auth bypass" → Firehose Loader button: SETUP group ဖယ်ပြီးနောက် button မရှိတော့ဘူး — rule ကိုပါ ဖယ်
             new[] { "network security", "NV Erase", "NV Restore" },
         };
 
@@ -6542,8 +7077,70 @@ namespace PMKUnlocker
             return false;
         }
 
+        // ===== SPD loader matching =====
+        // spd/loaders/<chip>_<brand_model>/*.bin folder တွေကနေ chip prefix တွေ ထုတ်ပါ
+        // (sc9832e_itel_a662l → "sc9832e", ums512_Realme_C21y → "ums512")
+        private List<string> SpdLoaderChips()
+        {
+            List<string> chips = new List<string>();
+            try
+            {
+                string root = Path.Combine(Application.StartupPath, "spd", "loaders");
+                if (!Directory.Exists(root)) return chips;
+                foreach (string dir in Directory.GetDirectories(root))
+                {
+                    string name = Path.GetFileName(dir).ToLowerInvariant();
+                    int u = name.IndexOf('_');
+                    string chip = u > 0 ? name.Substring(0, u) : name;
+                    chip = new string(chip.Where(c => char.IsLetterOrDigit(c)).ToArray());
+                    if (chip.Length > 0 && !chips.Contains(chip)) chips.Add(chip);
+                }
+            }
+            catch { }
+            return chips;
+        }
+
+        // model အမည်ထဲက chipset keyword ကို loader chip prefix နဲ့ တိုက်စစ်
+        private bool SpdModelMatchesLoader(string model, List<string> chips)
+        {
+            if (string.IsNullOrWhiteSpace(model)) return false;
+            string m = new string(model.ToLowerInvariant().Where(c => char.IsLetterOrDigit(c)).ToArray());
+
+            // Tiger T6xx = UMS512, Tiger T70x = UMS9230 (folder name မှာ မပါလောက် အထူးသတ်မှတ်)
+            string want = null;
+            if (m.Contains("t61") || m.Contains("t62") || m.Contains("t616")) want = "ums512";
+            else if (m.Contains("t70")) want = "ums9230";
+            if (want != null) return chips.Any(c => c.StartsWith(want));
+
+            foreach (string chip in chips)
+                if (chip.Length >= 4 && m.Contains(chip)) return true;
+            return false;
+        }
+
+        // SPD tab အတွက် — loader မရှိတဲ့ chipset တွေကို ဖျောက်ပေး
+        private Dictionary<string, List<MstModelEntry>> FilterSpdByAvailableLoaders(Dictionary<string, List<MstModelEntry>> view)
+        {
+            List<string> chips = SpdLoaderChips();
+            if (chips.Count == 0) return view;   // loader မရှိဘူး = filter မလုပ် (အရင်လက်ဟန်)
+            Dictionary<string, List<MstModelEntry>> outv = new Dictionary<string, List<MstModelEntry>>();
+            foreach (KeyValuePair<string, List<MstModelEntry>> kv in view)
+            {
+                List<MstModelEntry> keep = kv.Value.Where(e => SpdModelMatchesLoader(e.Model, chips)).ToList();
+                if (keep.Count > 0) outv[kv.Key] = keep;
+            }
+            return outv;
+        }
+
         // tab တစ်ခုစီအတွက် Brand → Model picker — model DB (chip အလိက်) + supported ops + Detect
         // chipFilter: "mediatek"/"samsung"/"spreadtrum"/"hisilicon" / null (= ADB tab, all chips)
+        // picker tab တစ်ခုစီမှာ Brand/Model အောက် ထည့်မယ့် file row အရေအတွက်
+        private int FileRowCount(TabPage page)
+        {
+            if (page == tabMtk) return 3;   // DA Agent / Auth / Preloader
+            if (page == tabSpd) return 1;   // Loader (FDL)
+            return 0;                        // QC က grpQcLoaderPicker ထဲမှာ သီးသန့် ထည့်
+        }
+
         private void AddDevicePickerToTab(TabPage page, string chipFilter, string tag, int y, string title, bool withDetect, bool withModelPicker = true, int offStrip = 86, int offNoStrip = 64)
         {
             try
@@ -6572,7 +7169,12 @@ namespace PMKUnlocker
                 }
 
                 Dictionary<string, List<MstModelEntry>> view = MstView(chipFilter);
-                _pickerOff[page] = new[] { offStrip, offNoStrip };
+                // SPD tab — spd/loaders ထဲမှာ loader မရှိတဲ့ chipset တွေကို ဖျောက်ချ (FDL မရှိဘူး = မလုပ်နိုင်)
+                if (page == tabSpd) view = FilterSpdByAvailableLoaders(view);
+                // file row n ခု (24px + 2px gap) ကြောင့် content host ကို အောက်ရွှေ့ — 4 = row/strip gap, 26 = row pitch
+                int fileRows = FileRowCount(page);
+                int fileExtra = fileRows > 0 ? 4 + fileRows * 26 : 0;
+                _pickerOff[page] = new[] { offStrip + fileExtra, offNoStrip + fileExtra };
                 int total = 0;
                 foreach (List<MstModelEntry> l in view.Values) total += l.Count;
 
@@ -6712,12 +7314,14 @@ namespace PMKUnlocker
                 List<MstModelEntry> cur = new List<MstModelEntry>();
                 MstModelEntry sel = null;
                 bool prog = false;
+                bool inited = false;   // startup fill ကို loader auto-link မလုပ်ရ
 
                 void ShowState()
                 {
                     if (sel == null)
                     {
-                        lbChip.Text = "—";
+                        // MTK: model ဘာမှ မရွေးရသေးရင် "Auto Detect" — တခြား tab တွေ "—"
+                        lbChip.Text = page == tabMtk ? "Auto Detect" : "—";
                         lbChip.ForeColor = Color.FromArgb(0, 220, 255);
                         opsStrip.Visible = false;
                         SetPickerOffset(page, PickerOff(page, false));
@@ -6735,7 +7339,11 @@ namespace PMKUnlocker
                     if (!string.IsNullOrEmpty(model))
                         sel = cur.FirstOrDefault(x => x.Model.Equals(model, StringComparison.OrdinalIgnoreCase));
                     if (sel == null && cur.Count == 1) sel = cur[0];
+                    if (page == tabSpd) _spdSelectedModel = sel?.Model ?? "";
                     ShowState();
+                    // QC: device model ရွေးရင် Firehose loader ကို auto ချိတ်ပေး
+                    if (inited && page == tabQc && sel != null)
+                        AutoLinkQcLoader(cbBrand.Text, sel.Model);
                 }
 
                 void FillModels(string brand)
@@ -6761,8 +7369,16 @@ namespace PMKUnlocker
 
                 if (view.Count > 0)
                 {
-                    foreach (string b in view.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    // SPD tab — brand အားလုံးကို ဖျောက်ပြီး chipset list တစ်ခုတည်းသော generic brand တစ်ခုပဲ ထားမယ်
+                    var brandKeys = page == tabSpd
+                        ? view.Keys.Where(k => k.StartsWith("#Generic", StringComparison.OrdinalIgnoreCase))
+                                   .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList()
+                        : view.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+
+                    foreach (string b in brandKeys)
                         cbBrand.Items.Add(b);
+                    // MTK tab: အစမှာ brand/model အလိုအလျောက် မရွေး — "Auto Detect" ပဲ ပြ
+                    if (page == tabMtk) cbBrand.Items.Insert(0, "Auto Detect");
                     prog = true;
                     cbBrand.SelectedIndex = 0;
                     prog = false;
@@ -6775,6 +7391,7 @@ namespace PMKUnlocker
                     prog = false;
                     cbModel.Enabled = false;
                 }
+                inited = true;
 
                 cbBrand.SelectedIndexChanged += (s, e) =>
                 {
@@ -6839,6 +7456,10 @@ namespace PMKUnlocker
                         };
                         chip.FlatAppearance.BorderSize = 0;
 
+                        // MST-style log: chip နှိပ်တိုင်း ယခင် log ရှင်း (handler အစဉ်လိုက် run
+                        // ဖြစ်လို့ ဒါက အရင်ဆုံး run — target button ရဲ့ ထပ်ရှင်းတာကို flag နဲ့ တား)
+                        chip.Click += (s2, e2) => ClearLogForNewOp();
+
                         string tipText;
                         if (target != null)
                         {
@@ -6863,7 +7484,7 @@ namespace PMKUnlocker
                             tipText = "ဤ op အတွက် button / implementation မရှိသေးဘူး (log only)";
                         }
                         if (toolTipMain != null)
-                            toolTipMain.SetToolTip(chip, tipText + Environment.NewLine + "op: " + op);
+                            Tip(chip, tipText + Environment.NewLine + "op: " + op);
 
                         Button t = target;
                         Func<Task> r = implRun;
@@ -6878,7 +7499,9 @@ namespace PMKUnlocker
                                 {
                                     Log("[ops] " + mn + " → " + on + "   [" + t.Text + "]",
                                         Color.FromArgb(0, 200, 255));
-                                    t.PerformClick();
+                                    // chip ကတော့ ရှင်းပြီးသား — target button မရှင်းအောင် flag ပေး
+                                    suppressNextLogClear = true;
+                                    try { t.PerformClick(); } finally { suppressNextLogClear = false; }
                                 }
                                 else if (r != null)
                                 {
@@ -6909,9 +7532,9 @@ namespace PMKUnlocker
                     }
                     if (shown < sel.Ops.Count) lbChip.Text += " (" + shown + " extra)";
                     opsFlow.Size = new Size(Math.Max(totalW, 10), 30);
-                    opsStrip.Visible = true;
-                    SetPickerOffset(page, PickerOff(page, true));
-                    UpdateOpsScroll();
+                    // ops strip (chip row) — Brand/Model အောက်က chips တွေ အသုံးမဝင်လို့ မပြတော့ဘူး (user request)
+                    opsStrip.Visible = false;
+                    SetPickerOffset(page, PickerOff(page, false));
                 }
 
                 if (btDetect != null)
@@ -6919,8 +7542,34 @@ namespace PMKUnlocker
 
                 if (view.Count > 0) FillModels(cbBrand.SelectedItem?.ToString() ?? "");
 
-                List<Control> ctrls = new List<Control> { cap, lbBrand, cbBrand, lbModel, cbModel, lbChip, opsStrip };
+                List<Control> ctrls = new List<Control> { cap, lbBrand, cbBrand, lbModel, cbModel, lbChip };
                 if (btDetect != null) ctrls.Add(btDetect);
+
+                // ===== "Double click or Drag" file rows — ပုံတူ layout (Brand/Model အောက်) =====
+                int rowW = page.ClientSize.Width - 30;
+                if (page == tabMtk)
+                {
+                    ctrls.Add(BuildFilePickerRow(page, 15, y + 30, rowW, "DA Agent",
+                        "Double click or Drag Download Agent Files Here",
+                        "Download Agent (*.bin;*.da)|*.bin;*.da",
+                        () => mtkDaPath, p => { mtkDaPath = p; SaveEdlPaths(); }));
+                    ctrls.Add(BuildFilePickerRow(page, 15, y + 56, rowW, "Auth",
+                        "Double click or Drag Auth Files Here",
+                        "Auth file (*.auth;*.sig)|*.auth;*.sig",
+                        () => mtkAuthPath, p => { mtkAuthPath = p; SaveEdlPaths(); }));
+                    ctrls.Add(BuildFilePickerRow(page, 15, y + 82, rowW, "Preloader",
+                        "Double click or Drag Preloader Files Here",
+                        "Preloader (*.bin)|*.bin",
+                        () => mtkPreloaderPath, p => { mtkPreloaderPath = p; SaveEdlPaths(); }));
+                }
+                else if (page == tabSpd)
+                {
+                    ctrls.Add(BuildFilePickerRow(page, 15, y + 30, rowW, "Loader",
+                        "Double click or Drag Spreadtrum Loader Files",
+                        "FDL loader (*.bin;*.fdl)|*.bin;*.fdl",
+                        () => spdLoaderPath, p => { spdLoaderPath = p; SaveEdlPaths(); }));
+                }
+
                 page.Controls.AddRange(ctrls.ToArray());
                 foreach (Control c in ctrls) c.BringToFront();
             }
@@ -6969,21 +7618,22 @@ namespace PMKUnlocker
         {
             try
             {
-                // 86 = picker row (cap 7 .. controls 50) + ops strip (52..82) — content 86 ကနေ စ
-                _pickerHost[tabMtk] = ShiftTabContentDown(tabMtk, 86);
-                _pickerHost[tabSamsung] = ShiftTabContentDown(tabSamsung, 86);
-                _pickerHost[tabSpd] = ShiftTabContentDown(tabSpd, 86);
-                ShiftTabContentDown(tabAdb, 40);   // ADB: model picker မရှိ — Detect row (7..33) ပဲ
-                _pickerHost[tabHisi] = ShiftTabContentDown(tabHisi, 86);
-                // QC: loader picker 11..55 + model picker (cap 57 / row 76..100 / strip 102..132) → content 136
-                _pickerHost[tabQc] = ShiftTabContentDown(tabQc, 136);
+                // Brand-Model device list: MTK/Samsung/SPD ပဲ — ADB/Hisi က Detect row (40) ပဲ
+                // MTK/SPD: file row တွေပါလို့ 64 + fileExtra (MTK 82 / SPD 30)
+                _pickerHost[tabMtk] = ShiftTabContentDown(tabMtk, 146);
+                _pickerHost[tabSamsung] = ShiftTabContentDown(tabSamsung, 64);
+                _pickerHost[tabSpd] = ShiftTabContentDown(tabSpd, 94);
+                _pickerHost[tabAdb] = ShiftTabContentDown(tabAdb, 40);
+                _pickerHost[tabHisi] = ShiftTabContentDown(tabHisi, 40);
+                // QC: device list မပြ (loader picker ပဲ) — panel 76px ဖြစ်လို့ content 80
+                _pickerHost[tabQc] = ShiftTabContentDown(tabQc, 80);
 
                 AddDevicePickerToTab(tabMtk, "mediatek", "MTK", 26, "MTK DEVICE LIST", true);
                 AddDevicePickerToTab(tabSamsung, "samsung", "SAMSUNG", 26, "SAMSUNG DEVICE LIST", true);
                 AddDevicePickerToTab(tabSpd, "spreadtrum", "SPD", 26, "SPREADTRUM / UNISOC DEVICE LIST", true);
                 AddDevicePickerToTab(tabAdb, null, "ADB", 26, "DEVICE LIST", true, withModelPicker: false);
-                AddDevicePickerToTab(tabHisi, "hisilicon", "HISILICON", 26, "HISILICON DEVICE LIST", true);
-                AddDevicePickerToTab(tabQc, "qualcomm", "QC", 76, "QUALCOMM DEVICE LIST", true, true, 136, 104);
+                AddDevicePickerToTab(tabHisi, "hisilicon", "HISILICON", 26, "HISILICON DEVICE LIST", true, withModelPicker: false);
+                // QC ရဲ့ QUALCOMM DEVICE LIST (Brand/Model/Detect) — အသုံးမဝင်လို့ ဖယ် (loader picker ပဲ ကျန်)
 
                 // QC tab: Brand/Model = Firehose loader picker (pmk_qc_loaders.json) — မပြောင်း
                 if (grpQcLoaderPicker != null)
@@ -6992,6 +7642,15 @@ namespace PMKUnlocker
                     tabQc.Controls.Add(grpQcLoaderPicker);
                     grpQcLoaderPicker.Location = new Point(15, 11);
                     grpQcLoaderPicker.BringToFront();
+                    // row2 — ပုံတူ Loader file row (LoadEdlPaths ပြီးမှ ဆိုလို့ saved loader ပါ ပြ)
+                    if (qcFileRow == null)
+                    {
+                        qcFileRow = BuildFilePickerRow(grpQcLoaderPicker, 9, 46, 912, "Loader",
+                            "Double click or Drag Firehose Loader Files",
+                            "Firehose loader (*.mbn;*.elf;*.bin;*.melf)|*.mbn;*.elf;*.bin;*.melf",
+                            () => edlLoaderPath, ApplyQcLoader);
+                        grpQcLoaderPicker.Controls.Add(qcFileRow);
+                    }
                 }
             }
             catch (Exception ex)
@@ -7212,6 +7871,18 @@ namespace PMKUnlocker
             }
         }
 
+        // su probe — KSU/Magisk/Temp-root ပထမဆုံးခေါ်မှာ daemon start + permission prompt ကြောင့်
+        // 15s ထက်ကြာနိုင်လို့ 20s + တစ်ကြိမ် retry (မဟုတ်ရင် false "su not available" ဖြစ်တယ်)
+        private async Task<string> ProbeSuAsync(int timeoutMs = 20000, int retries = 1)
+        {
+            for (int i = 0; ; i++)
+            {
+                string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id", timeoutMs)).Trim();
+                if (!string.IsNullOrWhiteSpace(id) || i >= retries) return id;
+                await Task.Delay(700);
+            }
+        }
+
         private async Task<string> ExecuteCommandQuickAsync(string fileName, string arguments, int timeoutMs = 15000)
         {
             if (IsDryRun) return "";
@@ -7401,7 +8072,7 @@ namespace PMKUnlocker
             Log("   REMOVE PATTERN / PIN / PASSWORD", Color.White);
             Log("========================================================", Color.FromArgb(0, 180, 255));
 
-            string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string id = (await ProbeSuAsync()).Trim();
             bool hasRoot = id.Contains("uid=0");
 
             if (hasRoot)
@@ -7453,7 +8124,7 @@ namespace PMKUnlocker
                 return;
             }
 
-            string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
                 MessageBox.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
@@ -7469,30 +8140,40 @@ namespace PMKUnlocker
             Log("========================================================", Color.FromArgb(0, 180, 255));
 
             // One push + one run — names/sizes/mounts/dm (was: N+ adb calls per dm-* → slow)
+            // size ယူရာမှာ blockdev/basename/readlink ကို partition တိုင်းမှာ fork လုပ် → 18s+
+            // ကြာခဲ့တယ်; ls -l + shell builtin read/sysfs နဲ့ ဖြစ်လို့ fork မလုပ်တော့ဘူး (<1s)
             string sizeSh =
                 "echo '##NAMES'\n" +
                 "ls -1 /dev/block/by-name 2>/dev/null\n" +
                 "echo '##SIZES'\n" +
-                "for p in /dev/block/by-name/*; do\n" +
-                "  n=$(basename \"$p\")\n" +
-                "  s=$(blockdev --getsize64 \"$p\" 2>/dev/null)\n" +
-                "  if [ -z \"$s\" ]; then\n" +
-                "    r=$(readlink -f \"$p\" 2>/dev/null)\n" +
-                "    b=$(basename \"$r\")\n" +
-                "    sec=$(cat /sys/class/block/$b/size 2>/dev/null)\n" +
-                "    if [ -n \"$sec\" ]; then s=$((sec * 512)); else s=0; fi\n" +
+                "ls -l /dev/block/by-name 2>/dev/null | while read -r line; do\n" +
+                "  case \"$line\" in *' -> '*) ;; *) continue ;; esac\n" +
+                "  lhs=${line% -> *}\n" +
+                "  name=${lhs##* }\n" +   // ls -l <dir> = path မပါ → နောက်ဆုံး token က partition name
+                "  rhs=${line#* -> }\n" +
+                "  tgt=${rhs##*/}\n" +
+                "  sz=0\n" +
+                "  if [ -r \"/sys/class/block/$tgt/size\" ]; then\n" +
+                "    read sec < \"/sys/class/block/$tgt/size\"\n" +
+                "    sz=$((sec * 512))\n" +
                 "  fi\n" +
-                "  printf '%s|%s\\n' \"$n\" \"$s\"\n" +
+                "  if [ \"$sz\" -eq 0 ]; then\n" +
+                "    b=$(blockdev --getsize64 \"/dev/block/by-name/$name\" 2>/dev/null)\n" +
+                "    case \"$b\" in ''|*[!0-9]*) sz=0 ;; *) sz=$b ;; esac\n" +
+                "  fi\n" +
+                "  printf '%s|%s\\n' \"$name\" \"$sz\"\n" +
                 "done\n" +
                 "echo '##MOUNTS'\n" +
                 "cat /proc/mounts\n" +
                 "echo '##DM'\n" +
                 "for b in /sys/block/dm-*; do\n" +
                 "  [ -d \"$b\" ] || continue\n" +
-                "  dm=$(basename \"$b\")\n" +
-                "  nm=$(cat \"$b/dm/name\" 2>/dev/null)\n" +
-                "  sec=$(cat \"$b/size\" 2>/dev/null)\n" +
-                "  if [ -n \"$sec\" ]; then sz=$((sec * 512)); else sz=0; fi\n" +
+                "  dm=${b##*/}\n" +
+                "  nm=''\n" +
+                "  [ -r \"$b/dm/name\" ] && read nm < \"$b/dm/name\"\n" +
+                "  sec=0\n" +
+                "  [ -r \"$b/size\" ] && read sec < \"$b/size\"\n" +
+                "  sz=$((sec * 512))\n" +
                 "  printf '%s|%s|%s\\n' \"$dm\" \"$nm\" \"$sz\"\n" +
                 "done\n";
             string tmpSh = Path.Combine(Path.GetTempPath(), "pmk_sizes.sh");
@@ -7658,8 +8339,7 @@ namespace PMKUnlocker
                 long bytes = sizes.TryGetValue(ex.Name, out long b) ? b : ex.Sz;
                 dgvPartitions.Rows.Add(false, ex.Name, FormatBytesLong(bytes), ex.Dev, ex.Mp, ex.Ro ? "ro" : "rw");
             }
-            panelPartition.Visible = true;
-            topLayout.RowStyles[2].Height = 330F;
+            SyncPartitionPanel(false);   // ADB ROOT grid ပြည့်ပြီ — partition row အလိုအလျောက် ချိန်
             Log("[OK] " + dgvPartitions.RowCount + " partition(s) in grid — right-click → Mount RW", Color.LightGreen);
             Log("[i] Mounted rows (system/vendor…) ကို right-click → 🔓 Mount RW", Color.Gray);
         }
@@ -7697,7 +8377,7 @@ namespace PMKUnlocker
         private async Task RunAdbFactoryResetCoreAsync()
         {
             // 1) root → wipe data via recovery command / rm (စမ်း)
-            string id = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string id = (await ProbeSuAsync()).Trim();
             if (id.Contains("uid=0"))
             {
                 Log("[*] Root detected — attempting data wipe...", Color.Cyan);
@@ -7989,6 +8669,10 @@ namespace PMKUnlocker
                 if (lines.Length > 1) edlLoaderPath = lines[1].Trim();
                 if (lines.Length > 3) hisiBootloadersPath = lines[3].Trim();
                 if (lines.Length > 4) edlSigPath = lines[4].Trim();
+                if (lines.Length > 5) mtkDaPath = lines[5].Trim();
+                if (lines.Length > 6) mtkAuthPath = lines[6].Trim();
+                if (lines.Length > 7) mtkPreloaderPath = lines[7].Trim();
+                if (lines.Length > 8) spdLoaderPath = lines[8].Trim();
             }
             catch (Exception ex)
             {
@@ -7999,7 +8683,7 @@ namespace PMKUnlocker
 
         private void SaveEdlPaths()
         {
-            try { File.WriteAllLines(PathsFile, new string[] { edlScriptPath ?? "", edlLoaderPath ?? "", edlLegacySlot ?? "", hisiBootloadersPath ?? "", edlSigPath ?? "" }); }
+                try { File.WriteAllLines(PathsFile, new string[] { edlScriptPath ?? "", edlLoaderPath ?? "", edlLegacySlot ?? "", hisiBootloadersPath ?? "", edlSigPath ?? "", mtkDaPath ?? "", mtkAuthPath ?? "", mtkPreloaderPath ?? "", spdLoaderPath ?? "" }); }
             catch (Exception ex) { Log("Path save error: " + ex.Message, Color.Red); }
         }
 
@@ -8128,10 +8812,11 @@ namespace PMKUnlocker
                 return true;
             }
 
-            Log("[!] EDL module (edl.py) not found - pick it with the EDL Module button.", Color.Orange);
-            MessageBox.Show("EDL module (edl.py) မတွေ့ပါ။\n\n📦 EDL Module ခလုတ်ကို နှိပ်ပြီး edl.py ကို ရွေးပေးပါ။\n(tool folder ထဲ ဒါမှမဟုတ် external path)",
-                "EDL Module လိုအပ်ပါတယ်", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return false;
+            Log("[!] EDL module (edl.py) not found.", Color.Orange);
+            var pick = MessageBox.Show("EDL module (edl.py) မတွေ့ပါ။\n\nခုဏ ရွေးပေးမလား? (tool folder ထဲ ဒါမှမဟုတ် external path)",
+                "EDL Module လိုအပ်ပါတယ်", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+            if (pick == DialogResult.OK) BrowseEdlScript();
+            return !string.IsNullOrEmpty(edlScriptPath) && File.Exists(edlScriptPath);
         }
 
         private string BuildEdlArgs(string command)
@@ -8149,11 +8834,12 @@ namespace PMKUnlocker
             return "\"" + edlScriptPath + "\"" + loader + portParam + " " + command;
         }
 
-        private async Task RunEdlAsync(string command, string title, bool clearPartitions = false)
+        private async Task RunEdlAsync(string command, string title, bool clearPartitions = false,
+            Func<List<string>, bool> tolerateRaw = null)
         {
             if (!EnsureEdlModule()) return;
             if (!await EnsureQcAuthAsync()) return;
-            await ExecuteCommandCleanAsync("python", BuildEdlArgs(command), title, clearPartitions);
+            await ExecuteCommandCleanAsync("python", BuildEdlArgs(command), title, clearPartitions, tolerateRaw: tolerateRaw);
         }
 
         // Unlock Tool လို — Qualcomm op မဆိုမတိုင်မီ auto Sahara + sig auth
@@ -8253,8 +8939,19 @@ namespace PMKUnlocker
             await RunFlashWorkflowAsync(async () =>
             {
                 await RunEdlAsync("e userdata", "Qualcomm Userlock Reset (userdata)");
-                await RunEdlAsync("e metadata", "Qualcomm Userlock Reset (metadata)");
-            });
+                // metadata မရှိတဲ့ ဖုန်း (ဥပမာ CPH1803/A3s — Android 8/9 era) မှာ edl.py က
+                // "Couldn't erase partition metadata / no gpt partition" နဲ့ fail တက် → skip
+                await RunEdlAsync("e metadata", "Qualcomm Userlock Reset (metadata)",
+                    tolerateRaw: raw =>
+                    {
+                        string joined = string.Join("\n", raw ?? new List<string>());
+                        return joined.Contains("Couldn't erase partition metadata") ||
+                               joined.Contains("no gpt partition") ||
+                               joined.Contains("No such partition") ||
+                               joined.Contains("no such partition") ||
+                               joined.Contains("partition metadata") && joined.Contains("not found");
+                    });
+            }, forceReboot: true);   // erase ပြီးရင် checkbox မကြည့်ဘဲ auto reboot (EDL → Android)
         }
 
         private async void BtnQcFullBackup_Click(object sender, EventArgs e)
@@ -8295,7 +8992,8 @@ namespace PMKUnlocker
             await RunFlashWorkflowAsync(() => RunEdlAsync("reset --resetmode=reset", "Qualcomm Reset Device"), autoRebootAfter: false);
         }
 
-        private void BtnQcSetModule_Click(object sender, EventArgs e)
+        // edl.py manual pick — SETUP button ဖယ်ပြီးနောက် EnsureEdlModule က ဒီ method ကိုပဲ ခေါ်တယ်
+        private void BrowseEdlScript()
         {
             using (OpenFileDialog ofd = new OpenFileDialog
             {
@@ -8310,21 +9008,182 @@ namespace PMKUnlocker
             }
         }
 
-        private void BtnQcSetLoader_Click(object sender, EventArgs e)
+        // Firehose loader manual pick — loader picker ရဲ့ "Manual / saved loader" ကနေ / Loader file row ကနေ ခေါ်တယ်
+        private void BrowseFirehoseLoader()
         {
             using (OpenFileDialog ofd = new OpenFileDialog
             {
-                Filter = "Firehose loader (*.mbn;*.elf;*.bin;*.melf)|*.mbn;*.elf;*.bin;*.melf|All Files (*.*)|*.*",
+                Filter = "Firehose loader (*.mbn;*.elf;*.bin;*.melf)|*.mbn;*.elf;*.bin;*.melf",
                 Title = "Firehose programmer (loader) ကို ရွေးပါ"
             })
             {
                 if (ofd.ShowDialog() != DialogResult.OK) return;
-                edlLoaderPath = ofd.FileName;
-                SaveEdlPaths();
-                if (cmbQcBrand != null) cmbQcBrand.SelectedItem = "Manual / saved loader";
-                Log("[OK] Firehose loader set: " + edlLoaderPath, Color.LightGreen);
-                if (lblQcLoaderStatus != null) lblQcLoaderStatus.Text = Path.GetFileName(edlLoaderPath);
+                ApplyQcLoader(ofd.FileName);
             }
+        }
+
+        // picked loader path ကို saved path + combo + status label တွေမှာ တစ်နေရာတည်း update
+        private void ApplyQcLoader(string file)
+        {
+            edlLoaderPath = file ?? "";
+            SaveEdlPaths();
+            if (string.IsNullOrEmpty(edlLoaderPath))
+            {
+                if (cmbQcBrand?.SelectedItem as string == "Manual / saved loader" &&
+                    cmbQcModel != null && cmbQcModel.Items.Count > 0)
+                    cmbQcModel.Items[0] = "Choose Firehose Loader...";
+                if (lblQcLoaderStatus != null)
+                {
+                    lblQcLoaderStatus.Text = "Auto Detect (saved / auto loader)";
+                    lblQcLoaderStatus.ForeColor = Color.Cyan;
+                }
+                return;
+            }
+            // brand ကတည်းက "Manual" ရွေးထားရင် SelectedIndexChanged ထပ်မဖြစ် → path အရင်သိမ်းမှ brand ပြောင်း
+            if (cmbQcBrand != null) cmbQcBrand.SelectedItem = "Manual / saved loader";
+            if (lblQcLoaderStatus != null)
+            {
+                lblQcLoaderStatus.Text = Path.GetFileName(edlLoaderPath);
+                lblQcLoaderStatus.ForeColor = Color.LightGreen;
+            }
+            if (cmbQcModel != null && cmbQcModel.Items.Count > 0)
+            {
+                string fn = Path.GetFileName(edlLoaderPath);
+                if (cmbQcModel.Items[0]?.ToString() != fn) cmbQcModel.Items[0] = fn;
+            }
+        }
+
+        // ===== "Double click or Drag" file row — QC Loader / MTK DA·Auth·Preloader / SPD Loader =====
+        // label column + hint field; double-click = browse, drag & drop = ဖိုင်, right-click = ဖျက်
+        private Panel BuildFilePickerRow(Control parent, int x, int y, int w, string label, string hint,
+            string filter, Func<string> getPath, Action<string> setPath)
+        {
+            Color labelBg = RowLabelBg;
+            Color fieldBg = RowFieldBg;
+            Color dim = RowHint;   // hint — theme အလိုက် ဖတ်ရလွယ်အောင်
+
+            Panel row = new Panel
+            {
+                Name = "fileRow" + label.Replace(" ", ""),
+                Location = new Point(x, y),
+                Size = new Size(w, 24),
+                BackColor = fieldBg,
+                AllowDrop = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            Label lb = new Label
+            {
+                Text = " " + label,
+                Location = new Point(0, 0),
+                Size = new Size(70, 24),
+                BackColor = labelBg,
+                ForeColor = RowLabelText,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft,
+                AllowDrop = true,
+                Cursor = Cursors.Hand
+            };
+            Label fld = new Label
+            {
+                Location = new Point(70, 0),
+                Size = new Size(Math.Max(50, w - 70), 24),
+                BackColor = fieldBg,
+                ForeColor = dim,
+                Font = new Font("Segoe UI", 9f),
+                TextAlign = ContentAlignment.MiddleLeft,
+                BorderStyle = BorderStyle.FixedSingle,
+                AllowDrop = true,
+                Cursor = Cursors.Hand,
+                AutoEllipsis = true
+            };
+            row.Controls.Add(lb);
+            row.Controls.Add(fld);
+
+            void Show()
+            {
+                string p = getPath();
+                if (string.IsNullOrEmpty(p))
+                {
+                    fld.Text = "⚙   " + hint;
+                    fld.ForeColor = RowHint;
+                }
+                else
+                {
+                    fld.Text = "✔  " + Path.GetFileName(p);
+                    fld.ForeColor = RowLoaded;
+                }
+            }
+
+            void Apply(string p)
+            {
+                setPath(p ?? "");
+                Show();
+                if (!string.IsNullOrEmpty(p)) Log("[OK] " + label + ": " + p, Color.LightGreen);
+                else Log("[i] " + label + " file cleared", Color.Gray);
+            }
+
+            void Browse()
+            {
+                using (OpenFileDialog ofd = new OpenFileDialog { Filter = filter, Title = label + " file ကို ရွေးပါ" })
+                {
+                    if (ofd.ShowDialog(parent.FindForm()) == DialogResult.OK) Apply(ofd.FileName);
+                }
+            }
+
+            void Clear() { if (!string.IsNullOrEmpty(getPath())) Apply(""); }
+
+            void RowEnter(object s, DragEventArgs e)
+            {
+                if (e.Data.GetDataPresent(DataFormats.FileDrop) &&
+                    e.Data.GetData(DataFormats.FileDrop) is string[] files &&
+                    files.Length > 0 && FileMatchesFilter(files[0], filter))
+                    e.Effect = DragDropEffects.Copy;
+                else
+                    e.Effect = DragDropEffects.None;
+            }
+            void RowDrop(object s, DragEventArgs e)
+            {
+                if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
+                {
+                    if (FileMatchesFilter(files[0], filter)) Apply(files[0]);
+                    else Log("[!] " + label + ": wrong file type — " + Path.GetFileName(files[0]), Color.Orange);
+                }
+            }
+
+            foreach (Control c in new Control[] { row, lb, fld })
+            {
+                c.MouseDoubleClick += (s, e) => Browse();
+                c.MouseClick += (s, e) => { if (e.Button == MouseButtons.Right) Clear(); };
+                c.DragEnter += RowEnter;
+                c.DragDrop += RowDrop;
+            }
+            row.MouseEnter += (s, e) => Show();   // တခြား code path က path ပြောင်းရင် hover မှာ refresh
+            if (toolTipMain != null)
+                Tip(row, "Double-click = browse • Drag & drop file = ထည့် • Right-click = ဖျက်");
+            fileRowRefresh[row] = Show;   // theme toggle မှာ bg/text/State ပြန်သတ်မှတ်ဖို့
+            Show();
+            return row;
+        }
+
+        // drag & drop ဖိုင် filter နဲ့ ကိုက်/မကိုက်
+        private static bool FileMatchesFilter(string file, string filter)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(filter) || filter.Contains("*.*")) return true;
+                string ext = Path.GetExtension(file);
+                foreach (string part in filter.Split('|'))
+                {
+                    if (!part.Contains("*.")) continue;
+                    foreach (string tok in part.Split(';'))
+                    {
+                        string t = tok.Trim();
+                        if (t.StartsWith("*.") && t.Equals("*" + ext, StringComparison.OrdinalIgnoreCase)) return true;
+                    }
+                }
+                return false;
+            }
+            catch { return false; }
         }
 
         // ================= QC LOADER PICKER (pmk_qc_loaders.json) =================
@@ -8398,6 +9257,90 @@ namespace PMKUnlocker
             catch (Exception ex) { cmbQcBrand.Items.Add("(load error: " + ex.Message + ")"); cmbQcBrand.SelectedIndex = 0; }
         }
 
+        // ===== QC: DEVICE LIST model → Firehose loader auto-link =====
+        private static string NormQcName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (char c in s)
+                if (char.IsLetterOrDigit(c)) sb.Append(char.ToUpperInvariant(c));
+            return sb.ToString();
+        }
+
+        private string MapLoaderBrand(string deviceBrand)
+        {
+            if (string.IsNullOrWhiteSpace(deviceBrand) || qcLoaderDb.Count == 0) return null;
+            string b = deviceBrand.Trim();
+            if (b.Equals("Moto", StringComparison.OrdinalIgnoreCase)) b = "Motorola";
+            else if (b.Equals("One Plus", StringComparison.OrdinalIgnoreCase)) b = "Oneplus";
+            else if (b.Equals("Huawei & Honor", StringComparison.OrdinalIgnoreCase)) b = "Huawei";
+            foreach (string k in qcLoaderDb.Keys)
+                if (string.Equals(k, b, StringComparison.OrdinalIgnoreCase)) return k;
+            return null;
+        }
+
+        private static string MatchLoaderModel(string deviceModel, IEnumerable<string> keys)
+        {
+            string d = NormQcName(deviceModel);
+            if (d.Length < 3) return null;
+            string best = null;
+            int bestScore = -1, bestLen = int.MaxValue;
+            foreach (string key in keys)
+            {
+                // "[AuthBypass] MI 10" → "MI 10" — mode prefix ကို ချန်ပြီး product နဲ့ နှိုင်း
+                string prod = key ?? "";
+                if (prod.StartsWith('['))
+                {
+                    int close = prod.IndexOf(']');
+                    if (close > 0) prod = prod.Substring(close + 1);
+                }
+                prod = NormQcName(prod);
+                if (prod.Length < 3) continue;
+
+                int score;
+                if (prod == d) score = 3;                                   // အတိအကျ
+                else if (prod.Length >= 4 && d.StartsWith(prod, StringComparison.Ordinal)) score = 2;  // device မှာ prefix/suffix ပိုပါ
+                else if (prod.Length >= 4 && d.IndexOf(prod, StringComparison.Ordinal) >= 0) score = 1;
+                else if (d.Length >= 4 && prod.StartsWith(d, StringComparison.Ordinal)) score = 1;    // loader မှာ ပိုရှည်
+                else continue;
+
+                if (score > bestScore ||
+                    (score == bestScore && prod.Length < bestLen) ||
+                    (score == bestScore && prod.Length == bestLen && best != null && string.CompareOrdinal(key, best) < 0))
+                {
+                    best = key; bestScore = score; bestLen = prod.Length;
+                }
+            }
+            return best;
+        }
+
+        private void AutoLinkQcLoader(string deviceBrand, string deviceModel)
+        {
+            try
+            {
+                if (qcLoaderDb.Count == 0 || cmbQcBrand == null || cmbQcModel == null) return;
+                string brand = MapLoaderBrand(deviceBrand);
+                if (brand == null || !qcLoaderDb.TryGetValue(brand, out var models)) return;
+                string key = MatchLoaderModel(deviceModel, models.Keys);
+                if (key == null) return;
+
+                if (!string.Equals(cmbQcBrand.SelectedItem as string, brand, StringComparison.OrdinalIgnoreCase))
+                    cmbQcBrand.SelectedItem = brand;   // handler က cmbQcModel ကို ပြန်ဖြည့်တယ်
+                if (!string.Equals(cmbQcBrand.SelectedItem as string, brand, StringComparison.OrdinalIgnoreCase)) return;
+
+                int idx = -1;
+                for (int i = 0; i < cmbQcModel.Items.Count; i++)
+                {
+                    string disp = cmbQcModel.Items[i]?.ToString();
+                    if (disp != null && qcModelDisplayToKey.TryGetValue(disp, out string k) &&
+                        string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+                }
+                if (idx < 0 || cmbQcModel.SelectedIndex == idx) return;
+                cmbQcModel.SelectedIndex = idx;   // → edlLoaderPath + log ([OK] Loader: ...)
+            }
+            catch { /* auto-link က link မလုပ်နိုင်ရင် loader picker အတိုင်းပဲ ထား */ }
+        }
+
         private void CmbQcBrand_SelectedIndexChanged(object sender, EventArgs e)
         {
             cmbQcModel.Items.Clear();
@@ -8438,6 +9381,8 @@ namespace PMKUnlocker
 
             if (brand == "Manual / saved loader")
             {
+                // saved loader မရှိသေးရင် — ခုဏက ဒီ item ကို ရွေးတာမို့ browse dialog ချက်ချင်းဖွင့်
+                if (string.IsNullOrEmpty(edlLoaderPath)) BrowseFirehoseLoader();
                 lblQcLoaderStatus.Text = string.IsNullOrEmpty(edlLoaderPath) ? "Choose a Firehose Loader file" : Path.GetFileName(edlLoaderPath);
                 lblQcLoaderStatus.ForeColor = File.Exists(edlLoaderPath) ? Color.LightGreen : Color.Orange;
                 return;
@@ -8761,7 +9706,7 @@ namespace PMKUnlocker
                 return;
             }
 
-            string suId = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
+            string suId = (await ProbeSuAsync()).Trim();
             bool hasRoot = suId.Contains("uid=0");
 
             if (!looksXiaomi)
@@ -8818,7 +9763,7 @@ namespace PMKUnlocker
             {
                 Log("[*] Trying adb root (eng builds) + su probe...", Color.Orange);
                 await ExecuteCommandQuickAsync("adb.exe", "root");
-                await Task.Delay(1500);
+                await Task.Delay(800);
                 suId = await ProbeSuAsync();
                 hasRoot = suId.Contains("uid=0");
                 if (hasRoot) Log("[OK] Root obtained via adb root/su: " + suId, Color.LightGreen);
@@ -8832,7 +9777,15 @@ namespace PMKUnlocker
             // Step A1: MobileSea temp root — token-gated payload (GUI မလို, token formula ကိုယ်တိုင် generate)
             double mstSec = -1;
             bool viaMst = false;
-            if (!hasRoot && looksXiaomi)
+            // Android16(zircon/MT6886/5.15.180) — token payload ဒီ combo မှာ မအောင် (~30s ဖြုတ်) → kernel exploit တန်းဆက်
+            bool skipToken = exploitMatch != null &&
+                             int.TryParse(fp.Sdk, out int sdkNo) && sdkNo >= 36 &&
+                             (fp.Codename.IndexOf("zircon", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              fp.Soc.IndexOf("MT6886", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              fp.Kernel.IndexOf("5.15.180", StringComparison.Ordinal) >= 0);
+            if (!hasRoot && looksXiaomi && skipToken)
+                Log("[i] Token path skip — Android16/zircon (token payload မအောင်, ~30s ဖြုတ်) → kernel exploit ကိုတန်းဆက်", Color.Gray);
+            if (!hasRoot && looksXiaomi && !skipToken)
             {
                 var swMst = Stopwatch.StartNew();
                 (bool mstRoot, double mstRealSec) = await TryMstTempRootAsync();
@@ -8880,7 +9833,7 @@ namespace PMKUnlocker
                     (string.IsNullOrWhiteSpace(fp.Patch) ? "" : "   ·   patch " + fp.Patch), Color.White);
                 Log("      Kernel   : " + (string.IsNullOrWhiteSpace(fp.Kernel) ? "?" : fp.Kernel), Color.White);
                 if (viaMst)
-                    Log("      Exploit  : MobileSea temp root (token)   ·   " + mstSec.ToString("0.0") + "s", Color.Cyan);
+                    Log("      Exploit  : PMK temp root (token)   ·   " + mstSec.ToString("0.0") + "s", Color.Cyan);
                 else if (exploitMatch != null && exploitSec >= 0)
                     Log("      Exploit  : " + (string.IsNullOrWhiteSpace(exploitMatch.Id) ? exploitMatch.Name : exploitMatch.Id) +
                         "   ·   " + exploitSec.ToString("0.0") + "s", Color.Cyan);
@@ -9160,32 +10113,64 @@ namespace PMKUnlocker
         }
 
         // su probe — PATH ထဲမှာ su မရှိရင် GhostLock temp-root su client / root helper ကို စမ်း
+        // (timeout/retry ဗားရှင်းကို param နဲ့ ခေါ် — bare call က ဒီ wrapper ကိုပဲ ပြန်ရောက်လို့ recursion ဖြစ်)
+        // KernelSU su daemon settle — ပထမ pass fail ပြီး error ရှိရင် 2.5s စောင့်ပြီး ထပ်စမ်း၊ uid=0 မရရင်
+        // နောက်ဆုံး error text ကို return (caller တွေက Contains("uid=0") နဲ့ပဲ check → "no output" မဟုတ်တော့)
         private async Task<string> ProbeSuAsync()
         {
-            string s = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id")).Trim();
-            if (s.Contains("uid=0")) return s;
-            s = (await ExecuteCommandQuickAsync("adb.exe", "shell /data/local/tmp/su -c id")).Trim();
-            if (s.Contains("uid=0")) return s;
-            s = (await ExecuteCommandQuickAsync("adb.exe", "shell /data/local/tmp/cve-2026-43499-root -c id")).Trim();
-            return s.Contains("uid=0") ? s : "";
+            string last = "";
+            for (int pass = 0; pass < 2; pass++)
+            {
+                if (pass > 0)
+                {
+                    if (last.Length == 0) return "";   // su လုံးဝမရှိ — settle မလို
+                    await Task.Delay(2500);            // KernelSU/legacy su daemon settle
+                }
+                foreach (string cmd in new[]
+                         {
+                             "shell su -c id",
+                             "shell /data/local/tmp/su -c id",
+                             "shell /data/local/tmp/cve-2026-43499-root -c id"
+                         })
+                {
+                    string s = (await ExecuteCommandQuickAsync("adb.exe", cmd)).Trim();
+                    if (s.Contains("uid=0")) return s;
+                    if (s.Length > 0) last = s;
+                }
+            }
+            return last;
         }
 
-        // ================= MobileSea temp root — token-gated payload (no GUI) =================
+        // ================= PMK temp root — token-gated payload (no GUI) =================
         // payload ကို /data/local/tmp/.preload.so အဖြစ် push → LD_PRELOAD + MS=<token> နဲ့ id ခေါ်
         // token = AES-256-CBC(pt, key/iv = FNV(ro.serialno) mix) · pt = 84 00 00 00 | epoch_le | K_le  (±120s)
         // verify pass ရင် payload ctor က run_exploit → permissive + su → "MST:Pass!"
+
+        // exploit stdout ထဲက internal trace chatter — log box မှာ မပြတော့ဘူး (file ထဲ ပဲ ကျန်)
+        private static bool IsExploitLogNoise(string t)
+        {
+            string s = t.ToLowerInvariant();
+            return s.Contains("slide ") || s.Contains("tracefs") || s.Contains("ksnitch") ||
+                   s.Contains("controlled mm") || s.Contains("match_page") || s.Contains("configfs") ||
+                   s.Contains("futex") || s.Contains("app fops") || s.Contains("page_owner") ||
+                   s.Contains("sock_diag") || s.Contains("prctl_map") || s.Contains("cfi_") ||
+                   s.Contains("attempt=") || s.Contains("hint=") || s.Contains("mm dup") ||
+                   s.Contains("pipe buf") || s.Contains("page alloc") || s.Contains("prs=") ||
+                   s.Contains("hwbinder") || s.Contains("svc_x");
+        }
+
         private async Task<(bool Root, double Sec)> TryMstTempRootAsync()
         {
             const string remote = "/data/local/tmp/.preload.so";
             string local = Path.Combine(Application.StartupPath, "exploits", "payloads", "mst-temproot.elf");
             if (!File.Exists(local))
             {
-                Log("[i] MobileSea payload not bundled — skip token root: " + local, Color.Gray);
+                Log("[i] PMK payload not bundled — skip token root: " + local, Color.Gray);
                 return (false, -1);
             }
 
             Log("--------------------------------------------------------", Color.FromArgb(0, 180, 255));
-            Log("[*] MobileSea temp root — token-gated payload (no GUI)...", Color.Orange);
+            Log("[*] PMK temp root — token-gated payload (no GUI)...", Color.Orange);
 
             // payload ရဲ့ FNV input နဲ့ တူအောင်: ro.serialno → ro.boot.serialno → "unknown"
             string serial = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.serialno")).Trim();
@@ -9195,13 +10180,13 @@ namespace PMKUnlocker
             if (serial.Length == 0) serial = "unknown";
 
             if (!await ExecuteCommandCleanAsync("adb.exe", "push \"" + local + "\" \"" + remote + "\"",
-                    "MobileSea Temp Root - push payload", false, false, true))
+                    "PMK Temp Root - push payload", false, false, true))
             {
-                Log("[!] payload push failed — MobileSea path abort.", Color.OrangeRed);
+                Log("[!] payload push failed — PMK path abort.", Color.OrangeRed);
                 return (false, -1);
             }
             await ExecuteCommandCleanAsync("adb.exe", "shell chmod 755 \"" + remote + "\"",
-                "MobileSea Temp Root - chmod", false, false, true);
+                "PMK Temp Root - chmod", false, false, true);
 
             // epoch = device clock (payload time() ±120s window)
             string epRaw = (await ExecuteCommandQuickAsync("adb.exe", "shell date +%s")).Trim();
@@ -9212,7 +10197,7 @@ namespace PMKUnlocker
             }
 
             string token = MstToken.Build(serial, epoch);
-            Log("[i] serial=" + serial + "  epoch=" + epoch + "  token=" + token, Color.Gray);
+            Log("[i] serial=" + serial + "  epoch=" + epoch, Color.Gray);
 
             string runCmd = "shell \"export LD_PRELOAD=" + remote + "; MS=" + token + " /system/bin/id\"";
             string bindArgs = await BindDeviceArgumentsAsync("adb.exe", runCmd);
@@ -9228,6 +10213,7 @@ namespace PMKUnlocker
                 string t = raw.TrimEnd();
                 if (t.Length == 0) continue;
                 total++;
+                if (IsExploitLogNoise(t)) continue;
                 bool keep = t.Contains("MST:") || t.Contains("uid=") ||
                             t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             t.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -9235,24 +10221,23 @@ namespace PMKUnlocker
                 Log("    " + t.Replace("MST:", "root:"), t.Contains("MST:") ? Color.LightGreen : Color.Gray);
                 shown++;
             }
-            if (total > shown)
-                Log("    (" + (total - shown) + " debug lines ဖျောက်)", Color.FromArgb(110, 110, 110));
             if (string.IsNullOrWhiteSpace(runOut))
                 Log("[i] payload stdout မရ (exit/timeout) — su probe နဲ့ အဆုံးအဖြတ်ပေးမယ်", Color.Orange);
 
             string su = await ProbeSuAsync();
             bool root = su.Contains("uid=0");
             Log(root
-                    ? "[OK] MobileSea temp root OK — " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s  ·  " + su
+                    ? "[OK] PMK temp root OK — " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s  ·  " + su
                     : (runOut != null && runOut.Contains("MST:Pass!")
                         ? "[!] token pass ဒါပေမဲ့ su probe fail — " + su
-                        : "[!] MobileSea temp root fail — kernel exploit path ဆက်မယ်"),
+                        : "[!] PMK temp root fail — kernel exploit path ဆက်မယ်"),
                 root ? Color.LightGreen : Color.Orange);
             return (root, sw.Elapsed.TotalSeconds);
         }
 
         // ART-style kernel exploit — device: push payload → run · host: run Windows exe → probe su/id
-        private async Task<(bool Root, double Sec)> TryKernelExploitAsync(string exploitsRoot, ExploitEntry ex, DeviceFingerprint fp)
+        // attempt=0 → fail ရင် auto-reboot တစ်ခါပြီး retry (same-boot stack-writer burn / flaky leak ကာကွယ်)
+        private async Task<(bool Root, double Sec)> TryKernelExploitAsync(string exploitsRoot, ExploitEntry ex, DeviceFingerprint fp, int attempt = 0)
         {
             bool hostMode = string.Equals(ex.RunMode, "host", StringComparison.OrdinalIgnoreCase);
             Log("--------------------------------------------------------", Color.FromArgb(0, 180, 255));
@@ -9272,6 +10257,7 @@ namespace PMKUnlocker
 
             int timeoutSec = ex.TimeoutSec <= 0 ? 30 : ex.TimeoutSec;
             double realSec = -1;
+            string runOut = "";
 
             if (hostMode)
             {
@@ -9362,8 +10348,21 @@ namespace PMKUnlocker
                 Log("[*] Running exploit (timeout " + timeoutSec + "s)...", Color.Orange);
                 // GhostLock race can take 15-45s — use timeoutSec, not ExecuteCommandQuickAsync's 15s default
                 // returnOutputOnFailure=true: payload fail path (exit≠0) ကောင်းကောင်း stdout လိုချင်
-                string runOut = await ReviewSafety.RunQuickAsync(ResolveToolPath("adb.exe"), runCmd,
+                // progress ticker — exploit ပိတ်နေတယ် မထင်စေဖို့ 30s တစ်ခါ elapsed ပြ
+                var expTask = ReviewSafety.RunQuickAsync(ResolveToolPath("adb.exe"), runCmd,
                     timeoutSec * 1000, true);
+                _ = Task.Run(async () =>
+                {
+                    int tickSec = 0;
+                    while (!expTask.IsCompleted && tickSec < timeoutSec)
+                    {
+                        await Task.Delay(30000);
+                        if (expTask.IsCompleted) break;
+                        tickSec += 30;
+                        Log("[i] Exploit running... " + tickSec + "s / " + timeoutSec + "s", Color.Gray);
+                    }
+                });
+                runOut = await expTask;
                 if (!string.IsNullOrWhiteSpace(runOut))
                 {
                     // full output debug အတွက် file ထဲ သိမ်း — log box မှာ key line တွေပဲ ပြ
@@ -9375,6 +10374,7 @@ namespace PMKUnlocker
                         string t = Regex.Replace(raw, "\u001b\\[[0-9;]*m", "").TrimEnd();
                         if (t.Length == 0) continue;
                         totalLines++;
+                        if (IsExploitLogNoise(t)) continue;
                         bool keep = t.Contains("offsets matched") || t.Contains("exploit start") ||
                                     t.Contains("exploit complete") || t.Contains("W1: SELinux attempt") ||
                                     t.Contains("W2: cred attempt") || t.Contains("tcp route won") ||
@@ -9402,9 +10402,6 @@ namespace PMKUnlocker
                         Log("    " + t, lc);
                         shownLines++;
                     }
-                    if (totalLines > shownLines)
-                        Log("    (" + (totalLines - shownLines) + " debug lines ဖျောက် · full: %TEMP%\\pmk_exploit_stdout.log)",
-                            Color.FromArgb(110, 110, 110));
                 }
                 else
                 {
@@ -9427,7 +10424,6 @@ namespace PMKUnlocker
                 }
             }
 
-            await Task.Delay(2000);
             string pattern = string.IsNullOrWhiteSpace(ex.SuccessPattern) ? "uid=0" : ex.SuccessPattern;
             string[] patternParts = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -9437,7 +10433,7 @@ namespace PMKUnlocker
             {
                 // KernelSU late-load can need a beat; retry once after adb root probe
                 await ExecuteCommandQuickAsync("adb.exe", "root");
-                await Task.Delay(1500);
+                await Task.Delay(800);
                 suId = await ProbeSuAsync();
                 ok = suId.Contains("uid=0");
             }
@@ -9479,6 +10475,18 @@ namespace PMKUnlocker
                     ksuLog.IndexOf("root script start uid=0", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     Log("[OK] GhostLock root script confirmed uid=0 (ksu log)", Color.LightGreen);
+                    // su daemon settle — probe အရင်ခေါ် (su ready ဆို ချက်ချင်းပြီး)၊ fail မှ 5s စောင့် ထပ်စမ်း
+                    for (int i = 0; i < 4; i++)
+                    {
+                        suId = await ProbeSuAsync();
+                        if (suId.Contains("uid=0"))
+                        {
+                            Log("[OK] Exploit root (settled): " + suId, Color.LightGreen);
+                            suPathCache.Clear(); // root တက်ပြီ → PATH su ပြန်ရှာ (tmpsu cache ဖယ်)
+                            return (true, realSec);
+                        }
+                        if (i < 3) await Task.Delay(5000);
+                    }
                     return (true, realSec);
                 }
             }
@@ -9498,6 +10506,47 @@ namespace PMKUnlocker
             }
 
             Log("[!] Exploit finished but no root (su probe empty/fail).", Color.OrangeRed);
+
+            // (ခ) failure signature ဖတ် — same-boot burn / flaky leak ကို ခွဲခြားပြီး reboot-retry ဒါမှမဟုတ် hint
+            string sigSrc = runOut ?? "";
+            if (sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) < 0 &&
+                sigSrc.IndexOf("stack writer", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                // stdout ထဲ မပါရင် device run log ကနေ ပြန်ရှာ
+                foreach (string lg in new[] { "/data/local/tmp/zircon-app-run.log", "/data/local/tmp/ghostlock-run.log" })
+                {
+                    string tail = await ExecuteCommandQuickAsync("adb.exe", "shell tail -n 60 " + lg);
+                    if (!string.IsNullOrWhiteSpace(tail)) sigSrc += "\n" + tail;
+                    if (sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) >= 0) break;
+                }
+            }
+            bool burnt = sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         sigSrc.IndexOf("stack writer ran", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (attempt == 0)
+            {
+                Log(burnt
+                        ? "[i] Stack writer ဒီ boot မှာ သုံးပြီးပြီ — same-boot ထပ်စမ်းတာ exploit ကိုယ်တိုင် ငြင်းတယ်"
+                        : "[i] Leak/pipe stage fail — probabilistic (flaky) ဖြစ်နိုင်တယ်",
+                    Color.Orange);
+                Log("[*] Auto-reboot ပြီး တစ်ခါပဲ ထပ်စမ်းမယ် (1/1)...", Color.Orange);
+                await ExecuteCommandQuickAsync("adb.exe", "reboot");
+                await Task.Delay(8000);
+                await ExecuteCommandCleanAsync("adb.exe", "wait-for-device", "Temp Root - wait device", false, true, quiet: true, timeoutSec: 180);
+                for (int i = 0; i < 30; i++)
+                {
+                    string bc = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop sys.boot_completed")).Trim();
+                    if (bc.StartsWith("1")) break;
+                    await Task.Delay(2000);
+                }
+                await Task.Delay(3000);
+                return await TryKernelExploitAsync(exploitsRoot, ex, fp, attempt + 1);
+            }
+
+            Log(burnt
+                    ? "[i] Hint: reboot ပြီးမှ ပြန်စမ်းပါ — same-boot retry က exploit ကိုယ်တိုင် ငြင်းတယ် (auto-reboot 1/1 ပြီးဆုံး)"
+                    : "[i] Hint: reboot ပြီး ထပ်စမ်းကြည့်ပါ — leak stage က တစ်ခါတလေ fail ဖြစ်တတ်တယ်",
+                Color.Orange);
             return (false, -1);
         }
 
@@ -9557,9 +10606,23 @@ namespace PMKUnlocker
                     using var vp = Process.Start(vendor);
                     if (vp != null)
                     {
-                        await vp.WaitForExitAsync();
-                        usedVendor = true;
-                        Log("[i] " + Path.GetFileName(setupExe) + " exit=" + vp.ExitCode, Color.Gray);
+                        // vendor setup hang ရင် 600s ပြီး kill (မဟုတ်ရင် fallback pnputil ကို စောင်းနေမယ်)
+                        bool vendorDone = true;
+                        using (var vCts = new CancellationTokenSource(TimeSpan.FromSeconds(600)))
+                        {
+                            try { await vp.WaitForExitAsync(vCts.Token); }
+                            catch (OperationCanceledException)
+                            {
+                                vendorDone = false;
+                                try { vp.Kill(entireProcessTree: true); } catch { }
+                                Log("[!] " + Path.GetFileName(setupExe) + " — 600s timeout, killed — pnputil fallback", Color.Orange);
+                            }
+                        }
+                        if (vendorDone)
+                        {
+                            usedVendor = true;
+                            Log("[i] " + Path.GetFileName(setupExe) + " exit=" + vp.ExitCode, Color.Gray);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -9605,7 +10668,7 @@ namespace PMKUnlocker
 
             Log("[*] Step 2/4: adb start-server + wait-for-device", Color.Orange);
             await ExecuteCommandCleanAsync("adb.exe", "start-server", "HiSilicon - Enable ADB", false, true, quiet: true);
-            await ExecuteCommandCleanAsync("adb.exe", "wait-for-device", "HiSilicon - Enable ADB", false, true, quiet: true);
+            await ExecuteCommandCleanAsync("adb.exe", "wait-for-device", "HiSilicon - Enable ADB", false, true, quiet: true, timeoutSec: 180);
 
             string devices = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (!(devices ?? "").Contains("\tdevice"))

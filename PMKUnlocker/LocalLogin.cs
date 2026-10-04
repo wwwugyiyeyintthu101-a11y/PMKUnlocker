@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace PMKUnlocker;
 
-// MST-style offline login (Email / Password / Remember me).
+// PMK-style offline login (Email / Password / Remember me).
 // Account က local (%LocalAppData%\PMKMobileTool\pmk_account.json) မှာပဲ — server မလို။
 // Remember me → DPAPI (CurrentUser) encrypt → auto-login next launch.
 internal static class LocalLogin

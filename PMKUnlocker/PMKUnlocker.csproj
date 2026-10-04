@@ -13,6 +13,7 @@
     <InformationalVersion>7.2.0-preview</InformationalVersion>
     <Product>PMK Mobile Tool</Product>
     <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
+    <ApplicationIcon>pmk.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

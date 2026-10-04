@@ -19,7 +19,9 @@ public partial class Form1
     // device မှာ PATH su ရှိ/မရှိ စစ် — မရှိရင် GhostLock temp-root client (/data/local/tmp/su) ကို သုံး (serial cache)
     private async Task<string> ResolveDeviceSuPathAsync(string serial)
     {
-        if (suPathCache.TryGetValue(serial, out string cached)) return cached;
+        // PATH su ("") = တည်ငြိမ် → cache ချက်ချင်းပြန်သုံး။ tmpsu ကတော့ root မရခိုက် cache ဖြစ်ထားနိုင် →
+        // အမြဲ revalidate (command -v 1 ခု) — Enforcing မှာ tmpsu EACCES ဖြစ်တာ ကာကွယ်ဖို့
+        if (suPathCache.TryGetValue(serial, out string cached) && cached.Length == 0) return cached;
         string path = "";
         try
         {

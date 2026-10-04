@@ -68,7 +68,7 @@ internal static class EdlAuth
             string pingXml = "<?xml version=\"1.0\" ?><data><nop verbose=\"0\" value=\"ping\"/></data>";
             await WriteAsciiAsync(sp, pingXml, ct);
             string pingResp = await ReadUntilAsync(sp, new[] { "ACK", "NAK", "ERROR" }, 3000, ct);
-            Say("    " + TrimForLog(pingResp));
+            SayResp(pingResp, Say);
             if (pingResp.Contains("NAK") || pingResp.Contains("ERROR"))
             {
                 // ping မအောင်မြင်လည်း configure/sig ဆက်ကြည့်ရမယ် (loader state မတူနိုင်)
@@ -88,7 +88,7 @@ internal static class EdlAuth
             Say("[*] Firehose: configure...");
             await WriteAsciiAsync(sp, configureXml, ct);
             string cfgResp = await ReadUntilAsync(sp, new[] { "Authenticated", "ACK", "NAK", "ERROR" }, 4000, ct);
-            Say("    " + TrimForLog(cfgResp));
+            SayResp(cfgResp, Say);
 
             bool alreadyAuth = cfgResp.Contains("Authenticated", StringComparison.OrdinalIgnoreCase)
                 || (cfgResp.Contains("ACK") && cfgResp.Contains("TargetName"));
@@ -129,7 +129,7 @@ internal static class EdlAuth
                     await WriteAsciiAsync(sp, sigXml, ct);
 
                     string sigAck = await ReadUntilAsync(sp, new[] { "ACK", "NAK", "ERROR" }, 5000, ct);
-                    Say("    " + TrimForLog(sigAck));
+                    SayResp(sigAck, Say);
                     if (!sigAck.Contains("ACK"))
                     {
                         lastFail = sigAck.Contains("NAK") ? "Sig command NAK before payload." : "Sig ACK timeout.";
@@ -144,7 +144,7 @@ internal static class EdlAuth
                         new[] { "Authenticated", "NAK", "ERROR" },
                         10000,
                         ct);
-                    Say("    " + TrimForLog(authResp));
+                    SayResp(authResp, Say);
 
                     if (authResp.Contains("Authenticated", StringComparison.OrdinalIgnoreCase)
                         || (authResp.Contains("ACK") && !authResp.Contains("NAK")))
@@ -192,7 +192,7 @@ internal static class EdlAuth
                     cfg2 += more;
                 }
 
-                Say("    " + TrimForLog(cfg2));
+                SayResp(cfg2, Say);
                 if (cfg2.Contains("TargetName") || (cfg2.Contains("ACK") && !cfg2.Contains("NAK")))
                     break;
                 if (attempt < 2) await Task.Delay(500, ct);
@@ -213,7 +213,7 @@ internal static class EdlAuth
             else if (cfg2.Contains("Authenticated", StringComparison.OrdinalIgnoreCase))
             {
                 string cfg3 = await ReadUntilAsync(sp, new[] { "ACK", "NAK", "ERROR" }, 3000, ct);
-                Say("    " + TrimForLog(cfg3));
+                SayResp(cfg3, Say);
                 result.Ok = cfg3.Contains("ACK");
                 result.Message = result.Ok
                     ? "Firehose ready after auth."
@@ -239,6 +239,16 @@ internal static class EdlAuth
         return result;
     }
 
+    // Firehose raw XML response — success (ACK/Authenticated) ဆိုရင် log ရှင်းအောင် မပြတော့။
+    // NAK/ERROR/response မရှိရင်ပဲ raw dump ပြ (debug အတွက်)။
+    private static void SayResp(string resp, Action<string> say)
+    {
+        bool ok = (resp.Contains("ACK") || resp.Contains("Authenticated")) &&
+                  !resp.Contains("NAK") && !resp.Contains("ERROR");
+        if (ok) return;
+        say("    " + (string.IsNullOrWhiteSpace(resp) ? "(no response)" : TrimForLog(resp)));
+    }
+
     // QSaharaServer.exe — loader ကို device ထဲ တင် (Sahara imgID 13)
     private static async Task<bool> RunSaharaAsync(string portName, string loaderPath, CancellationToken ct)
     {
@@ -260,8 +270,20 @@ internal static class EdlAuth
             using var proc = Process.Start(psi);
             if (proc == null) return false;
 
-            using var reg = ct.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
-            await proc.WaitForExitAsync(ct);
+            // QSaharaServer hang (device drop/port error) အတွက် 90s cap —
+            // timeout/STOP/external-cancel သုံးခုလုံးက proc ကို kill တယ် (မဟုတ်ရင် အမြဲတမ်း hang)
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(90));
+            using var reg = cts.Token.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
+            try
+            {
+                await proc.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+                return false;
+            }
             return proc.ExitCode == 0;
         }
         catch
