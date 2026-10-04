@@ -111,17 +111,7 @@ public class LoginForm : Form
             AutoSize = true,
             BackColor = Color.Transparent
         };
-        var lblVer = new Label
-        {
-            Text = "[ PMK ]  v7.2",
-            ForeColor = Color.FromArgb(220, 210, 255),
-            Font = new Font("Segoe UI", 9.5f),
-            Location = new Point(19, 34),
-            AutoSize = true,
-            BackColor = Color.Transparent
-        };
         panelTitle.Controls.Add(lblTitle);
-        panelTitle.Controls.Add(lblVer);
 
         // ---- status bar ----
         panelStatus = new Panel { Dock = DockStyle.Bottom, Height = 34, BackColor = StatusBg };
@@ -280,22 +270,12 @@ public class LoginForm : Form
         lnkRegister.Links.Add(22, 14, "register");
         lnkRegister.LinkClicked += (_, _) => ToggleRegisterMode(!registerMode);
 
-        // server hint
-        var lblHint = new Label
-        {
-            Text = "⌂  " + LicenseClient.BaseUrl,
-            Location = new Point(left, 278),
-            AutoSize = true,
-            ForeColor = Color.FromArgb(130, 130, 150),
-            Font = new Font("Segoe UI", 8.5f)
-        };
-
         panelCard.Controls.AddRange(new Control[]
         {
             lblEmail, txtEmail,
             lblPass, txtPassword, chkShow,
             chkRemember, btnLogin,
-            lnkRegister, lblHint
+            lnkRegister
         });
         panelBody.Controls.Add(panelCard);
 
