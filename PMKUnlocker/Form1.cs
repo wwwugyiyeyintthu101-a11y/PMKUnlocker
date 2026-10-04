@@ -2036,6 +2036,9 @@ namespace PMKUnlocker
         // — တကယ့် တန်ဖိုးတွေက ro.product.bootimage.* မှာ ရှိတယ်)။ ဒါကြောင့် getprop အားလုံးကို တစ်ခါ
         // dump လုပ်ပြီး fallback chain နဲ့ ဖတ်တယ် (adb call လည်း သက်သာတယ်)။
         private Dictionary<string, string> deviceProps = null;
+        // ရည်ရွယ်ချက်ရှိ reboot wait window (auto-reboot retry) အတွင်း — ဖုန်းပျောက်နေတာ သဘာဝမို့
+        // disconnect error တွေကို friendly line နဲ့ suppress လုပ်
+        private volatile bool rebootWaitActive = false;
 
         private async Task<bool> LoadDevicePropsAsync()
         {
@@ -2406,7 +2409,13 @@ namespace PMKUnlocker
             Func<List<string>, bool> tolerateRaw = null, int timeoutSec = 0, bool timeoutMeansSuccess = false)
         {
             try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
-            catch (Exception ex) { workflowFailed = true; Log("[FAIL] " + ex.Message, Color.Red); return false; }
+            catch (Exception ex)
+            {
+                workflowFailed = true;
+                if (rebootWaitActive) return false;
+                Log("[FAIL] " + ex.Message, Color.Red);
+                return false;
+            }
             bool ok = await ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess);
             if (flashWorkflowContext.Value && !ok) workflowFailed = true;
             return ok;
@@ -7846,7 +7855,7 @@ namespace PMKUnlocker
                             lblBattery.ForeColor = Color.FromArgb(180, 195, 215);
                         }
 
-                        if (currentState != lastDeviceState && showLog)
+                        if (currentState != lastDeviceState && showLog && !rebootWaitActive)
                         {
                             Log("[Auto-Detect] Device Disconnected.", Color.Gray);
                         }
@@ -7883,6 +7892,7 @@ namespace PMKUnlocker
             catch (Exception ex)
             {
                 if (flashWorkflowContext.Value) workflowFailed = true;
+                if (rebootWaitActive) return "";
                 Log("[!] " + ex.Message, Color.Orange);
                 return "";
             }
@@ -9753,6 +9763,13 @@ namespace PMKUnlocker
             DLine("Soc manufacturer", Prop("ro.soc.manufacturer"));
             DLine("Soc model", Prop("ro.soc.model"));
             DLine("Serialno", Prop("ro.serialno"));
+            DLine("IMEI", Prop("ro.ril.oem.imei1", "ro.ril.oem.imei", "ro.ril.miui.imei0", "persist.radio.imei1", "gsm.imei"));
+            DLine("IMEI2", Prop("ro.ril.oem.imei2", "ro.ril.miui.imei1", "persist.radio.imei2"));
+            DLine("MEID", Prop("ro.ril.oem.meid", "persist.radio.meid"));
+            string frpPath = (await ExecuteCommandQuickAsync("adb.exe",
+                "shell \"ls -d /dev/block/bootdevice/by-name/frp /dev/block/by-name/frp 2>/dev/null\"")).Trim();
+            frpPath = frpPath.Split('\n')[0].Trim();
+            DLine("FRP PST", frpPath);
             DLine("Version", fp.Android);
             DLine("SdkVersion", fp.Sdk);
             DLine("Android Cpu", Prop("ro.product.cpu.abi"));
@@ -10550,16 +10567,22 @@ namespace PMKUnlocker
                         : "[i] Leak/pipe stage fail — probabilistic (flaky) ဖြစ်နိုင်တယ်",
                     Color.Orange);
                 Log("[*] Auto-reboot ပြီး တစ်ခါပဲ ထပ်စမ်းမယ် (1/1)...", Color.Orange);
-                await ExecuteCommandQuickAsync("adb.exe", "reboot");
-                await Task.Delay(8000);
-                await ExecuteCommandCleanAsync("adb.exe", "wait-for-device", "Temp Root - wait device", false, true, quiet: true, timeoutSec: 180);
-                for (int i = 0; i < 30; i++)
+                rebootWaitActive = true;
+                try
                 {
-                    string bc = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop sys.boot_completed")).Trim();
-                    if (bc.StartsWith("1")) break;
-                    await Task.Delay(2000);
+                    Log("[i] Device rebooting — reconnect စောင့်နေသည်...", Color.Cyan);
+                    await ExecuteCommandQuickAsync("adb.exe", "reboot");
+                    await Task.Delay(8000);
+                    await ExecuteCommandCleanAsync("adb.exe", "wait-for-device", "Temp Root - wait device", false, true, quiet: true, timeoutSec: 180);
+                    for (int i = 0; i < 30; i++)
+                    {
+                        string bc = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop sys.boot_completed")).Trim();
+                        if (bc.StartsWith("1")) break;
+                        await Task.Delay(2000);
+                    }
+                    await Task.Delay(3000);
                 }
-                await Task.Delay(3000);
+                finally { rebootWaitActive = false; }
                 return await TryKernelExploitAsync(exploitsRoot, ex, fp, attempt + 1);
             }
 
