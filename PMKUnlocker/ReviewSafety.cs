@@ -5,11 +5,8 @@ namespace PMKUnlocker;
 
 internal static class ReviewSafety
 {
-    internal static bool ShouldReboot(bool enabled, bool didRun, bool failed, bool stopped, bool dryRun) =>
-        enabled && didRun && !failed && !stopped && !dryRun;
-
-    internal static async Task<bool> ExecuteUnlessDryRunAsync(bool dryRun, Func<Task<bool>> command) =>
-        !dryRun && await command();
+    internal static bool ShouldReboot(bool enabled, bool didRun, bool failed, bool stopped) =>
+        enabled && didRun && !failed && !stopped;
 
     internal static List<string> ExtractImages(string archive, string directory)
     {

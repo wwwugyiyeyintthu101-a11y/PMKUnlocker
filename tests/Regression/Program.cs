@@ -88,18 +88,11 @@ try
     }
     Check(ShopServices.ExpandedImageSize(Path.Combine(firmwareDir, "boot.img")) == 32768, "Sparse preflight uses expanded size, not file length");
     Check(ShopServices.CheckImages(firmwareDir, layout, false).Count == 1, "Oversized sparse image blocks preflight");
-    int launched = 0;
-    bool dryResult = await ReviewSafety.ExecuteUnlessDryRunAsync(true, () => { launched++; return Task.FromResult(true); });
-    Check(!dryResult && launched == 0, "Dry-run never invokes the device command");
-    bool liveResult = await ReviewSafety.ExecuteUnlessDryRunAsync(false, () => { launched++; return Task.FromResult(true); });
-    Check(liveResult && launched == 1, "Live command runs once and returns its result");
-    Check(!await ReviewSafety.ExecuteUnlessDryRunAsync(false, () => Task.FromResult(false)), "Command failure is preserved");
-    Check(ReviewSafety.ShouldReboot(true, true, false, false, false), "Successful operation permits enabled auto-reboot");
-    Check(!ReviewSafety.ShouldReboot(true, true, true, false, false), "Failed operation cannot auto-reboot");
-    Check(!ReviewSafety.ShouldReboot(true, false, false, false, false), "Cancelled dialog without a command cannot auto-reboot");
-    Check(!ReviewSafety.ShouldReboot(true, true, false, true, false), "STOP prevents auto-reboot");
-    Check(!ReviewSafety.ShouldReboot(true, true, false, false, true), "Dry-run prevents auto-reboot");
-    Check(!ReviewSafety.ShouldReboot(false, true, false, false, false), "Disabled auto-reboot is respected");
+    Check(ReviewSafety.ShouldReboot(true, true, false, false), "Successful operation permits enabled auto-reboot");
+    Check(!ReviewSafety.ShouldReboot(true, true, true, false), "Failed operation cannot auto-reboot");
+    Check(!ReviewSafety.ShouldReboot(true, false, false, false), "Cancelled dialog without a command cannot auto-reboot");
+    Check(!ReviewSafety.ShouldReboot(true, true, false, true), "STOP prevents auto-reboot");
+    Check(!ReviewSafety.ShouldReboot(false, true, false, false), "Disabled auto-reboot is respected");
     string source = Path.Combine(dir, "rawprogram.xml"), target = Path.Combine(dir, "filtered.xml");
     File.WriteAllText(source, "<data><program label='boot' filename='boot.img'/><program label='USERDATA' filename='data.img'/></data>");
     ReviewSafety.FilterUserdata(source, target);

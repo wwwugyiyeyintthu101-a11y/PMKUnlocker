@@ -131,11 +131,10 @@ namespace PMKUnlocker
         private TextBox txtPartFilter;
         private ContextMenuStrip ctxPartitionMenu;
 
-        // Header: platform + theme + dry-run status
+        // Header: platform + theme status
         private Label lblPlatformStatus;
         private Label lblBattery;
         private Button btnThemeToggle;
-        private CheckBox chkDryRun;
         private bool lightTheme = false;
         private string lastVbmetaBackupPath = "";
         private readonly HashSet<string> warnedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -287,7 +286,7 @@ namespace PMKUnlocker
         // (BROM/EDL mode ကနေ Android ပြန်ဝင်အောင်)။
         private async Task MaybeAutoRebootAsync(string platform, string arguments, string serial)
         {
-            if (IsDryRun || stopRequested) return;
+            if (stopRequested) return;
             string previousBootMode = Environment.GetEnvironmentVariable("PMK_MTK_BOOTMODE");
             string previousSerial = Environment.GetEnvironmentVariable("PMK_MTK_SERIAL");
             try
@@ -361,11 +360,6 @@ namespace PMKUnlocker
                 Log("[!] Another operation is still running.", Color.OrangeRed);
                 return;
             }
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] Operation skipped. No device commands sent; turn off Dry-run to perform this operation.", Color.Cyan);
-                return;
-            }
             string rebootPlatform = tabControl.SelectedTab == tabMtk ? "MTK" : tabControl.SelectedTab == tabQc ? "QC" : "";
             // forceReboot = op တစ်ခုအတွက် checkbox ကို ကျော်ပြီး reboot အတိအကျ သတ်မှတ် (ဥပမာ QC Userlock Reset)
             bool rebootEnabled = forceReboot ?? (rebootPlatform == "MTK" ? chkMtkAutoReboot.Checked : rebootPlatform == "QC" && chkQcAutoReboot.Checked);
@@ -389,7 +383,7 @@ namespace PMKUnlocker
 
                 // command တကယ် run ပြီးမှ reboot (folder dialog cancel ဆို reboot မလုပ်)
                 if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled && rebootArguments.Length > 0,
-                    workflowDidOp, workflowFailed, stopRequested, IsDryRun))
+                    workflowDidOp, workflowFailed, stopRequested))
                     await MaybeAutoRebootAsync(rebootPlatform, rebootArguments, rebootSerial);
             }
             finally
@@ -645,17 +639,6 @@ namespace PMKUnlocker
             if (toolTipMain != null)
                 Tip(btnThemeToggle, "Switch between Dark and Light theme.");
 
-            chkDryRun = new CheckBox
-            {
-                Text = "Dry-run",
-                Location = new Point(760, 18),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(255, 200, 90),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
-            };
-            Tip(chkDryRun,
-                "Dry-run mode: device command တွေ မပို့ပါ။ တကယ်လုပ်ရန် Dry-run ကို ပိတ်ပါ။");
-
             // Login email + ကျန်ရက် + clock — header ညာဘက် stack (overlap မဖြစ်အောင်)
             lblLicenseInfo = MakeLicenseLabel();
 
@@ -706,7 +689,7 @@ namespace PMKUnlocker
             panelRightInfo.Controls.Add(panelLicenseBadge); // Top
             panelTopHeader.Controls.Add(panelRightInfo);
 
-            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery, btnThemeToggle, chkDryRun });
+            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery, btnThemeToggle });
 
             // ================= 2. TAB CONTROL =================
             // အပေါ်ဘက် split panel ထဲမှာ ဖြည့်ထားတယ် (window resize လုပ်ရင် အလိုအလျောက် လိုက်ပြောင်း)
@@ -2416,14 +2399,9 @@ namespace PMKUnlocker
             bool clearPartitions = false, bool showRawOutput = false, bool quiet = false,
             Func<List<string>, bool> tolerateRaw = null, int timeoutSec = 0, bool timeoutMeansSuccess = false)
         {
-            if (!IsDryRun)
-            {
-                try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
-                catch (Exception ex) { workflowFailed = true; Log("[FAIL] " + ex.Message, Color.Red); return false; }
-            }
-            if (IsDryRun) Log("[DRY-RUN] Not executed: " + taskTitle + " | " + fileName + " " + arguments, Color.Cyan);
-            bool ok = await ReviewSafety.ExecuteUnlessDryRunAsync(IsDryRun,
-                () => ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess));
+            try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
+            catch (Exception ex) { workflowFailed = true; Log("[FAIL] " + ex.Message, Color.Red); return false; }
+            bool ok = await ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess);
             if (flashWorkflowContext.Value && !ok) workflowFailed = true;
             return ok;
         }
@@ -2807,12 +2785,6 @@ namespace PMKUnlocker
                 Debug.WriteLine("WarnIfImageTooLarge: " + ex.Message);
             }
             return true;
-        }
-
-        // ================= DRY-RUN MODE =================
-        private bool IsDryRun
-        {
-            get { return chkDryRun != null && chkDryRun.Checked; }
         }
 
         // ================= DRIVER HELPER =================
@@ -3287,7 +3259,7 @@ namespace PMKUnlocker
                     cmb.BackColor = inputBg;
                     cmb.ForeColor = inputFg;
                 }
-                else if (c is CheckBox cb && cb != chkDryRun && cb != chkMtkBackupVbmetaFirst)
+                else if (c is CheckBox cb && cb != chkMtkBackupVbmetaFirst)
                     cb.ForeColor = text;
                 else if (c is Label lb && lb != lblDeviceModeStatus && lb != lblPlatformStatus && lb != lblBattery && lb != lblPort
                     && lb != lblClock && lb != lblLicenseInfo)
@@ -3557,15 +3529,6 @@ namespace PMKUnlocker
 
         private async Task<bool> RunPartitionOpAsync(string op, string partition, string filePath, string title)
         {
-            // Dry-run: plan ပြပြီး actual write/erase မလုပ်
-            if (IsDryRun && (op == "w" || op == "e"))
-            {
-                Log("[DRY-RUN] Would " + (op == "w" ? "write" : "erase") + " [" + partition + "]" +
-                    (filePath != null ? " <- " + Path.GetFileName(filePath) : "") +
-                    " — no changes made.", Color.Cyan);
-                return true;
-            }
-
             if (op == "w" && filePath != null && !WarnIfImageTooLarge(partition, filePath))
                 return false;
 
@@ -3677,11 +3640,6 @@ namespace PMKUnlocker
                     Log("[!] " + title + ": file not found " + (filePath ?? "(null)"), Color.OrangeRed);
                     return false;
                 }
-                if (IsDryRun)
-                {
-                    Log("[DRY-RUN] Would write " + Path.GetFileName(filePath) + " → [" + partition + "] via adb su dd", Color.Cyan);
-                    return true;
-                }
                 string remote = "/data/local/tmp/pmk_write_" + partition + Path.GetExtension(filePath);
                 long flen = new FileInfo(filePath).Length;
                 Log("[*] WRITE [" + partition + "] " + Path.GetFileName(filePath) + " (" + FormatBytesLong(flen) + ") → " + dev, Color.Cyan);
@@ -3701,11 +3659,6 @@ namespace PMKUnlocker
 
             if (op == "e")
             {
-                if (IsDryRun)
-                {
-                    Log("[DRY-RUN] Would erase [" + partition + "] via adb su dd", Color.Cyan);
-                    return true;
-                }
                 string sz = (await ExecuteCommandQuickAsync("adb.exe",
                     "shell su -c \"blockdev --getsize64 " + dev + " 2>/dev/null\"")).Trim();
                 long.TryParse(sz, out long bytes);
@@ -4097,12 +4050,6 @@ namespace PMKUnlocker
             if (r == DialogResult.Cancel) return;
             bool fix = r == DialogResult.Yes;
 
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] Would " + (fix ? "apply Orange State Fix" : "restore vbmeta") +
-                    " on [vbmeta] — no changes made.", Color.Cyan);
-                return;
-            }
 
             try
             {
@@ -4150,12 +4097,6 @@ namespace PMKUnlocker
             if (r == DialogResult.Cancel) return;
             bool fix = r == DialogResult.Yes;
 
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] Would " + (fix ? "apply DM Fix" : "restore vbmeta") +
-                    " on [vbmeta, vbmeta_system, vbmeta_vendor] — no changes made.", Color.Cyan);
-                return;
-            }
 
             try
             {
@@ -4256,13 +4197,6 @@ namespace PMKUnlocker
                     "• Fix အတွက် disabled flags တွေ ပြန် original အတိုင်း ဖြစ်သွားမယ်",
                     "Undo Vbmeta Fix", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
-
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] Would restore " + part + " from " + Path.GetFileName(lastVbmetaBackupPath) +
-                    " — no changes made.", Color.Cyan);
-                return;
-            }
 
             bool ok = await RunPartitionOpAsync("w", part, lastVbmetaBackupPath,
                 "Undo Vbmeta Fix [" + part + "]");
@@ -4427,7 +4361,6 @@ namespace PMKUnlocker
 
         private async Task BtnQcStartFlashAsync()
         {
-            if (IsDryRun) { Log("[DRY-RUN] Flash skipped; no device commands sent.", Color.Cyan); return; }
             if (string.IsNullOrEmpty(qcFirmwareFolder) || !Directory.Exists(qcFirmwareFolder))
             {
                 Log("[!] No Qualcomm firmware folder selected - pick one first.", Color.OrangeRed);
@@ -4855,7 +4788,6 @@ namespace PMKUnlocker
 
         private async Task BtnSamStartFlashAsync()
         {
-            if (IsDryRun) { Log("[DRY-RUN] Flash skipped; no device commands sent.", Color.Cyan); return; }
             if (string.IsNullOrEmpty(samFirmwareFile) || !File.Exists(samFirmwareFile))
             {
                 MessageBox.Show("Firmware ဖိုင် မရွေးရသေးပါ — 📂 Browse နဲ့ အရင် ရွေးပါ။", "Firmware",
@@ -5214,7 +5146,6 @@ namespace PMKUnlocker
 
         private async Task BtnSpdDirectFlashAsync()
         {
-            if (IsDryRun) { Log("[DRY-RUN] Flash skipped; no device commands sent.", Color.Cyan); return; }
             if (!await EnsurePacExtractedAsync()) return;
 
             string spd = FindSpdDump();
@@ -5670,13 +5601,6 @@ namespace PMKUnlocker
             {
                 MessageBox.Show("Folder ထဲမှာ .img / .bin ဖိုင် မတွေ့ပါ။\n\n" + firmwareFolder,
                     "Firmware", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] Would flash " + imgCount + " image(s) from " + Path.GetFileName(firmwareFolder) +
-                    " (skip userdata: " + (skipUserdata ? "yes" : "no") + ") — no changes made.", Color.Cyan);
                 return;
             }
 
@@ -7885,7 +7809,6 @@ namespace PMKUnlocker
 
         private async Task<string> ExecuteCommandQuickAsync(string fileName, string arguments, int timeoutMs = 15000)
         {
-            if (IsDryRun) return "";
             try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
             catch (Exception ex)
             {
@@ -8666,13 +8589,12 @@ namespace PMKUnlocker
                 if (!File.Exists(PathsFile)) return;
                 string[] lines = File.ReadAllLines(PathsFile);
                 if (lines.Length > 0) edlScriptPath = lines[0].Trim();
-                if (lines.Length > 1) edlLoaderPath = lines[1].Trim();
+                // lines[1] (QC loader) / lines[8] (SPD loader) — မသိမ်းတော့ (user request)
                 if (lines.Length > 3) hisiBootloadersPath = lines[3].Trim();
                 if (lines.Length > 4) edlSigPath = lines[4].Trim();
                 if (lines.Length > 5) mtkDaPath = lines[5].Trim();
                 if (lines.Length > 6) mtkAuthPath = lines[6].Trim();
                 if (lines.Length > 7) mtkPreloaderPath = lines[7].Trim();
-                if (lines.Length > 8) spdLoaderPath = lines[8].Trim();
             }
             catch (Exception ex)
             {
@@ -8683,7 +8605,15 @@ namespace PMKUnlocker
 
         private void SaveEdlPaths()
         {
-                try { File.WriteAllLines(PathsFile, new string[] { edlScriptPath ?? "", edlLoaderPath ?? "", edlLegacySlot ?? "", hisiBootloadersPath ?? "", edlSigPath ?? "", mtkDaPath ?? "", mtkAuthPath ?? "", mtkPreloaderPath ?? "", spdLoaderPath ?? "" }); }
+            try
+            {
+                // slot 1 (QC loader) + slot 8 (SPD loader) = ကွက်လပ် — ရွေးထားတဲ့ loader များ ပိတ်ရင် ပြန်မပေါ်စေရ (index alignment အတွက် slot နေရာထား)
+                File.WriteAllLines(PathsFile, new string[]
+                {
+                    edlScriptPath ?? "", "", edlLegacySlot ?? "", hisiBootloadersPath ?? "",
+                    edlSigPath ?? "", mtkDaPath ?? "", mtkAuthPath ?? "", mtkPreloaderPath ?? "", ""
+                });
+            }
             catch (Exception ex) { Log("Path save error: " + ex.Message, Color.Red); }
         }
 
@@ -8726,19 +8656,9 @@ namespace PMKUnlocker
                 Set(chkSamAutoReboot, "SamAutoReboot");
                 Set(chkMtkBackupVbmetaFirst, "MtkBackupVbmetaFirst");
                 if (map.TryGetValue("LightTheme", out string lt)) { lightTheme = AsBool(lt); ApplyTheme(); }
-                if (map.TryGetValue("DryRun", out string dr) && chkDryRun != null) chkDryRun.Checked = AsBool(dr);
 
-                // String settings — firmware folder / last COM port / splitter
-                if (map.TryGetValue("MtkFirmware", out string mf) && !string.IsNullOrEmpty(mf) && Directory.Exists(mf))
-                {
-                    mtkFirmwareFolder = mf;
-                    if (txtScatterFolder != null) txtScatterFolder.Text = mf;
-                }
-                if (map.TryGetValue("QcFirmware", out string qf) && !string.IsNullOrEmpty(qf) && Directory.Exists(qf))
-                {
-                    qcFirmwareFolder = qf;
-                    if (txtQcFirmware != null) txtQcFirmware.Text = qf;
-                }
+                // String settings — last COM port / splitter
+                // Firmware folder paths ကို မသိမ်းတော့ — ဖွင့်တိုင်း clean (user request)
                 if (map.TryGetValue("LastPort", out string lp) && !string.IsNullOrEmpty(lp) &&
                     cmbPorts != null && cmbPorts.Items.Contains(lp))
                 {
@@ -8781,9 +8701,7 @@ namespace PMKUnlocker
                 Line(chkSamAutoReboot, "SamAutoReboot", sb);
                 Line(chkMtkBackupVbmetaFirst, "MtkBackupVbmetaFirst", sb);
                 sb.Append("LightTheme=").Append(lightTheme ? "1" : "0").AppendLine();
-                Line(chkDryRun, "DryRun", sb);
-                Str("MtkFirmware", mtkFirmwareFolder ?? "", sb);
-                Str("QcFirmware", qcFirmwareFolder ?? "", sb);
+                // MtkFirmware / QcFirmware ကို ရေးတော့မပါ — ပိတ်ရင် path အဟောင်း ဖျက်သွားမယ်
                 Str("LastPort", cmbPorts?.SelectedItem?.ToString() ?? "", sb);
                 Str("SplitterDistance", userAdjustedSplit ? splitMain.SplitterDistance.ToString() : "", sb);
                 File.WriteAllText(SettingsFile, sb.ToString(), Encoding.UTF8);
@@ -8851,12 +8769,6 @@ namespace PMKUnlocker
             {
                 Log("[!] Select Qualcomm 9008 COM port first.", Color.Orange);
                 return false;
-            }
-
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] EDL auto-auth skipped.", Color.Orange);
-                return true;
             }
 
             // တစ်ခါ auth ပြီးပြီးသား COM port ဆို ထပ်မလုပ် (device ကနေ EDL မထွက်ချိန်)
@@ -11923,7 +11835,6 @@ namespace PMKUnlocker
         // တခြား tool တွေ (SamFw etc) က COM port ကို AT နဲ့ သုံး — ADB မစောင့်ရ
         private async Task<bool> TrySamsungAtFactoryResetAsync()
         {
-            if (IsDryRun) { Log("[DRY-RUN] No device commands sent.", Color.Cyan); return false; }
             try
             {
                 // Modem ဦးစားပေး — Connectivity Device V2 (AT မဟုတ်) ကို ရှောင်
@@ -12403,11 +12314,6 @@ namespace PMKUnlocker
         // Download mode error screen → flash-count reset → normal Download mode (firmware မလို)
         private async Task RunSamsungSoftBrickAsync()
         {
-            if (IsDryRun)
-            {
-                Log("[DRY-RUN] SoftBrick Fix skipped — no device commands sent.", Color.Cyan);
-                return;
-            }
             if (isTaskRunning)
             {
                 Log("[!] Another operation is still running - wait for it to finish or press STOP.", Color.OrangeRed);
@@ -12916,7 +12822,6 @@ namespace PMKUnlocker
 
         private async Task<string> RunKirinUnlockAsync(KirinBootloader bl, string port)
         {
-            if (IsDryRun) { Log("[DRY-RUN] No device commands sent.", Color.Cyan); return null; }
             if (hisiCts != null) { try { hisiCts.Cancel(); hisiCts.Dispose(); } catch { } }
             hisiCts = new CancellationTokenSource();
             CancellationToken ct = hisiCts.Token;
