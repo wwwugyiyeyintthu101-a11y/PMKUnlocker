@@ -424,6 +424,8 @@ namespace PMKUnlocker
         private readonly string licPlan;
         private readonly string licExpires;
         private readonly int licDays;
+        // client-side license expiry — parse မအောင်ရင် MaxValue (login gate က block ပြီးသားမို့ တားစရာမလို)
+        private DateTime licenseExpiresUtc = DateTime.MaxValue;
 
         public Form1() : this("", "", "", 0) { }
 
@@ -433,6 +435,10 @@ namespace PMKUnlocker
             licPlan = plan;
             licExpires = expires;
             licDays = days;
+            if (DateTime.TryParse(expires, null, System.Globalization.DateTimeStyles.RoundtripKind, out var licExpDt))
+                licenseExpiresUtc = licExpDt.Kind == DateTimeKind.Local
+                    ? licExpDt.ToUniversalTime()
+                    : DateTime.SpecifyKind(licExpDt, DateTimeKind.Utc);
 
             InitializeComponent();
             // PMK icon — exe ထဲ embedded pmk.ico (title bar / taskbar)
@@ -527,9 +533,17 @@ namespace PMKUnlocker
             string[] tools = { "adb.exe", "fastboot.exe", "heimdall.exe", "fh_loader.exe", "QSaharaServer.exe" };
             foreach (string t in tools)
             {
-                // heimdall.exe က samsung\ ထဲမှာ — root တစ်ခုတည်း မစစ်ဘဲ subfolder ပါ ရှာ
-                if (string.IsNullOrEmpty(FindFileInToolFolders(t)))
-                    Log("[!] Bundled tool missing: " + t, Color.Orange);
+                try
+                {
+                    // heimdall.exe က samsung\ ထဲမှာ — root တစ်ခုတည်း မစစ်ဘဲ subfolder ပါ ရှာ
+                    // (FindFileInToolFolders → ToolIntegrity.Verify — tamper ရင် throw)
+                    if (string.IsNullOrEmpty(FindFileInToolFolders(t)))
+                        Log("[!] Bundled tool missing: " + t, Color.Orange);
+                }
+                catch (InvalidDataException ex)
+                {
+                    Log("[!] " + ex.Message, Color.OrangeRed);
+                }
             }
             if (!File.Exists(Path.Combine(Application.StartupPath, "pmk_mtk_op.py")))
                 Log("[!] pmk_mtk_op.py missing - MTK operations will fail.", Color.Orange);
@@ -1878,6 +1892,14 @@ namespace PMKUnlocker
                     pollTickBusy = true;
                     try
                     {
+                        // license သက်တမ်းကုန် → client-side block (server check ထပ်မံ)
+                        if (DateTime.UtcNow >= licenseExpiresUtc)
+                        {
+                            MessageBox.Show(this,
+                                "Subscription သက်တမ်းကုန်ပါပြီ — tool ကို ပိတ်ပါမည်။\n\nAdmin ကို renew လုပ်ပါ။",
+                                "License expired", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            Environment.Exit(0);
+                        }
                         // port list ကို ၃ စက္ကန့်တစ်ခါ (အလွန် ပေါ့)၊ device status ကို ၆ စက္ကန့်တစ်ခါ
                         // (adb/fastboot/PowerShell query တွေ ပါတာမို့ ပိုလေးတယ်)။
                         RefillPortCombo();

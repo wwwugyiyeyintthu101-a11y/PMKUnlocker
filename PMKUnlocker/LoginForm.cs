@@ -422,6 +422,25 @@ public class LoginForm : Form
                 return;
             }
 
+            // Client-side expiry enforce — server မှာလည်း block ပေမဲ့ client clock နဲ့ ပြန်စစ်
+            bool expired = loginRes.DaysLeft <= 0;
+            if (!expired && DateTime.TryParse(loginRes.ExpiresAt, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out DateTime expCli))
+            {
+                DateTime expUtc = expCli.Kind == DateTimeKind.Local
+                    ? expCli.ToUniversalTime()
+                    : DateTime.SpecifyKind(expCli, DateTimeKind.Utc);
+                expired = expUtc <= DateTime.UtcNow;
+            }
+            if (expired)
+            {
+                lblStatus.Text = "Subscription သက်တမ်းကုန်ပြီ — admin renew လုပ်ပါ";
+                lblStatus.ForeColor = Danger;
+                txtPassword.SelectAll();
+                txtPassword.Focus();
+                return;
+            }
+
             string email2 = txtEmail.Text.Trim();
             // Remember me → password ကို DPAPI နဲ့ သိမ်း (next launch မှာ prefill — Login နှိပ်ရုံ)
             if (chkRemember.Checked)
