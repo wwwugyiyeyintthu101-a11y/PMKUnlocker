@@ -19,6 +19,13 @@ public class LoginForm : Form
     private System.Windows.Forms.Timer loadTimer;
     private int loadFrames;
     private ProgressBar updBar;
+    private bool btnHover;
+
+    private static readonly Font FTitle = new Font("Segoe UI", 15f, FontStyle.Bold);
+    private static readonly Font FHead  = new Font("Segoe UI", 16f, FontStyle.Bold);
+    private static readonly Font FChip  = new Font("Segoe UI", 9f, FontStyle.Bold);
+    private static readonly Font FBtn   = new Font("Segoe UI", 10.5f, FontStyle.Bold);
+    private static readonly Font FLbl   = new Font("Segoe UI", 8.5f, FontStyle.Bold);
 
     // login OK ပြီးရင် Form1 ကို ပြဖို့
     public string LoginEmail { get; private set; } = "";
@@ -51,6 +58,14 @@ public class LoginForm : Form
         // + update gate check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login gate က စောင့်ယူ)
         Shown += (_, _) =>
         {
+            // fade-in (200ms)
+            var ft = new System.Windows.Forms.Timer { Interval = 20 };
+            ft.Tick += (_, _) =>
+            {
+                Opacity = Math.Min(1.0, Opacity + 0.12);
+                if (Opacity >= 1.0) { ft.Stop(); ft.Dispose(); }
+            };
+            ft.Start();
             try
             {
                 if (!string.IsNullOrWhiteSpace(UpdateChecker.Repo))
@@ -86,7 +101,7 @@ public class LoginForm : Form
         SuspendLayout();
 
         Text = "PMK Mobile Tool [ PMK ] v7.3";
-        ClientSize = new Size(460, 460);
+        ClientSize = new Size(490, 540);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
@@ -94,28 +109,46 @@ public class LoginForm : Form
         BackColor = PageBg;
         Font = new Font("Segoe UI", 9.5f);
         KeyPreview = true;
+        Opacity = 0;   // Shown မှာ fade-in
 
-        // ---- gradient title ----
-        panelTitle = new Panel { Dock = DockStyle.Top, Height = 56 };
+        // ---- gradient title + app icon + version chip ----
+        panelTitle = new Panel { Dock = DockStyle.Top, Height = 64 };
         panelTitle.Paint += (_, e) =>
         {
-            using var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelTitle.ClientRectangle, TitleTop, TitleBot, 0f);
-            e.Graphics.FillRectangle(lg, panelTitle.ClientRectangle);
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
+                panelTitle.ClientRectangle, TitleTop, TitleBot, 35f))
+                g.FillRectangle(lg, panelTitle.ClientRectangle);
+            using (var hl = new SolidBrush(Color.FromArgb(55, 255, 255, 255)))
+                g.FillRectangle(hl, 0, panelTitle.Height - 1, panelTitle.Width, 1);
+            try
+            {
+                using var ic = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (ic != null) g.DrawIcon(ic, new Rectangle(22, 17, 30, 30));
+            }
+            catch { }
+            TextRenderer.DrawText(g, "PMK Mobile Tool", FTitle,
+                new Rectangle(64, 6, 300, 52), Color.White,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            string ver = "v" + UpdateChecker.CurrentVersion;
+            var chip = new Rectangle(panelTitle.Width - 78, 21, 58, 22);
+            using (var cb = new SolidBrush(Color.FromArgb(65, 255, 255, 255)))
+                FillRounded(g, cb, chip, 11);
+            TextRenderer.DrawText(g, ver, FChip, chip,
+                Color.FromArgb(240, 240, 255),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            using (var cp = new Pen(Color.FromArgb(80, 255, 255, 255)))
+                DrawRounded(g, cp, chip, 11);
         };
-        var lblTitle = new Label
-        {
-            Text = "PMK Mobile Tool",
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 14f, FontStyle.Bold),
-            Location = new Point(18, 8),
-            AutoSize = true,
-            BackColor = Color.Transparent
-        };
-        panelTitle.Controls.Add(lblTitle);
 
         // ---- status bar ----
-        panelStatus = new Panel { Dock = DockStyle.Bottom, Height = 34, BackColor = StatusBg };
+        panelStatus = new Panel { Dock = DockStyle.Bottom, Height = 36, BackColor = StatusBg };
+        panelStatus.Paint += (_, e) =>
+        {
+            using var p = new Pen(Color.FromArgb(40, 139, 92, 246));
+            e.Graphics.DrawLine(p, 0, 0, panelStatus.Width, 0);
+        };
         lblStatus = new Label
         {
             Dock = DockStyle.Fill,
@@ -140,59 +173,109 @@ public class LoginForm : Form
         panelStatus.Controls.Add(updBar);
         panelStatus.Controls.Add(updSpacer);
 
-        // ---- body ----
+        // ---- body: bg gradient + glow blobs + card shadow ----
         panelBody = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = PageBg,
-            Padding = new Padding(28, 22, 28, 14)
+            Padding = new Padding(30, 24, 30, 16)
+        };
+        panelBody.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var bg = new System.Drawing.Drawing2D.LinearGradientBrush(
+                panelBody.ClientRectangle, Color.FromArgb(11, 13, 20), Color.FromArgb(20, 22, 40), 90f))
+                g.FillRectangle(bg, panelBody.ClientRectangle);
+            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(32, 139, 92, 246));
+            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(24, 56, 189, 247));
+            // card drop shadow
+            var cr = panelCard.Bounds;
+            if (cr.Width > 4)
+            {
+                using var sp = new System.Drawing.Drawing2D.GraphicsPath();
+                AddRounded(sp, new Rectangle(cr.X - 3, cr.Y + 5, cr.Width + 6, cr.Height + 4), 18);
+                using var sb = new SolidBrush(Color.FromArgb(50, 0, 0, 0));
+                g.FillPath(sb, sp);
+            }
         };
 
-        // white card
+        // rounded card — region cuts corners so bg gradient shows through
         panelCard = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = CardBg,
-            Padding = new Padding(30, 26, 30, 20)
+            BackColor = CardBg
         };
         panelCard.Paint += (_, e) =>
         {
-            var rect = new Rectangle(0, 0, panelCard.Width - 1, panelCard.Height - 1);
-            ControlPaint.DrawBorder(e.Graphics, rect,
-                BorderCol, ButtonBorderStyle.Solid);
-            using var accent = new SolidBrush(Accent);
-            e.Graphics.FillRectangle(accent, 0, 0, panelCard.Width, 4);
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
+                panelCard.ClientRectangle, Color.FromArgb(35, 38, 50), Color.FromArgb(26, 28, 38), 90f))
+                g.FillRectangle(lg, panelCard.ClientRectangle);
+            var rc = new Rectangle(0, 0, panelCard.Width - 1, panelCard.Height - 1);
+            using (var p = new Pen(Color.FromArgb(64, 72, 108), 1.4f))
+                DrawRounded(g, p, rc, 16);
+            using (var acc = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new Rectangle(0, 0, panelCard.Width, 4), Accent, Color.FromArgb(34, 211, 238), 0f))
+                g.FillRectangle(acc, 0, 0, panelCard.Width, 4);
         };
+        panelCard.Resize += (_, _) => UpdateCardRegion();
+        void UpdateCardRegion()
+        {
+            if (panelCard.Width < 4 || panelCard.Height < 4) return;
+            var r = System.Drawing.Region.FromHrgn(
+                CreateRoundRectRgn(0, 0, panelCard.Width, panelCard.Height, 32, 32));
+            panelCard.Region?.Dispose();
+            panelCard.Region = r;
+        }
 
         // layout inside card (absolute but well spaced)
-        int left = 30;
-        int fieldW = 370;
+        int left = 32;
+        int fieldW = 366;
+
+        var lblHead = new Label
+        {
+            Text = "Welcome back",
+            Location = new Point(left, 26),
+            AutoSize = true,
+            ForeColor = Color.White,
+            Font = FHead
+        };
+        var lblSub = new Label
+        {
+            Text = "Sign in to continue to PMK Mobile Tool",
+            Location = new Point(left, 62),
+            AutoSize = true,
+            ForeColor = TextMuted,
+            Font = new Font("Segoe UI", 9.5f)
+        };
 
         var lblEmail = new Label
         {
-            Text = "Email ID",
-            Location = new Point(left, 24),
+            Text = "EMAIL ID",
+            Location = new Point(left, 106),
             AutoSize = true,
-            ForeColor = TextDark,
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold)
+            ForeColor = Color.FromArgb(158, 164, 196),
+            Font = FLbl
         };
-        txtEmail = MakeTextBox(left, 50, fieldW, "user@gmail.com");
+        txtEmail = MakeField(left, 128, fieldW, 42, "user@gmail.com", out var emailWrap);
 
         var lblPass = new Label
         {
-            Text = "Password",
-            Location = new Point(left, 96),
+            Text = "PASSWORD",
+            Location = new Point(left, 188),
             AutoSize = true,
-            ForeColor = TextDark,
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold)
+            ForeColor = Color.FromArgb(158, 164, 196),
+            Font = FLbl
         };
-        txtPassword = MakeTextBox(left, 122, fieldW - 70, "••••••••");
+        txtPassword = MakeField(left, 210, fieldW - 78, 42, "••••••••", out var passWrap);
         txtPassword.UseSystemPasswordChar = true;
 
         var chkShow = new CheckBox
         {
             Text = "Show",
-            Location = new Point(left + fieldW - 62, 124),
+            Location = new Point(left + fieldW - 70, 222),
             AutoSize = true,
             ForeColor = TextMuted,
             Font = new Font("Segoe UI", 9f),
@@ -204,7 +287,7 @@ public class LoginForm : Form
         chkRemember = new CheckBox
         {
             Text = "Remember me",
-            Location = new Point(left, 164),
+            Location = new Point(left, 266),
             AutoSize = true,
             ForeColor = TextDark,
             Font = new Font("Segoe UI", 9.5f),
@@ -212,53 +295,72 @@ public class LoginForm : Form
             Cursor = Cursors.Hand
         };
 
-        // round Login
+        // gradient rounded Login
         btnLogin = new Button
         {
-            Location = new Point(322, 168),
-            Size = new Size(76, 76),
+            Location = new Point(left, 298),
+            Size = new Size(fieldW, 46),
             FlatStyle = FlatStyle.Flat,
             BackColor = Accent,
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Font = FBtn,
             Cursor = Cursors.Hand,
             TabStop = false
         };
         btnLogin.FlatAppearance.BorderSize = 0;
         btnLogin.Click += async (_, _) => await OnLoginAsync();
         btnLogin.Region = System.Drawing.Region.FromHrgn(
-            CreateRoundRectRgn(0, 0, btnLogin.Width, btnLogin.Height, btnLogin.Width, btnLogin.Height));
+            CreateRoundRectRgn(0, 0, fieldW, 46, 24, 24));
         btnLogin.Paint += (_, e) =>
         {
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using var bg = new SolidBrush(btnLogin.Enabled || loading ? Accent : Color.Gray);
-            e.Graphics.FillEllipse(bg, 0, 0, btnLogin.Width - 1, btnLogin.Height - 1);
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var rc = new Rectangle(0, 0, btnLogin.Width - 1, btnLogin.Height - 1);
+            Color c1, c2, bd;
+            if (!btnLogin.Enabled)
+            {
+                c1 = Color.FromArgb(70, 74, 92); c2 = Color.FromArgb(54, 58, 74); bd = Color.FromArgb(90, 95, 115);
+            }
+            else if (btnHover)
+            {
+                c1 = Color.FromArgb(167, 139, 250); c2 = Color.FromArgb(124, 58, 237); bd = Color.FromArgb(196, 181, 253);
+            }
+            else
+            {
+                c1 = Color.FromArgb(139, 92, 246); c2 = Color.FromArgb(109, 40, 217); bd = Color.FromArgb(167, 139, 250);
+            }
+            using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
+                btnLogin.ClientRectangle, c1, c2, 90f))
+                g.FillRectangle(lg, btnLogin.ClientRectangle);
+            using (var gl = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new Rectangle(0, 0, btnLogin.Width, 20), Color.FromArgb(45, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+                g.FillRectangle(gl, 2, 2, btnLogin.Width - 4, 18);
+            using (var p = new Pen(bd, 1.3f))
+                DrawRounded(g, p, rc, 12);
             if (loading)
             {
-                // spinner dots
                 var c = btnLogin.ClientRectangle;
-                int cx = c.Width / 2, cy = c.Height / 2 - 4;
+                int cx = c.Width / 2, cy = c.Height / 2 - 3;
                 for (int i = 0; i < 3; i++)
                 {
                     int phase = (loadFrames + i) % 3;
                     int alpha = phase == 0 ? 255 : phase == 1 ? 140 : 70;
                     using var brush = new SolidBrush(Color.FromArgb(alpha, Color.White));
-                    e.Graphics.FillEllipse(brush, cx - 14 + i * 12, cy - 4, 8, 8);
+                    g.FillEllipse(brush, cx - 44 + i * 12, cy - 4, 8, 8);
                 }
-                TextRenderer.DrawText(e.Graphics, "Loading", btnLogin.Font,
-                    new Rectangle(0, cy + 10, c.Width, 20), Color.White,
+                TextRenderer.DrawText(g, registerMode ? "Creating account..." : "Signing in...", FBtn,
+                    new Rectangle(0, cy + 6, c.Width, 20), Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             else
             {
-                string label = registerMode ? "⊙\nCreate" : "⊙\nLogin";
-                TextRenderer.DrawText(e.Graphics, label, btnLogin.Font,
-                    btnLogin.ClientRectangle, Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.HidePrefix);
+                string label = registerMode ? "Create Account  →" : "Sign In  →";
+                TextRenderer.DrawText(g, label, FBtn, btnLogin.ClientRectangle, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
         };
-        btnLogin.MouseEnter += (_, _) => { if (btnLogin.Enabled && !loading) btnLogin.BackColor = AccentHover; };
-        btnLogin.MouseLeave += (_, _) => { btnLogin.BackColor = Accent; };
+        btnLogin.MouseEnter += (_, _) => { if (btnLogin.Enabled && !loading) { btnHover = true; btnLogin.Invalidate(); } };
+        btnLogin.MouseLeave += (_, _) => { btnHover = false; btnLogin.Invalidate(); };
 
         // loading spinner timer
         loadTimer = new System.Windows.Forms.Timer { Interval = 120 };
@@ -272,11 +374,11 @@ public class LoginForm : Form
         lnkRegister = new LinkLabel
         {
             Text = "Account မရှိသေးပါ — Register Here",
-            Location = new Point(left, 248),
+            Location = new Point(left, 362),
             AutoSize = true,
             LinkColor = AccentDark,
             ActiveLinkColor = Accent,
-            ForeColor = TextDark,
+            ForeColor = TextMuted,
             Font = new Font("Segoe UI", 9.5f),
             Cursor = Cursors.Hand
         };
@@ -286,8 +388,9 @@ public class LoginForm : Form
 
         panelCard.Controls.AddRange(new Control[]
         {
-            lblEmail, txtEmail,
-            lblPass, txtPassword, chkShow,
+            lblHead, lblSub,
+            lblEmail, emailWrap,
+            lblPass, passWrap, chkShow,
             chkRemember, btnLogin,
             lnkRegister
         });
@@ -322,24 +425,96 @@ public class LoginForm : Form
         AcceptButton = btnLogin;
         ResumeLayout(false);
         PerformLayout();
+        UpdateCardRegion();
     }
 
-    private static TextBox MakeTextBox(int x, int y, int w, string placeholder)
+    // rounded-rect paint helpers
+    private static void AddRounded(System.Drawing.Drawing2D.GraphicsPath path, Rectangle r, int rad)
     {
-        var tb = new TextBox
+        int d = Math.Min(rad * 2, Math.Min(r.Width, r.Height));
+        if (d < 2) { path.AddRectangle(r); return; }
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+    }
+
+    private static void FillRounded(Graphics g, Brush b, Rectangle r, int rad)
+    {
+        using var p = new System.Drawing.Drawing2D.GraphicsPath();
+        AddRounded(p, r, rad);
+        g.FillPath(b, p);
+    }
+
+    private static void DrawRounded(Graphics g, Pen p, Rectangle r, int rad)
+    {
+        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+        AddRounded(path, r, rad);
+        g.DrawPath(p, path);
+    }
+
+    private static void DrawGlow(Graphics g, Rectangle bounds, Color center)
+    {
+        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+        path.AddEllipse(bounds);
+        using var br = new System.Drawing.Drawing2D.PathGradientBrush(path)
+        {
+            CenterColor = center,
+            SurroundColors = new[] { Color.FromArgb(0, center.R, center.G, center.B) }
+        };
+        g.FillPath(br, path);
+    }
+
+    // rounded input field: wrapper panel (border/glow) + borderless textbox
+    private TextBox MakeField(int x, int y, int w, int h, string placeholder, out Panel result)
+    {
+        var wrap = new Panel
         {
             Location = new Point(x, y),
-            Size = new Size(w, 30),
-            Font = new Font("Segoe UI", 10.5f),
-            BorderStyle = BorderStyle.FixedSingle,
+            Size = new Size(w, h),
+            BackColor = InputBg,
+            Padding = new Padding(14, 2, 14, 2)
+        };
+        wrap.Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, w, h, 24, 24));
+        var tb = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.None,
+            Font = new Font("Segoe UI", 11.5f),
             BackColor = InputBg,
             ForeColor = TextDark,
-            MaxLength = 120
+            MaxLength = 120,
+            Text = placeholder
         };
-        tb.GotFocus += (_, _) => { if (tb.Text == placeholder) { tb.Text = ""; tb.ForeColor = TextDark; } };
-        tb.LostFocus += (_, _) => { if (string.IsNullOrWhiteSpace(tb.Text)) { tb.Text = placeholder; tb.ForeColor = Color.FromArgb(120, 120, 140); } };
-        tb.Text = placeholder;
         tb.ForeColor = Color.FromArgb(120, 120, 140);
+        tb.GotFocus += (_, _) =>
+        {
+            wrap.Tag = true;
+            wrap.Invalidate();
+            if (tb.Text == placeholder) { tb.Text = ""; tb.ForeColor = TextDark; }
+        };
+        tb.LostFocus += (_, _) =>
+        {
+            wrap.Tag = false;
+            wrap.Invalidate();
+            if (string.IsNullOrWhiteSpace(tb.Text)) { tb.Text = placeholder; tb.ForeColor = Color.FromArgb(120, 120, 140); }
+        };
+        wrap.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            bool on = wrap.Tag is true;
+            if (on)
+            {
+                using var glow = new Pen(Color.FromArgb(45, 139, 92, 246), 5f);
+                DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
+            }
+            using var p = new Pen(on ? Accent : Color.FromArgb(58, 64, 94), on ? 2f : 1.3f);
+            DrawRounded(g, p, new Rectangle(1, 1, wrap.Width - 3, wrap.Height - 3), 12);
+        };
+        wrap.Controls.Add(tb);
+        result = wrap;
         return tb;
     }
 
