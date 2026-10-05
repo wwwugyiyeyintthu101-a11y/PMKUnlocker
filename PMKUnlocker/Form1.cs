@@ -11033,29 +11033,18 @@ namespace PMKUnlocker
             {
                 foreach (int baud in bauds)
                 {
-                    using (var sp = new SerialPort(comName, baud, Parity.None, 8, StopBits.One))
+                    (AtProbeOutcome kind, SerialPort sp, string _) =
+                        await OpenAndProbeAtAsync(comName, baud, 3000, 300, 3000);
+                    if (kind == AtProbeOutcome.OpenFail) break;
+                    if (kind == AtProbeOutcome.Silent)
                     {
-                        sp.DtrEnable = true;
-                        sp.RtsEnable = true;
-                        sp.ReadTimeout = 3000;
-                        sp.WriteTimeout = 2000;
-                        try { sp.Open(); }
-                        catch (Exception ex)
-                        {
-                            Log("[i] " + comName + "@" + baud + " open fail: " + ex.Message, Color.Gray);
-                            break;
-                        }
-
+                        Log("[i] " + comName + "@" + baud + " no AT response", Color.Gray);
+                        continue;
+                    }
+                    using (sp)
+                    {
                         try
                         {
-                            await Task.Delay(300);
-                            sp.DiscardInBuffer();
-                            sp.DiscardOutBuffer();
-                            string at0 = await ReadAtResponseAsync(sp, "AT", 3000);
-                            bool talks = AtHasOk(at0) || AtHasError(at0) ||
-                                (at0 != null && (at0.Contains("AT") || at0.Contains("+")));
-                            if (!talks) { Log("[i] " + comName + "@" + baud + " no AT response", Color.Gray); continue; }
-
                             string portLabel = string.IsNullOrWhiteSpace(label) ? comName : label;
                             if (!portLabel.Contains(comName, StringComparison.OrdinalIgnoreCase))
                                 portLabel = portLabel + " (" + comName + ")";
@@ -11721,29 +11710,18 @@ namespace PMKUnlocker
             {
                 foreach (int baud in bauds)
                 {
-                    using (var sp = new SerialPort(comName, baud, Parity.None, 8, StopBits.One))
+                    (AtProbeOutcome kind, SerialPort sp, string _) =
+                        await OpenAndProbeAtAsync(comName, baud, 2500, 250, 2500);
+                    if (kind == AtProbeOutcome.OpenFail) break;
+                    if (kind == AtProbeOutcome.Silent)
                     {
-                        sp.DtrEnable = true;
-                        sp.RtsEnable = true;
-                        sp.ReadTimeout = 2500;
-                        sp.WriteTimeout = 2000;
-                        try { sp.Open(); }
-                        catch (Exception ex)
-                        {
-                            Log("[i] " + comName + "@" + baud + " open fail: " + ex.Message, Color.Gray);
-                            break;
-                        }
-
+                        Log("[i] " + comName + "@" + baud + " no AT response", Color.Gray);
+                        continue;
+                    }
+                    using (sp)
+                    {
                         try
                         {
-                            await Task.Delay(250);
-                            sp.DiscardInBuffer();
-                            sp.DiscardOutBuffer();
-                            string at0 = await ReadAtResponseAsync(sp, "AT", 2500);
-                            bool talks = AtHasOk(at0) || AtHasError(at0) ||
-                                (at0 != null && (at0.Contains("AT") || at0.Contains("+")));
-                            if (!talks) { Log("[i] " + comName + "@" + baud + " no AT response", Color.Gray); continue; }
-
                             Log("[*] AT ADB enable via " + comName + " (Label: " +
                                 (string.IsNullOrWhiteSpace(label) ? "-" : label) + ") @" + baud, Color.Cyan);
                             await ReadAtResponseAsync(sp, "ATE0", 2000);
@@ -11789,25 +11767,14 @@ namespace PMKUnlocker
             {
                 foreach (int baud in bauds)
                 {
-                    using (var sp = new SerialPort(comName, baud, Parity.None, 8, StopBits.One))
+                    (AtProbeOutcome kind, SerialPort sp, string _) =
+                        await OpenAndProbeAtAsync(comName, baud, 3000, 250, 3000, quiet: true);
+                    if (kind == AtProbeOutcome.OpenFail) break;
+                    if (kind != AtProbeOutcome.Talks) continue;
+                    using (sp)
                     {
-                        sp.DtrEnable = true;
-                        sp.RtsEnable = true;
-                        sp.ReadTimeout = 3000;
-                        sp.WriteTimeout = 2000;
-                        try { sp.Open(); }
-                        catch { break; }
-
                         try
                         {
-                            await Task.Delay(250);
-                            sp.DiscardInBuffer();
-                            sp.DiscardOutBuffer();
-                            string at0 = await ReadAtResponseAsync(sp, "AT", 3000);
-                            bool talks = AtHasOk(at0) || AtHasError(at0) ||
-                                (at0 != null && (at0.Contains("AT") || at0.Contains("+")));
-                            if (!talks) continue;
-
                             await ReadAtResponseAsync(sp, "ATE0", 2000);
                             async Task<string> Q(string cmd) =>
                                 AtPayload(await ReadAtResponseAsync(sp, cmd, 3500));
@@ -12135,36 +12102,15 @@ namespace PMKUnlocker
             int[] bauds = { 115200, 9600, 460800, 57600 };
             foreach (int baud in bauds)
             {
-                using (var sp = new SerialPort(comName, baud, Parity.None, 8, StopBits.One))
+                (AtProbeOutcome kind, SerialPort sp, string at0) =
+                    await OpenAndProbeAtAsync(comName, baud, 2000, 250, 2000, warmupCrlf: true);
+                if (kind == AtProbeOutcome.OpenFail) return false;
+                Log("[i] AT@" + baud + " resp: " + AtBrief(at0), Color.Gray);
+                if (kind != AtProbeOutcome.Talks) continue;
+                using (sp)
                 {
-                    sp.DtrEnable = true;
-                    sp.RtsEnable = true;
-                    sp.ReadTimeout = 2000;
-                    sp.WriteTimeout = 2000;
-                    try { sp.Open(); }
-                    catch (Exception ex)
-                    {
-                        Log("[i] " + comName + "@" + baud + " open fail: " + ex.Message, Color.Gray);
-                        return false;
-                    }
-
                     try
                     {
-                        await Task.Delay(250);
-                        sp.DiscardInBuffer();
-                        sp.DiscardOutBuffer();
-
-                        sp.Write("\r\n");
-                        await Task.Delay(100);
-                        sp.DiscardInBuffer();
-                        string atResp = await ReadAtResponseAsync(sp, "AT");
-                        Log("[i] AT@" + baud + " resp: " + AtBrief(atResp), Color.Gray);
-
-                        bool modemTalks = AtHasOk(atResp) || AtHasError(atResp) ||
-                                          (atResp != null && (atResp.Contains("AT") || atResp.Contains("+")));
-                        if (!modemTalks)
-                            continue;
-
                         await ReadAtResponseAsync(sp, "ATE0");
 
                         bool resetOk = false;
@@ -12209,6 +12155,58 @@ namespace PMKUnlocker
                 }
             }
             return false;
+        }
+
+        // AT serial prologue — info / quick-info / ADB-enable / factory-reset 4 နေရာမှာ
+        // ထပ်နေတဲ့ open → settle → "AT" probe ကို ဒီမှာ ပေါင်းတယ်။
+        //   OpenFail = open fail (caller break/return), Silent = မဖြောင်း (continue),
+        //   Talks = sp open — caller က using(sp) + body ဆက်ပြီး dispose လုပ်တယ်။
+        private enum AtProbeOutcome { OpenFail, Silent, Talks }
+
+        private async Task<(AtProbeOutcome Outcome, SerialPort Sp, string Probe)> OpenAndProbeAtAsync(
+            string comName, int baud, int readTimeoutMs, int settleMs, int probeTimeoutMs,
+            bool warmupCrlf = false, bool quiet = false)
+        {
+            var sp = new SerialPort(comName, baud, Parity.None, 8, StopBits.One)
+            {
+                DtrEnable = true,
+                RtsEnable = true,
+                ReadTimeout = readTimeoutMs,
+                WriteTimeout = 2000
+            };
+            try { sp.Open(); }
+            catch (Exception ex)
+            {
+                if (!quiet) Log("[i] " + comName + "@" + baud + " open fail: " + ex.Message, Color.Gray);
+                sp.Dispose();
+                return (AtProbeOutcome.OpenFail, null, null);
+            }
+            try
+            {
+                await Task.Delay(settleMs);
+                sp.DiscardInBuffer();
+                sp.DiscardOutBuffer();
+                if (warmupCrlf)
+                {
+                    sp.Write("\r\n");
+                    await Task.Delay(100);
+                    sp.DiscardInBuffer();
+                }
+                string at0 = await ReadAtResponseAsync(sp, "AT", probeTimeoutMs);
+                bool talks = AtHasOk(at0) || AtHasError(at0) ||
+                    (at0 != null && (at0.Contains("AT") || at0.Contains("+")));
+                if (!talks)
+                {
+                    sp.Dispose();
+                    return (AtProbeOutcome.Silent, null, at0);
+                }
+                return (AtProbeOutcome.Talks, sp, at0);
+            }
+            catch
+            {
+                sp.Dispose();
+                throw;
+            }
         }
 
         // AT response တွင် result line "OK" ရှိမှန်း (echo/line-break ကို OK မထင်)
