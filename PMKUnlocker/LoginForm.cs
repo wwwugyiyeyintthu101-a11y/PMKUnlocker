@@ -103,7 +103,7 @@ public class LoginForm : Form
     {
         SuspendLayout();
 
-        Text = "PMK Mobile Tool [ PMK ] v7.3";
+        Text = "PMK Mobile Tool [ PMK ] v" + UpdateChecker.CurrentVersion;
         ClientSize = new Size(490, 540);
         FormBorderStyle = FormBorderStyle.None;   // native title bar removed (custom title panel only)
         MaximizeBox = false;
