@@ -26,6 +26,8 @@ public class LoginForm : Form
     private static readonly Font FChip  = new Font("Segoe UI", 9f, FontStyle.Bold);
     private static readonly Font FBtn   = new Font("Segoe UI", 10.5f, FontStyle.Bold);
     private static readonly Font FLbl   = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+    private static readonly Font FBdg   = new Font("Segoe UI", 13f, FontStyle.Bold);
+    private static readonly Font FWm    = new Font("Segoe UI", 110f, FontStyle.Bold);
 
     // login OK ပြီးရင် Form1 ကို ပြဖို့
     public string LoginEmail { get; private set; } = "";
@@ -37,15 +39,16 @@ public class LoginForm : Form
     private static readonly Color Accent      = Color.FromArgb(139, 92, 246);
     private static readonly Color AccentHover = Color.FromArgb(124, 58, 237);
     private static readonly Color AccentDark  = Color.FromArgb(167, 139, 250);
-    private static readonly Color TitleTop    = Color.FromArgb(76, 29, 149);
-    private static readonly Color TitleBot    = Color.FromArgb(124, 58, 237);
+    private static readonly Color Cyan        = Color.FromArgb(34, 211, 238);
+    private static readonly Color TitleTop    = Color.FromArgb(49, 46, 129);   // indigo
+    private static readonly Color TitleBot    = Color.FromArgb(124, 58, 237);  // violet
     private static readonly Color PageBg      = Color.FromArgb(18, 20, 24);
     private static readonly Color CardBg      = Color.FromArgb(32, 35, 42);
     private static readonly Color StatusBg    = Color.FromArgb(26, 29, 35);
     private static readonly Color TextDark    = Color.FromArgb(235, 235, 245);
     private static readonly Color TextMuted   = Color.FromArgb(150, 150, 170);
     private static readonly Color BorderCol   = Color.FromArgb(70, 75, 95);
-    private static readonly Color InputBg     = Color.FromArgb(44, 48, 58);
+    private static readonly Color InputBg     = Color.FromArgb(36, 40, 62);
     private static readonly Color Success     = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger      = Color.FromArgb(255, 110, 110);
 
@@ -122,14 +125,16 @@ public class LoginForm : Form
                 g.FillRectangle(lg, panelTitle.ClientRectangle);
             using (var hl = new SolidBrush(Color.FromArgb(55, 255, 255, 255)))
                 g.FillRectangle(hl, 0, panelTitle.Height - 1, panelTitle.Width, 1);
-            try
-            {
-                using var ic = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-                if (ic != null) g.DrawIcon(ic, new Rectangle(22, 17, 30, 30));
-            }
-            catch { }
+            // PMK logo tile
+            var tile = new Rectangle(18, 12, 40, 40);
+            using (var tl = new System.Drawing.Drawing2D.LinearGradientBrush(tile, Cyan, Color.FromArgb(124, 58, 237), 45f))
+                FillRounded(g, tl, tile, 10);
+            using (var tp = new Pen(Color.FromArgb(130, 255, 255, 255), 1.2f))
+                DrawRounded(g, tp, tile, 10);
+            TextRenderer.DrawText(g, "PMK", FBdg, tile, Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             TextRenderer.DrawText(g, "PMK Mobile Tool", FTitle,
-                new Rectangle(64, 6, 300, 52), Color.White,
+                new Rectangle(68, 6, 300, 52), Color.White,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             string ver = "v" + UpdateChecker.CurrentVersion;
             var chip = new Rectangle(panelTitle.Width - 78, 21, 58, 22);
@@ -185,10 +190,10 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var bg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelBody.ClientRectangle, Color.FromArgb(11, 13, 20), Color.FromArgb(20, 22, 40), 90f))
+                panelBody.ClientRectangle, Color.FromArgb(9, 11, 22), Color.FromArgb(24, 26, 54), 90f))
                 g.FillRectangle(bg, panelBody.ClientRectangle);
-            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(32, 139, 92, 246));
-            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(24, 56, 189, 247));
+            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(36, 139, 92, 246));
+            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(26, 34, 211, 238));
             // card drop shadow
             var cr = panelCard.Bounds;
             if (cr.Width > 4)
@@ -211,13 +216,26 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelCard.ClientRectangle, Color.FromArgb(35, 38, 50), Color.FromArgb(26, 28, 38), 90f))
+                panelCard.ClientRectangle, Color.FromArgb(28, 31, 50), Color.FromArgb(19, 21, 34), 90f))
                 g.FillRectangle(lg, panelCard.ClientRectangle);
+            // giant PMK watermark (subtle — GDI+ honors alpha)
+            using (var wm = new SolidBrush(Color.FromArgb(8, 167, 139, 250)))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Far })
+                g.DrawString("PMK", FWm, wm, new RectangleF(0, panelCard.Height - 170, panelCard.Width - 24, 170), sf);
+            // PMK badge (glow + gradient tile) top-left
+            var badge = new Rectangle(32, 22, 54, 54);
+            DrawGlow(g, new Rectangle(14, 4, 90, 90), Color.FromArgb(40, 139, 92, 246));
+            using (var bl = new System.Drawing.Drawing2D.LinearGradientBrush(badge, Cyan, Color.FromArgb(124, 58, 237), 45f))
+                FillRounded(g, bl, badge, 14);
+            using (var bp = new Pen(Color.FromArgb(150, 255, 255, 255), 1.3f))
+                DrawRounded(g, bp, badge, 14);
+            TextRenderer.DrawText(g, "PMK", FBdg, badge, Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             var rc = new Rectangle(0, 0, panelCard.Width - 1, panelCard.Height - 1);
-            using (var p = new Pen(Color.FromArgb(64, 72, 108), 1.4f))
+            using (var p = new Pen(Color.FromArgb(72, 80, 132), 1.4f))
                 DrawRounded(g, p, rc, 16);
             using (var acc = new System.Drawing.Drawing2D.LinearGradientBrush(
-                new Rectangle(0, 0, panelCard.Width, 4), Accent, Color.FromArgb(34, 211, 238), 0f))
+                new Rectangle(0, 0, panelCard.Width, 4), Accent, Cyan, 0f))
                 g.FillRectangle(acc, 0, 0, panelCard.Width, 4);
         };
         panelCard.Resize += (_, _) => UpdateCardRegion();
@@ -237,7 +255,7 @@ public class LoginForm : Form
         var lblHead = new Label
         {
             Text = "Welcome back",
-            Location = new Point(left, 26),
+            Location = new Point(left + 70, 26),
             AutoSize = true,
             ForeColor = Color.White,
             Font = FHead
@@ -245,9 +263,9 @@ public class LoginForm : Form
         var lblSub = new Label
         {
             Text = "Sign in to continue to PMK Mobile Tool",
-            Location = new Point(left, 62),
+            Location = new Point(left + 70, 56),
             AutoSize = true,
-            ForeColor = TextMuted,
+            ForeColor = Color.FromArgb(165, 172, 202),
             Font = new Font("Segoe UI", 9.5f)
         };
 
@@ -507,10 +525,10 @@ public class LoginForm : Form
             bool on = wrap.Tag is true;
             if (on)
             {
-                using var glow = new Pen(Color.FromArgb(45, 139, 92, 246), 5f);
+                using var glow = new Pen(Color.FromArgb(45, 34, 211, 238), 5f);
                 DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
             }
-            using var p = new Pen(on ? Accent : Color.FromArgb(58, 64, 94), on ? 2f : 1.3f);
+            using var p = new Pen(on ? Cyan : Color.FromArgb(56, 62, 100), on ? 2f : 1.3f);
             DrawRounded(g, p, new Rectangle(1, 1, wrap.Width - 3, wrap.Height - 3), 12);
         };
         wrap.Controls.Add(tb);
