@@ -580,7 +580,7 @@ namespace PMKUnlocker
                 Location = new Point(15, 18),
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(0, 200, 255)
+                ForeColor = Color.FromArgb(86, 145, 250)
             };
 
             cmbPorts = new ComboBox
@@ -633,7 +633,7 @@ namespace PMKUnlocker
                 Text = "Platform: ADB / FB",
                 Location = new Point(15, 53),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 180, 255),
+                ForeColor = Color.FromArgb(139, 92, 246),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
@@ -1028,7 +1028,7 @@ namespace PMKUnlocker
                 Text = "⚡ FIRMWARE FLASH  —  pick the scatter file, then press START FLASH",
                 Location = new Point(UiX(0), UiY(3) + 8),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
@@ -1123,11 +1123,11 @@ namespace PMKUnlocker
             dgvPartitions.CellMouseDown += DgvPartitions_CellMouseDown;
             dgvPartitions.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
             dgvPartitions.DefaultCellStyle.ForeColor = Color.White;
-            dgvPartitions.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0, 122, 204);
+            dgvPartitions.DefaultCellStyle.SelectionBackColor = Color.FromArgb(86, 145, 250);
             dgvPartitions.DefaultCellStyle.SelectionForeColor = Color.White;
             dgvPartitions.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
             dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(35, 40, 50);
-            dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(0, 200, 255);
+            dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(86, 145, 250);
             dgvPartitions.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             dgvPartitions.ColumnHeadersHeight = 32;
             dgvPartitions.EnableHeadersVisualStyles = false;
@@ -1206,7 +1206,7 @@ namespace PMKUnlocker
                 Text = "⚡ FIRMWARE FLASH  —  pick the firmware folder, then press START FLASH",
                 Location = new Point(UiX(0), UiY(2) + 2),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
@@ -1284,12 +1284,12 @@ namespace PMKUnlocker
             };
             EnsureThemePaint(grpQcLoaderPicker);
 
-            var lblQcLoaderTitle = new Label { Text = "🧩 LOADER PICKER (Firehose)", Location = new Point(9, 13), AutoSize = true, ForeColor = Color.FromArgb(0, 200, 255), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+            var lblQcLoaderTitle = new Label { Text = "🧩 LOADER PICKER (Firehose)", Location = new Point(9, 13), AutoSize = true, ForeColor = Color.FromArgb(86, 145, 250), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
             var lblBrandTag = new Label { Text = "Brand:", Location = new Point(175, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
             cmbQcBrand = new ComboBox { Location = new Point(225, 10), Size = new Size(160, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
             var lblModelTag = new Label { Text = "Model:", Location = new Point(405, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
             cmbQcModel = new ComboBox { Location = new Point(455, 10), Size = new Size(220, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
-            lblQcLoaderStatus = new Label { Text = "Auto Detect (saved / auto loader)", Location = new Point(690, 14), AutoSize = false, Size = new Size(230, 20), ForeColor = Color.Cyan, Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
+            lblQcLoaderStatus = new Label { Text = "Auto Detect (saved / auto loader)", Location = new Point(690, 14), AutoSize = false, Size = new Size(230, 20), ForeColor = Color.FromArgb(86, 145, 250), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
 
             grpQcLoaderPicker.Controls.AddRange(new Control[] { lblQcLoaderTitle, lblBrandTag, cmbQcBrand, lblModelTag, cmbQcModel, lblQcLoaderStatus });
             cmbQcBrand.SelectedIndexChanged += CmbQcBrand_SelectedIndexChanged;
@@ -1363,7 +1363,7 @@ namespace PMKUnlocker
                 Text = "⚡ FIRMWARE FLASH (heimdall CLI)  —  .img or .tar/.tar.md5",
                 Location = new Point(UiX(0), UiY(3) + 2),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
@@ -1455,7 +1455,7 @@ namespace PMKUnlocker
                 Text = "⚡ FIRMWARE FLASH (spd_dump CLI)  —  PAC firmware",
                 Location = new Point(UiX(0), UiY(2) + 2),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
@@ -1641,7 +1641,7 @@ namespace PMKUnlocker
                 Location = new Point(660, 8),
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
-                ForeColor = Color.LightSkyBlue,
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
 
@@ -1710,7 +1710,7 @@ namespace PMKUnlocker
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(8, 0, 0, 0),
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             });
 
@@ -1868,6 +1868,9 @@ namespace PMKUnlocker
                     SyncPartitionPanel(true);
                 }
                 catch { }
+
+                // selected platform tab က startup မှာ highlight မပေါ်တတ် — Load မှာ တစ်ခါထပ်ချိန်
+                SyncPlatformBar();
 
                 // COM port list ကို "Scan Port" မနှိပ်ဘဲ အလိုအလျောက် refresh (၃ စက္ကန့်တစ်ခါ)
                 // — ဖုန်း ချိတ်/ဖြုတ်လုပ်တာနဲ့ port က ချက်ချင်း ပေါ်လာအောင်။
@@ -2862,7 +2865,7 @@ namespace PMKUnlocker
                     Text = "USB / COM driver status — known VIDs (MediaTek, Qualcomm, Samsung, Unisoc, HiSilicon)",
                     Location = new Point(12, 10),
                     AutoSize = true,
-                    ForeColor = lightTheme ? Color.FromArgb(0, 95, 155) : Color.FromArgb(0, 200, 255),
+                    ForeColor = lightTheme ? Color.FromArgb(58, 102, 208) : Color.FromArgb(86, 145, 250),
                     Font = new Font("Segoe UI", 9f, FontStyle.Bold)
                 };
 
@@ -3076,25 +3079,25 @@ namespace PMKUnlocker
                 if (lightTheme)
                 {
                     // 3D-ish platform buttons: raised face + hard border
-                    platformBtns[i].BackColor = sel ? Color.FromArgb(0, 110, 185) : Color.FromArgb(240, 244, 252);
+                    platformBtns[i].BackColor = sel ? Color.FromArgb(58, 102, 208) : Color.FromArgb(240, 244, 252);
                     platformBtns[i].ForeColor = sel ? Color.White : Color.FromArgb(40, 44, 56);
-                    platformBtns[i].FlatAppearance.BorderColor = sel ? Color.FromArgb(0, 150, 210) : Color.FromArgb(145, 155, 178);
-                    platformBtns[i].FlatAppearance.MouseOverBackColor = sel ? Color.FromArgb(0, 125, 200) : Color.FromArgb(248, 250, 254);
-                    platformBtns[i].FlatAppearance.MouseDownBackColor = sel ? Color.FromArgb(0, 95, 160) : Color.FromArgb(228, 234, 246);
+                    platformBtns[i].FlatAppearance.BorderColor = sel ? Color.FromArgb(90, 130, 235) : Color.FromArgb(145, 155, 178);
+                    platformBtns[i].FlatAppearance.MouseOverBackColor = sel ? Color.FromArgb(70, 112, 225) : Color.FromArgb(248, 250, 254);
+                    platformBtns[i].FlatAppearance.MouseDownBackColor = sel ? Color.FromArgb(48, 86, 180) : Color.FromArgb(228, 234, 246);
                 }
                 else
                 {
-                    platformBtns[i].BackColor = sel ? Color.FromArgb(0, 122, 204) : Color.FromArgb(38, 44, 54);
+                    platformBtns[i].BackColor = sel ? Color.FromArgb(86, 145, 250) : Color.FromArgb(38, 44, 54);
                     platformBtns[i].ForeColor = Color.White;
-                    platformBtns[i].FlatAppearance.BorderColor = sel ? Color.FromArgb(0, 200, 255) : Color.FromArgb(70, 80, 95);
+                    platformBtns[i].FlatAppearance.BorderColor = sel ? Color.FromArgb(129, 169, 255) : Color.FromArgb(70, 80, 95);
                 }
             }
         }
 
         private static bool IsAccentTitle(Color c)
         {
-            // section titles: cyan (0,200,255) / blue-cyan accents
-            return c.R < 90 && c.G > 150 && c.B > 200;
+            // section titles: badge blue (86,145,250) / violet (139,92,246) + ယခင် cyan accents
+            return c.B > 200 && c.G > 60 && c.G < 210 && c.R < 175;
         }
 
         // 3D panel paint — light mode: vertical gradient + raised/etched bevel; dark: flat + group border
@@ -3221,8 +3224,8 @@ namespace PMKUnlocker
             Color panelBg = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(23, 26, 32);
             Color logBg = lightTheme ? Color.FromArgb(228, 234, 246) : Color.FromArgb(10, 11, 14);
             Color logFg = lightTheme ? Color.FromArgb(15, 85, 48) : Color.FromArgb(0, 255, 128);
-            Color accent = lightTheme ? Color.FromArgb(0, 95, 155) : Color.FromArgb(0, 200, 255);
-            Color accentSoft = lightTheme ? Color.FromArgb(0, 80, 140) : Color.FromArgb(0, 180, 255);
+            Color accent = lightTheme ? Color.FromArgb(58, 102, 208) : Color.FromArgb(86, 145, 250);
+            Color accentSoft = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(139, 92, 246);
             Color chromeBg = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(22, 25, 30);
             Color chromeBg2 = lightTheme ? Color.FromArgb(217, 224, 238) : Color.FromArgb(26, 29, 35);
             Color inputBg = lightTheme ? Color.FromArgb(243, 246, 252) : Color.FromArgb(38, 42, 50);
@@ -3252,7 +3255,7 @@ namespace PMKUnlocker
             if (panelPartBtns != null) { panelPartBtns.BackColor = chromeBg2; EnsureThemePaint(panelPartBtns); }
             if (tabControl != null) tabControl.BackColor = formBg;
             if (panelTopHeader != null) EnsureThemePaint(panelTopHeader);
-            if (lblProgressStatus != null) lblProgressStatus.ForeColor = lightTheme ? Color.FromArgb(0, 80, 140) : Color.LightSkyBlue;
+            if (lblProgressStatus != null) lblProgressStatus.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
             if (lblSpeedBadge != null) lblSpeedBadge.ForeColor = lightTheme ? Color.FromArgb(0, 110, 50) : Color.FromArgb(0, 255, 128);
 
             foreach (TabPage tp in tabControl.TabPages)
@@ -3353,7 +3356,7 @@ namespace PMKUnlocker
                 dgvPartitions.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(28, 31, 38);
                 dgvPartitions.DefaultCellStyle.ForeColor = text;
                 dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 40, 50);
-                dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(0, 80, 140) : Color.FromArgb(0, 200, 255);
+                dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
             }
 
             // ShopPanel / Setup-Backups grids + lists
@@ -3365,7 +3368,7 @@ namespace PMKUnlocker
                     dgv.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(35, 40, 50);
                     dgv.DefaultCellStyle.ForeColor = text;
                     dgv.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 40, 50);
-                    dgv.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(0, 80, 140) : Color.FromArgb(0, 200, 255);
+                    dgv.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
                 }
                 else if (c is ListBox lb && lb != null)
                 {
@@ -6055,7 +6058,7 @@ namespace PMKUnlocker
             Rectangle bounds = tabControl.GetTabRect(e.Index);
             bool isSelected = (tabControl.SelectedIndex == e.Index);
 
-            Color backColor = isSelected ? Color.FromArgb(0, 122, 204) : Color.FromArgb(32, 35, 42);
+            Color backColor = isSelected ? Color.FromArgb(86, 145, 250) : Color.FromArgb(32, 35, 42);
             Color textColor = isSelected ? Color.White : Color.Gainsboro;
 
             using (SolidBrush brush = new SolidBrush(backColor))
@@ -6065,7 +6068,7 @@ namespace PMKUnlocker
 
             if (isSelected)
             {
-                using (Pen pen = new Pen(Color.FromArgb(0, 220, 255), 3))
+                using (Pen pen = new Pen(Color.FromArgb(86, 145, 250), 3))
                 {
                     g.DrawLine(pen, bounds.Left, bounds.Bottom - 2, bounds.Right, bounds.Bottom - 2);
                 }
@@ -6111,7 +6114,7 @@ namespace PMKUnlocker
                 Text = title,
                 Location = new Point(9, 4),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(0, 200, 255),
+                ForeColor = Color.FromArgb(86, 145, 250),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 Tag = "accent"
             });
@@ -6135,8 +6138,8 @@ namespace PMKUnlocker
             switch (theme)
             {
                 case ButtonTheme.Cyan:
-                    gradStops = new[] { Color.FromArgb(0, 145, 230), Color.FromArgb(0, 95, 160), Color.FromArgb(0, 55, 110) };
-                    borderColor = Color.FromArgb(0, 180, 255);
+                    gradStops = new[] { Color.FromArgb(86, 145, 250), Color.FromArgb(112, 116, 246), Color.FromArgb(124, 74, 230) };
+                    borderColor = Color.FromArgb(150, 170, 255);
                     break;
                 case ButtonTheme.Green:
                     gradStops = new[] { Color.FromArgb(45, 175, 105), Color.FromArgb(20, 110, 60), Color.FromArgb(12, 70, 40) };
@@ -7136,7 +7139,7 @@ namespace PMKUnlocker
                         Location = new Point(120, 11),
                         Size = new Size(770, 18),
                         AutoEllipsis = true,
-                        ForeColor = Color.FromArgb(0, 220, 255),
+                        ForeColor = Color.FromArgb(86, 145, 250),
                         Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                     };
                     Button det = Create3DButton("🔍 Detect", 15, 7, 96, 26, ButtonTheme.Cyan);
@@ -7164,7 +7167,7 @@ namespace PMKUnlocker
                     Text = title + "  (" + total + " models)",
                     Location = new Point(15, y - 19),
                     AutoSize = true,
-                    ForeColor = Color.FromArgb(0, 200, 255),
+                    ForeColor = Color.FromArgb(86, 145, 250),
                     Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                 };
 
@@ -7215,7 +7218,7 @@ namespace PMKUnlocker
                     Location = new Point(513, y + 4),
                     Size = new Size(175, 18),
                     AutoEllipsis = true,
-                    ForeColor = Color.FromArgb(0, 220, 255),
+                    ForeColor = Color.FromArgb(86, 145, 250),
                     Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                 };
 
@@ -7303,7 +7306,7 @@ namespace PMKUnlocker
                     {
                         // MTK: model ဘာမှ မရွေးရသေးရင် "Auto Detect" — တခြား tab တွေ "—"
                         lbChip.Text = page == tabMtk ? "Auto Detect" : "—";
-                        lbChip.ForeColor = Color.FromArgb(0, 220, 255);
+                        lbChip.ForeColor = Color.FromArgb(86, 145, 250);
                         opsStrip.Visible = false;
                         SetPickerOffset(page, PickerOff(page, false));
                         return;
@@ -9005,7 +9008,7 @@ namespace PMKUnlocker
                 if (lblQcLoaderStatus != null)
                 {
                     lblQcLoaderStatus.Text = "Auto Detect (saved / auto loader)";
-                    lblQcLoaderStatus.ForeColor = Color.Cyan;
+                    lblQcLoaderStatus.ForeColor = Color.FromArgb(86, 145, 250);
                 }
                 return;
             }
@@ -9364,7 +9367,7 @@ namespace PMKUnlocker
                 edlLoaderPath = "";
                 SaveEdlPaths();
                 lblQcLoaderStatus.Text = "Auto Detect (no manual loader selected)";
-                lblQcLoaderStatus.ForeColor = Color.Cyan;
+                lblQcLoaderStatus.ForeColor = Color.FromArgb(86, 145, 250);
                 return;
             }
 
@@ -9957,13 +9960,13 @@ namespace PMKUnlocker
             Color formBg = dark ? Color.FromArgb(18, 20, 24) : Color.FromArgb(222, 228, 240);
             Color listBg = dark ? Color.FromArgb(26, 29, 35) : Color.FromArgb(243, 246, 252);
             Color listFg = dark ? Color.Gainsboro : Color.FromArgb(35, 38, 48);
-            Color titleC = dark ? Color.FromArgb(0, 200, 255) : Color.FromArgb(0, 95, 155);
+            Color titleC = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
             Color hintC = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(70, 80, 95);
-            Color okBg = dark ? Color.FromArgb(0, 122, 204) : Color.FromArgb(0, 95, 155);
+            Color okBg = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
             Color cancelBg = dark ? Color.FromArgb(60, 66, 76) : Color.FromArgb(150, 158, 170);
             Color greenC = dark ? Color.FromArgb(0, 220, 140) : Color.FromArgb(0, 130, 70);
             Color redC = dark ? Color.FromArgb(255, 110, 80) : Color.FromArgb(200, 60, 30);
-            Color cyanC = dark ? Color.FromArgb(0, 200, 255) : Color.FromArgb(0, 95, 155);
+            Color cyanC = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
 
             using var dlg = new Form
             {
@@ -10026,7 +10029,7 @@ namespace PMKUnlocker
                 using (var fb = new SolidBrush(fg))
                     e.Graphics.DrawString(list.Items[e.Index].ToString(), list.Font, fb, e.Bounds.X + 4, e.Bounds.Y + 4);
                 if ((e.State & DrawItemState.Focus) != 0)
-                    using (var p = new Pen(Color.FromArgb(0, 122, 204)))
+                    using (var p = new Pen(Color.FromArgb(86, 145, 250)))
                         e.Graphics.DrawRectangle(p, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
             };
             var cancel = new Button
@@ -12579,7 +12582,7 @@ namespace PMKUnlocker
                     Text = "OK",
                     Location = new Point(252, 128),
                     Size = new Size(88, 34),
-                    BackColor = Color.FromArgb(0, 122, 204),
+                    BackColor = Color.FromArgb(86, 145, 250),
                     ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
                     DialogResult = DialogResult.OK
