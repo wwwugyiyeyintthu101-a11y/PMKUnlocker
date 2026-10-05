@@ -213,6 +213,7 @@ namespace PMKUnlocker
         private CheckBox chkSamBackupPit;
         private CheckBox chkSamAutoReboot;
         private string qcFirmwareFolder = "";
+        private readonly Dictionary<string, long> flashFileSizes = new(StringComparer.OrdinalIgnoreCase);
         private string samFirmwareFile = "";
         private string spdFirmwareFile = "";
 
@@ -363,8 +364,6 @@ namespace PMKUnlocker
             string rebootPlatform = tabControl.SelectedTab == tabMtk ? "MTK" : tabControl.SelectedTab == tabQc ? "QC" : "";
             // forceReboot = op တစ်ခုအတွက် checkbox ကို ကျော်ပြီး reboot အတိအကျ သတ်မှတ် (ဥပမာ QC Userlock Reset)
             bool rebootEnabled = forceReboot ?? (rebootPlatform == "MTK" ? chkMtkAutoReboot.Checked : rebootPlatform == "QC" && chkQcAutoReboot.Checked);
-            string rebootArguments = rebootPlatform == "MTK" ? BuildMtkOpArgs("reset") :
-                rebootPlatform == "QC" && !string.IsNullOrEmpty(edlScriptPath) ? BuildEdlArgs("reset --resetmode=reset") : "";
             string rebootSerial = Environment.GetEnvironmentVariable("PMK_MTK_SERIAL");
             if (string.IsNullOrWhiteSpace(rebootSerial)) rebootSerial = string.IsNullOrWhiteSpace(cachedMtkComPort) ? "off" : cachedMtkComPort;
             workflowFailed = false;
@@ -381,10 +380,21 @@ namespace PMKUnlocker
                 try { await action(); }
                 catch (Exception ex) { workflowFailed = true; Log("[FAIL] Operation stopped: " + ex.Message, Color.Red); }
 
-                // command တကယ် run ပြီးမှ reboot (folder dialog cancel ဆို reboot မလုပ်)
-                if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled && rebootArguments.Length > 0,
+                // command တကယ် run ပြီးမှ reboot args တွက် — QC ရဲ့ edlScriptPath ဖြေရှင်းချက်က op
+                // အတွင်း/ပြီးမှ ဖြစ်နိုင်လို့ (flash က edl.py မသုံး — အရင် စတဲ့အချိန်က snapshot ယူထားလို့
+                // path အလွတ်ဖြစ်ရင် reboot တိတ်တည်း ပျောက်သွားတဲ့ bug)
+                string rebootArguments = rebootPlatform == "MTK" ? BuildMtkOpArgs("reset") :
+                    rebootPlatform == "QC" ? BuildQcRebootArgs() : "";
+                bool qcFirehoseFallback = rebootPlatform == "QC" && rebootArguments.Length == 0;
+                if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled &&
+                    (rebootArguments.Length > 0 || qcFirehoseFallback),
                     workflowDidOp, workflowFailed, stopRequested))
-                    await MaybeAutoRebootAsync(rebootPlatform, rebootArguments, rebootSerial);
+                {
+                    if (rebootArguments.Length > 0)
+                        await MaybeAutoRebootAsync(rebootPlatform, rebootArguments, rebootSerial);
+                    else
+                        await QcFirehoseRebootAsync();   // edl.py မရှိ → fh_loader firehose power reset
+                }
             }
             finally
             {
@@ -2546,7 +2556,7 @@ namespace PMKUnlocker
                                     if (start > 17 && end > start)
                                     {
                                         string fileNameOnly = line.Substring(start, end - start);
-                                        Log($" Flashing [ {fileNameOnly} ] ... Ok", Color.White);
+                                        Log($" Flashing [ {fileNameOnly} ]{FlashSizeSuffix(fileNameOnly)} ... Ok", Color.White);
                                     }
                                 }
                                 // ၂။ Patching လုပ်သည့် အပိုင်းကို ဖမ်းပြခြင်း
@@ -4357,6 +4367,33 @@ namespace PMKUnlocker
             return "";
         }
 
+        // flash log ထဲက file name ရဲ့ disk size — firmware folder (fh_loader --search_path) ကနေ
+        // ရှာပြီး " (X MB)" suffix ပေးတယ် (split parts တွေလည်း အတူတူ folder မှာ ရှိလို့ တွေ့တယ်)
+        private string FlashSizeSuffix(string fileName)
+        {
+            try
+            {
+                if (flashFileSizes.TryGetValue(fileName, out long cached)) return FormatFlashSize(cached);
+                if (string.IsNullOrEmpty(qcFirmwareFolder) || !Directory.Exists(qcFirmwareFolder)) return "";
+                string full = Path.Combine(qcFirmwareFolder, fileName);
+                if (!File.Exists(full))
+                    full = Directory.EnumerateFiles(qcFirmwareFolder, Path.GetFileName(fileName), SearchOption.AllDirectories)
+                        .FirstOrDefault() ?? "";
+                if (full.Length == 0 || !File.Exists(full)) return "";
+                long bytes = new FileInfo(full).Length;
+                flashFileSizes[fileName] = bytes;
+                return FormatFlashSize(bytes);
+            }
+            catch { return ""; }
+        }
+
+        private static string FormatFlashSize(long bytes)
+        {
+            return bytes >= 1048576
+                ? $" ({bytes / 1048576.0:0.##} MB)"
+                : $" ({bytes / 1024.0:0.##} KB)";
+        }
+
         private string ResolveToolPath(string fileName)
         {
             if (Path.IsPathRooted(fileName) || fileName.Contains(Path.DirectorySeparatorChar) ||
@@ -4389,6 +4426,7 @@ namespace PMKUnlocker
             {
                 if (fbd.ShowDialog() != DialogResult.OK) return;
                 qcFirmwareFolder = fbd.SelectedPath;
+                flashFileSizes.Clear();   // folder ပြောင်းရင် size cache အဟောင်း မကျန်စေရ
                 txtQcFirmware.Text = qcFirmwareFolder;
                 SaveSettings();
 
@@ -8796,6 +8834,43 @@ namespace PMKUnlocker
                 "EDL Module လိုအပ်ပါတယ်", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
             if (pick == DialogResult.OK) BrowseEdlScript();
             return !string.IsNullOrEmpty(edlScriptPath) && File.Exists(edlScriptPath);
+        }
+
+        // QC reboot args — flash က edl.py မသုံးလို့ path မရှိနိုင်; op ပြီးမှ တစ်ခါထပ်ရှာ (tools.json/tool folder)
+        private string BuildQcRebootArgs()
+        {
+            if (string.IsNullOrEmpty(edlScriptPath) || !File.Exists(edlScriptPath))
+            {
+                edlScriptPath = FindEdlScript();
+                if (!string.IsNullOrEmpty(edlScriptPath)) SaveEdlPaths();
+            }
+            return !string.IsNullOrEmpty(edlScriptPath) ? BuildEdlArgs("reset --resetmode=reset") : "";
+        }
+
+        // edl.py (python) မရှိတဲ့အခါ — flash သုံးခဲ့တဲ့ firehose session ကနေ fh_loader နဲ့ power reset
+        // (release ထဲ edl.py မပါလို့ မဖြစ်မနိ QC auto-reboot ပျောက်နေတာကို ကာကွယ်)
+        private async Task QcFirehoseRebootAsync()
+        {
+            try
+            {
+                string port = cmbPorts.SelectedItem?.ToString();
+                if (string.IsNullOrEmpty(port) || !port.StartsWith("COM"))
+                {
+                    Log("[!] Auto reboot skipped: no COM port.", Color.Orange);
+                    return;
+                }
+                string xml = Path.Combine(Path.GetTempPath(), "pmk_reboot.xml");
+                File.WriteAllText(xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><data><power value=\"reset\" /></data>");
+                Log("[*] Auto reboot after successful QC operation (firehose power reset).", Color.Orange);
+                bool rebooted = await ExecuteCommandCleanAsync("fh_loader.exe",
+                    $"--port=\\\\.\\{port} --sendxml=\"{xml}\" --noprompt",
+                    "Auto Reboot (QC)", quiet: true, timeoutSec: 60, timeoutMeansSuccess: true);
+                if (rebooted && !stopRequested) _ = WaitAndroidAfterRebootAsync();
+            }
+            catch (Exception ex)
+            {
+                Log("[!] Auto reboot failed: " + ex.Message, Color.Orange);
+            }
         }
 
         private string BuildEdlArgs(string command)
