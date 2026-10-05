@@ -20,6 +20,7 @@ public class LoginForm : Form
     private int loadFrames;
     private ProgressBar updBar;
     private bool btnHover;
+    private int titleHover;
 
     private static readonly Font FTitle = new Font("Segoe UI", 15f, FontStyle.Bold);
     private static readonly Font FHead  = new Font("Segoe UI", 16f, FontStyle.Bold);
@@ -39,16 +40,16 @@ public class LoginForm : Form
     private static readonly Color Accent      = Color.FromArgb(139, 92, 246);
     private static readonly Color AccentHover = Color.FromArgb(124, 58, 237);
     private static readonly Color AccentDark  = Color.FromArgb(167, 139, 250);
-    private static readonly Color Cyan        = Color.FromArgb(34, 211, 238);
-    private static readonly Color TitleTop    = Color.FromArgb(49, 46, 129);   // indigo
-    private static readonly Color TitleBot    = Color.FromArgb(124, 58, 237);  // violet
-    private static readonly Color PageBg      = Color.FromArgb(18, 20, 24);
-    private static readonly Color CardBg      = Color.FromArgb(32, 35, 42);
-    private static readonly Color StatusBg    = Color.FromArgb(26, 29, 35);
+    private static readonly Color Cyan        = Color.FromArgb(86, 145, 250);    // badge blue
+    private static readonly Color TitleTop    = Color.FromArgb(86, 145, 250);    // page gradient start (badge blue)
+    private static readonly Color TitleBot    = Color.FromArgb(139, 92, 246);    // page gradient end (badge violet)
+    private static readonly Color PageBg      = Color.FromArgb(112, 66, 224);
+    private static readonly Color CardBg      = Color.FromArgb(33, 31, 74);
+    private static readonly Color StatusBg    = Color.FromArgb(72, 47, 156);
     private static readonly Color TextDark    = Color.FromArgb(235, 235, 245);
     private static readonly Color TextMuted   = Color.FromArgb(150, 150, 170);
     private static readonly Color BorderCol   = Color.FromArgb(70, 75, 95);
-    private static readonly Color InputBg     = Color.FromArgb(36, 40, 62);
+    private static readonly Color InputBg     = Color.FromArgb(41, 38, 92);
     private static readonly Color Success     = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger      = Color.FromArgb(255, 110, 110);
 
@@ -61,14 +62,6 @@ public class LoginForm : Form
         // + update gate check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login gate က စောင့်ယူ)
         Shown += (_, _) =>
         {
-            // fade-in (200ms)
-            var ft = new System.Windows.Forms.Timer { Interval = 20 };
-            ft.Tick += (_, _) =>
-            {
-                Opacity = Math.Min(1.0, Opacity + 0.12);
-                if (Opacity >= 1.0) { ft.Stop(); ft.Dispose(); }
-            };
-            ft.Start();
             try
             {
                 if (!string.IsNullOrWhiteSpace(UpdateChecker.Repo))
@@ -81,6 +74,13 @@ public class LoginForm : Form
     // Windows 10/11 dark title bar
     [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    // borderless window — drag + native message support
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private void ApplyDarkTitleBar()
     {
@@ -105,14 +105,13 @@ public class LoginForm : Form
 
         Text = "PMK Mobile Tool [ PMK ] v7.3";
         ClientSize = new Size(490, 540);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = FormBorderStyle.None;   // native title bar removed (custom title panel only)
         MaximizeBox = false;
         MinimizeBox = true;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = PageBg;
         Font = new Font("Segoe UI", 9.5f);
         KeyPreview = true;
-        Opacity = 0;   // Shown မှာ fade-in
 
         // ---- gradient title + app icon + version chip ----
         panelTitle = new Panel { Dock = DockStyle.Top, Height = 64 };
@@ -121,23 +120,28 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelTitle.ClientRectangle, TitleTop, TitleBot, 35f))
+                panelTitle.ClientRectangle, TitleTop, TitleBot, 0f))
                 g.FillRectangle(lg, panelTitle.ClientRectangle);
-            using (var hl = new SolidBrush(Color.FromArgb(55, 255, 255, 255)))
-                g.FillRectangle(hl, 0, panelTitle.Height - 1, panelTitle.Width, 1);
+            // title text
+            TextRenderer.DrawText(g, "PMK Mobile Tool", FTitle,
+                new Rectangle(68, 6, 300, 52), Color.White,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             // PMK logo tile
             var tile = new Rectangle(18, 12, 40, 40);
             using (var tl = new System.Drawing.Drawing2D.LinearGradientBrush(tile, Cyan, Color.FromArgb(124, 58, 237), 45f))
                 FillRounded(g, tl, tile, 10);
+            using (var tg = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new Rectangle(tile.X, tile.Y, tile.Width, tile.Height),
+                Color.FromArgb(95, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+                FillRounded(g, tg, tile, 10);
             using (var tp = new Pen(Color.FromArgb(130, 255, 255, 255), 1.2f))
                 DrawRounded(g, tp, tile, 10);
             TextRenderer.DrawText(g, "PMK", FBdg, tile, Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            TextRenderer.DrawText(g, "PMK Mobile Tool", FTitle,
-                new Rectangle(68, 6, 300, 52), Color.White,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            using (var ip = new Pen(Color.FromArgb(70, 0, 0, 0), 1.1f))
+                DrawRounded(g, ip, new Rectangle(tile.X + 1, tile.Y + 2, tile.Width - 2, tile.Height - 3), 9);
             string ver = "v" + UpdateChecker.CurrentVersion;
-            var chip = new Rectangle(panelTitle.Width - 78, 21, 58, 22);
+            var chip = new Rectangle(panelTitle.Width - 166, 21, 58, 22);
             using (var cb = new SolidBrush(Color.FromArgb(65, 255, 255, 255)))
                 FillRounded(g, cb, chip, 11);
             TextRenderer.DrawText(g, ver, FChip, chip,
@@ -145,21 +149,71 @@ public class LoginForm : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             using (var cp = new Pen(Color.FromArgb(80, 255, 255, 255)))
                 DrawRounded(g, cp, chip, 11);
+            // custom window buttons (native title bar removed)
+            int bw = 44;
+            var minR = new Rectangle(panelTitle.Width - bw * 2, 0, bw, panelTitle.Height);
+            var closeR = new Rectangle(panelTitle.Width - bw, 0, bw, panelTitle.Height);
+            if (titleHover == 1)
+                using (var hb = new SolidBrush(Color.FromArgb(40, 255, 255, 255)))
+                    g.FillRectangle(hb, minR);
+            if (titleHover == 2)
+                using (var hb = new SolidBrush(Color.FromArgb(130, 225, 60, 70)))
+                    g.FillRectangle(hb, closeR);
+            int gcy = panelTitle.Height / 2;
+            using (var gpPen = new Pen(Color.White, 1.5f))
+            {
+                g.DrawLine(gpPen, minR.X + 16, gcy + 5, minR.X + 28, gcy + 5);
+                g.DrawLine(gpPen, closeR.X + 16, gcy - 6, closeR.X + 28, gcy + 6);
+                g.DrawLine(gpPen, closeR.X + 28, gcy - 6, closeR.X + 16, gcy + 6);
+            }
+        };
+
+        // custom title bar — drag + min/close (borderless)
+        panelTitle.MouseMove += (_, e) =>
+        {
+            int h = HitTitleButton(e.Location);
+            if (h != titleHover) { titleHover = h; panelTitle.Invalidate(); }
+        };
+        panelTitle.MouseLeave += (_, _) =>
+        {
+            if (titleHover != 0) { titleHover = 0; panelTitle.Invalidate(); }
+        };
+        panelTitle.MouseDown += (_, e) =>
+        {
+            if (HitTitleButton(e.Location) != 0) return;
+            if (e.Button == MouseButtons.Left)
+            {
+                ReleaseCapture();
+                SendMessage(Handle, 0xA1, 0x2, 0);   // HTCAPTION — window ကိုဆွဲရွှေ့
+            }
+        };
+        panelTitle.MouseClick += (_, e) =>
+        {
+            int h = HitTitleButton(e.Location);
+            if (h == 2) Close();
+            else if (h == 1) WindowState = FormWindowState.Minimized;
         };
 
         // ---- status bar ----
         panelStatus = new Panel { Dock = DockStyle.Bottom, Height = 36, BackColor = StatusBg };
         panelStatus.Paint += (_, e) =>
         {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var p = new Pen(Color.FromArgb(40, 139, 92, 246));
-            e.Graphics.DrawLine(p, 0, 0, panelStatus.Width, 0);
+            g.DrawLine(p, 0, 0, panelStatus.Width, 0);
+            // steady status dot (no blinking)
+            using (var dg = new SolidBrush(Color.FromArgb(55, 86, 145, 250)))
+                g.FillEllipse(dg, 5, 13, 10, 10);
+            using (var dd = new SolidBrush(Color.FromArgb(220, 86, 145, 250)))
+                g.FillEllipse(dd, 8, 16, 4, 4);
         };
         lblStatus = new Label
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(16, 0, 0, 0),
-            ForeColor = TextMuted,
+            ForeColor = Color.FromArgb(224, 226, 252),
             Text = "License sign-in — admin creates accounts",
             Font = new Font("Segoe UI", 9f)
         };
@@ -190,17 +244,25 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var bg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelBody.ClientRectangle, Color.FromArgb(9, 11, 22), Color.FromArgb(24, 26, 54), 90f))
+                panelBody.ClientRectangle, TitleTop, TitleBot, 0f))
                 g.FillRectangle(bg, panelBody.ClientRectangle);
-            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(36, 139, 92, 246));
-            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(26, 34, 211, 238));
-            // card drop shadow
+            // subtle dot grid (tech texture, visible around card)
+            using (var db = new SolidBrush(Color.FromArgb(20, 255, 255, 255)))
+            {
+                for (int xx = 10; xx < panelBody.Width; xx += 24)
+                    for (int yy = 10; yy < panelBody.Height; yy += 24)
+                        g.FillEllipse(db, xx, yy, 2, 2);
+            }
+            // soft glow sheen on the gradient (calm — no pulsing)
+            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(40, 255, 255, 255));
+            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(32, 170, 210, 255));
+            // card drop shadow (deeper — raised plate)
             var cr = panelCard.Bounds;
             if (cr.Width > 4)
             {
                 using var sp = new System.Drawing.Drawing2D.GraphicsPath();
                 AddRounded(sp, new Rectangle(cr.X - 3, cr.Y + 5, cr.Width + 6, cr.Height + 4), 18);
-                using var sb = new SolidBrush(Color.FromArgb(50, 0, 0, 0));
+                using var sb = new SolidBrush(Color.FromArgb(40, 0, 0, 0));
                 g.FillPath(sb, sp);
             }
         };
@@ -216,27 +278,49 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelCard.ClientRectangle, Color.FromArgb(28, 31, 50), Color.FromArgb(19, 21, 34), 90f))
+                panelCard.ClientRectangle, Color.FromArgb(36, 34, 84), Color.FromArgb(24, 22, 56), 90f))
                 g.FillRectangle(lg, panelCard.ClientRectangle);
             // giant PMK watermark (subtle — GDI+ honors alpha)
             using (var wm = new SolidBrush(Color.FromArgb(8, 167, 139, 250)))
             using (var sf = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Far })
                 g.DrawString("PMK", FWm, wm, new RectangleF(0, panelCard.Height - 170, panelCard.Width - 24, 170), sf);
-            // PMK badge (glow + gradient tile) top-left
+            // soft static halo behind Sign In button
+            DrawGlow(g, new Rectangle(6, 284, 418, 74), Color.FromArgb(58, 139, 92, 246));
+            // PMK badge (glow + gradient tile)
             var badge = new Rectangle(32, 22, 54, 54);
             DrawGlow(g, new Rectangle(14, 4, 90, 90), Color.FromArgb(40, 139, 92, 246));
             using (var bl = new System.Drawing.Drawing2D.LinearGradientBrush(badge, Cyan, Color.FromArgb(124, 58, 237), 45f))
                 FillRounded(g, bl, badge, 14);
+            using (var bg2 = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new Rectangle(badge.X, badge.Y, badge.Width, badge.Height),
+                Color.FromArgb(95, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+                FillRounded(g, bg2, badge, 14);
             using (var bp = new Pen(Color.FromArgb(150, 255, 255, 255), 1.3f))
                 DrawRounded(g, bp, badge, 14);
+            using (var ip2 = new Pen(Color.FromArgb(70, 0, 0, 0), 1.1f))
+                DrawRounded(g, ip2, new Rectangle(badge.X + 1, badge.Y + 2, badge.Width - 2, badge.Height - 3), 13);
             TextRenderer.DrawText(g, "PMK", FBdg, badge, Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             var rc = new Rectangle(0, 0, panelCard.Width - 1, panelCard.Height - 1);
-            using (var p = new Pen(Color.FromArgb(72, 80, 132), 1.4f))
+            using (var p = new Pen(Color.FromArgb(116, 118, 196), 1.4f))
                 DrawRounded(g, p, rc, 16);
             using (var acc = new System.Drawing.Drawing2D.LinearGradientBrush(
                 new Rectangle(0, 0, panelCard.Width, 4), Accent, Cyan, 0f))
                 g.FillRectangle(acc, 0, 0, panelCard.Width, 4);
+            // gradient headline
+            using (var hp = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                hp.AddString("Welcome back", FHead.FontFamily, (int)FHead.Style, FHead.Size,
+                    new PointF(102, 24), StringFormat.GenericDefault);
+                g.TranslateTransform(1.5f, 2f);
+                using (var gh = new SolidBrush(Color.FromArgb(160, 8, 8, 26)))
+                    g.FillPath(gh, hp);
+                g.ResetTransform();
+                var hgb = hp.GetBounds();
+                using (var hb2 = new System.Drawing.Drawing2D.LinearGradientBrush(
+                    hgb, Color.White, Color.FromArgb(186, 167, 250), 12f))
+                    g.FillPath(hb2, hp);
+            }
         };
         panelCard.Resize += (_, _) => UpdateCardRegion();
         void UpdateCardRegion()
@@ -252,14 +336,6 @@ public class LoginForm : Form
         int left = 32;
         int fieldW = 366;
 
-        var lblHead = new Label
-        {
-            Text = "Welcome back",
-            Location = new Point(left + 70, 26),
-            AutoSize = true,
-            ForeColor = Color.White,
-            Font = FHead
-        };
         var lblSub = new Label
         {
             Text = "Sign in to continue to PMK Mobile Tool",
@@ -353,6 +429,10 @@ public class LoginForm : Form
             using (var gl = new System.Drawing.Drawing2D.LinearGradientBrush(
                 new Rectangle(0, 0, btnLogin.Width, 20), Color.FromArgb(45, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
                 g.FillRectangle(gl, 2, 2, btnLogin.Width - 4, 18);
+            // 3D: dark bottom band (lifted look)
+            using (var shd = new System.Drawing.Drawing2D.LinearGradientBrush(
+                new Rectangle(0, btnLogin.Height - 16, btnLogin.Width, 16), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(85, 0, 0, 0), 90f))
+                g.FillRectangle(shd, 2, btnLogin.Height - 16, btnLogin.Width - 4, 13);
             using (var p = new Pen(bd, 1.3f))
                 DrawRounded(g, p, rc, 12);
             if (loading)
@@ -387,6 +467,10 @@ public class LoginForm : Form
             loadFrames = (loadFrames + 1) % 3;
             btnLogin.Invalidate();
         };
+        FormClosed += (_, _) =>
+        {
+            loadTimer.Stop(); loadTimer.Dispose();
+        };
 
         // Register link
         lnkRegister = new LinkLabel
@@ -406,7 +490,7 @@ public class LoginForm : Form
 
         panelCard.Controls.AddRange(new Control[]
         {
-            lblHead, lblSub,
+            lblSub,
             lblEmail, emailWrap,
             lblPass, passWrap, chkShow,
             chkRemember, btnLogin,
@@ -492,7 +576,7 @@ public class LoginForm : Form
             Location = new Point(x, y),
             Size = new Size(w, h),
             BackColor = InputBg,
-            Padding = new Padding(14, 2, 14, 2)
+            Padding = new Padding(14, 8, 14, 2)   // top-aligned edit text → push down to field center
         };
         wrap.Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, w, h, 24, 24));
         var tb = new TextBox
@@ -503,6 +587,7 @@ public class LoginForm : Form
             BackColor = InputBg,
             ForeColor = TextDark,
             MaxLength = 120,
+            TextAlign = HorizontalAlignment.Center,
             Text = placeholder
         };
         tb.ForeColor = Color.FromArgb(120, 120, 140);
@@ -525,15 +610,31 @@ public class LoginForm : Form
             bool on = wrap.Tag is true;
             if (on)
             {
-                using var glow = new Pen(Color.FromArgb(45, 34, 211, 238), 5f);
+                using var glow = new Pen(Color.FromArgb(45, 86, 145, 250), 5f);
                 DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
             }
-            using var p = new Pen(on ? Cyan : Color.FromArgb(56, 62, 100), on ? 2f : 1.3f);
+            using var p = new Pen(on ? Cyan : Color.FromArgb(74, 70, 138), on ? 2f : 1.3f);
             DrawRounded(g, p, new Rectangle(1, 1, wrap.Width - 3, wrap.Height - 3), 12);
+            // inner bevel — sunken field (dark top, light bottom)
+            using (var dTop = new Pen(Color.FromArgb(75, 0, 0, 0)))
+            using (var lBot = new Pen(Color.FromArgb(30, 255, 255, 255)))
+            {
+                g.DrawLine(dTop, 14, 3, wrap.Width - 14, 3);
+                g.DrawLine(lBot, 14, wrap.Height - 4, wrap.Width - 14, wrap.Height - 4);
+            }
         };
         wrap.Controls.Add(tb);
         result = wrap;
         return tb;
+    }
+
+    private int HitTitleButton(Point p)
+    {
+        int bw = 44;
+        if (p.Y < 0 || p.Y > panelTitle.Height) return 0;
+        if (p.X >= panelTitle.Width - bw) return 2;                 // close
+        if (p.X >= panelTitle.Width - bw * 2) return 1;             // minimize
+        return 0;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
