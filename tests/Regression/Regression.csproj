@@ -10,5 +10,6 @@
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
     <Compile Include="../../PMKUnlocker/KernelExploit.cs" Link="KernelExploit.cs" />
+    <Compile Include="../../PMKUnlocker/ToolIntegrity.cs" Link="ToolIntegrity.cs" />
   </ItemGroup>
 </Project>

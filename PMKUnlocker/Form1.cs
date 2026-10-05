@@ -1870,16 +1870,31 @@ namespace PMKUnlocker
                 RefreshMtkDetection();   // background (PowerShell) — UI မဟန်းအောင်
                 devicePollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
                 int pollTick = 0;
+                bool pollTickBusy = false;
                 devicePollTimer.Tick += async (s2, e2) =>
                 {
-                    // port list ကို ၃ စက္ကန့်တစ်ခါ (အလွန် ပေါ့)၊ device status ကို ၆ စက္ကန့်တစ်ခါ
-                    // (adb/fastboot/PowerShell query တွေ ပါတာမို့ ပိုလေးတယ်)။
-                    RefillPortCombo();
-                    pollTick++;
-                    if (pollTick % 2 == 0)
+                    // တစ် tick ပြီးမှ နောက် tick — CheckAllDevices ကြာ/exception ဖြစ်ရင် ထပ်ဝင်မစ
+                    if (pollTickBusy) return;
+                    pollTickBusy = true;
+                    try
                     {
-                        RefreshMtkDetection();
-                        if (!isDetecting) await CheckAllDevicesAsync(false);
+                        // port list ကို ၃ စက္ကန့်တစ်ခါ (အလွန် ပေါ့)၊ device status ကို ၆ စက္ကန့်တစ်ခါ
+                        // (adb/fastboot/PowerShell query တွေ ပါတာမို့ ပိုလေးတယ်)။
+                        RefillPortCombo();
+                        pollTick++;
+                        if (pollTick % 2 == 0)
+                        {
+                            RefreshMtkDetection();
+                            if (!isDetecting) await CheckAllDevicesAsync(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("[Poll] " + ex.Message, Color.Orange);
+                    }
+                    finally
+                    {
+                        pollTickBusy = false;
                     }
                 };
                 devicePollTimer.Start();
@@ -5089,6 +5104,8 @@ namespace PMKUnlocker
                 }
             }
 
+            ToolIntegrity.Verify(fdl1);
+            ToolIntegrity.Verify(fdl2);
             string a1 = Environment.GetEnvironmentVariable("PMK_SPD_FDL1_ADDR") ?? "0x5000";
             string a2 = Environment.GetEnvironmentVariable("PMK_SPD_FDL2_ADDR") ?? "0x9efffe00";
 
@@ -9399,6 +9416,7 @@ namespace PMKUnlocker
             string fullPath = Path.GetFullPath(Path.Combine(Application.StartupPath, relPath.Replace('/', Path.DirectorySeparatorChar)));
             if (File.Exists(fullPath))
             {
+                ToolIntegrity.Verify(fullPath);
                 edlLoaderPath = fullPath;
                 SaveEdlPaths();
                 lblQcLoaderStatus.Text = brand + " / " + display;
@@ -10200,6 +10218,7 @@ namespace PMKUnlocker
         {
             const string remote = "/data/local/tmp/.preload.so";
             string local = Path.Combine(Application.StartupPath, "exploits", "payloads", "mst-temproot.elf");
+            ToolIntegrity.Verify(local);
             if (!File.Exists(local))
             {
                 Log("[i] PMK payload not bundled — skip token root: " + local, Color.Gray);
@@ -10635,6 +10654,7 @@ namespace PMKUnlocker
 
             // DriverSetup.exe (Huawei vendor) self-elevates + reads install.xml; fall back to pnputil
             string setupExe = Path.Combine(HuaweiDriversRoot, install ? "DriverSetup.exe" : "DriverUninstall.exe");
+            ToolIntegrity.Verify(setupExe);
             bool usedVendor = false;
             if (File.Exists(setupExe))
             {

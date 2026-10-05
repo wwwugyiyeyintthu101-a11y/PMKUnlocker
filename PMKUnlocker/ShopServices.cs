@@ -70,7 +70,11 @@ internal static class ShopServices
         foreach (string folder in new[] { "", "tools", "samsung", "spd", "python", "mtk", "edl" })
         {
             string candidate = Path.Combine(root, folder, name);
-            if (File.Exists(candidate)) return candidate;
+            if (File.Exists(candidate))
+            {
+                ToolIntegrity.Verify(candidate);
+                return candidate;
+            }
         }
         return "";
     }
