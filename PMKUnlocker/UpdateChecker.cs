@@ -143,10 +143,10 @@ internal static class UpdateChecker
                 if (total > 0)
                 {
                     int pct = (int)(done * 100 / total.Value);
-                    if (pct >= lastReported + 10)
+                    if (pct > lastReported)
                     {
-                        lastReported = pct - pct % 10;
-                        onPercent?.Invoke(lastReported);
+                        lastReported = pct;
+                        onPercent?.Invoke(pct);
                     }
                 }
             }

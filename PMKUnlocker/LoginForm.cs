@@ -18,6 +18,7 @@ public class LoginForm : Form
     private bool loading;
     private System.Windows.Forms.Timer loadTimer;
     private int loadFrames;
+    private ProgressBar updBar;
 
     // login OK ပြီးရင် Form1 ကို ပြဖို့
     public string LoginEmail { get; private set; } = "";
@@ -125,6 +126,19 @@ public class LoginForm : Form
             Font = new Font("Segoe UI", 9f)
         };
         panelStatus.Controls.Add(lblStatus);
+
+        // update download progress — status bar ညာဘက်မှာ (start hidden)
+        updBar = new ProgressBar
+        {
+            Dock = DockStyle.Right,
+            Width = 0,
+            Height = 14,
+            Style = ProgressBarStyle.Continuous,
+            Visible = false
+        };
+        var updSpacer = new Panel { Dock = DockStyle.Right, Width = 14, BackColor = StatusBg };
+        panelStatus.Controls.Add(updBar);
+        panelStatus.Controls.Add(updSpacer);
 
         // ---- body ----
         panelBody = new Panel
@@ -503,7 +517,21 @@ public class LoginForm : Form
         string oldTitle = Text;
         try
         {
-            string setup = await UpdateChecker.DownloadAsync(info, pct => Text = "Downloading update... " + pct + "%");
+            // download progress — status bar + progress bar + title မှာ ရာခိုင်နှုန်းပြ
+            updBar.Value = 0;
+            updBar.Width = 150;
+            updBar.Visible = true;
+            lblStatus.ForeColor = Accent;
+            lblStatus.Text = "Downloading update... 0%";
+            string setup = await UpdateChecker.DownloadAsync(info, pct =>
+            {
+                Text = "Downloading update... " + pct + "%";
+                lblStatus.Text = "Downloading update... " + pct + "%";
+                if (pct > updBar.Value && pct <= 100) updBar.Value = pct;
+            });
+            lblStatus.ForeColor = Success;
+            lblStatus.Text = "SHA-256 verified — installing update...";
+            updBar.Value = 100;
             UpdateChecker.StartInstallAndExit(setup);
             Environment.Exit(0);
         }
