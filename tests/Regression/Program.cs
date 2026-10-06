@@ -97,6 +97,108 @@ try
     File.WriteAllText(source, "<data><program label='boot' filename='boot.img'/><program label='USERDATA' filename='data.img'/></data>");
     ReviewSafety.FilterUserdata(source, target);
     Check(XDocument.Load(target).Descendants("program").Count() == 1 && File.ReadAllText(source).Contains("USERDATA"), "Skip userdata preserves original XML and boot entry");
+    // Split: file ကြီးတွေကို အပိုင်းခွဲရာမှာ entry order/filename/start_sector မပျက်စေရ (system ပျက်ပြီး bootloop ဖြစ်ခဲ့သော bug)
+    string splitDir = Path.Combine(dir, "splitfw");
+    Directory.CreateDirectory(splitDir);
+    using (var fs = new FileStream(Path.Combine(splitDir, "system.img"), FileMode.Create))
+    {
+        byte[] block = new byte[4096];
+        for (int b = 0; b < 25; b++)
+        {
+            for (int i = 0; i < block.Length; i++) block[i] = (byte)b;
+            fs.Write(block, 0, block.Length);
+        }
+    }
+    string splitSrc = Path.Combine(splitDir, "rawprogram0.xml");
+    File.WriteAllText(splitSrc,
+        "<?xml version=\"1.0\" ?><data><program SECTOR_SIZE_IN_BYTES=\"512\" file_sector_offset=\"0\" filename=\"system.img\" label=\"SYSTEM\" num_partition_sectors=\"200\" size_in_KB=\"100\" start_byte_hex=\"0xC800\" start_sector=\"100\"/></data>");
+    string splitDst = Path.Combine(splitDir, "rawprogram0_pmk.xml");
+    int splitAdded = ReviewSafety.SplitOversizedImages(splitSrc, splitDir, splitDst, null, null, 40 * 1024);
+    var splitParts = XDocument.Load(splitDst).Descendants("program").ToList();
+    Check(splitAdded == 3 && splitParts.Count == 3, "Split produces one program entry per part");
+    Check((string?)splitParts[0].Attribute("filename") == "system__pmkpart1.img" &&
+          (string?)splitParts[1].Attribute("filename") == "system__pmkpart2.img" &&
+          (string?)splitParts[2].Attribute("filename") == "system__pmkpart3.img", "Split keeps part order (first part never lost)");
+    Check((string?)splitParts[0].Attribute("start_sector") == "100" &&
+          (string?)splitParts[1].Attribute("start_sector") == "180" &&
+          (string?)splitParts[2].Attribute("start_sector") == "260", "Split start_sector advances by written bytes");
+    Check((string?)splitParts[0].Attribute("num_partition_sectors") == "80" &&
+          (string?)splitParts[1].Attribute("num_partition_sectors") == "80" &&
+          (string?)splitParts[2].Attribute("num_partition_sectors") == "40" &&
+          (string?)splitParts[0].Attribute("start_byte_hex") == "0xc800" &&
+          (string?)splitParts[2].Attribute("start_byte_hex") == "0x20800", "Split sectors and byte offsets match part sizes");
+    using (var p1 = File.OpenRead(Path.Combine(splitDir, "system__pmkpart1.img")))
+    using (var p2 = File.OpenRead(Path.Combine(splitDir, "system__pmkpart2.img")))
+    using (var p3 = File.OpenRead(Path.Combine(splitDir, "system__pmkpart3.img")))
+        Check(p1.Length == 40960 && p2.Length == 40960 && p3.Length == 20480 &&
+              p1.ReadByte() == 0 && p2.ReadByte() == 10 && p3.ReadByte() == 20, "Split part files contain the right data range");
+    Check(File.ReadAllText(splitSrc).Contains("filename=\"system.img\""), "Split leaves source XML untouched");
+    int splitAgain = ReviewSafety.SplitOversizedImages(splitSrc, splitDir, splitDst, null, null, 40 * 1024);
+    var splitParts2 = XDocument.Load(splitDst).Descendants("program").ToList();
+    Check(splitAgain == 3 && splitParts2.Count == 3 &&
+          (string?)splitParts2[0].Attribute("filename") == "system__pmkpart1.img" &&
+          (string?)splitParts2[1].Attribute("start_sector") == "180" &&
+          (string?)splitParts2[2].Attribute("start_sector") == "260", "Split reuses existing parts with same entries");
+
+    // ---- Sparse image expansion (fh_loader 15.06 container-as-raw → bootloop) ----
+    string spDir = Path.Combine(Path.GetTempPath(), "pmk_reg_sparse" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(spDir);
+    try
+    {
+        // header 28B + raw(1 block, 0..255) + fill(2 blocks, AA BB CC DD) + DCA(3 blocks) → 6 blocks × 4096
+        string spSrc = Path.Combine(spDir, "tiny.img");
+        using (var fs = File.Create(spSrc))
+        using (var bw = new BinaryWriter(fs))
+        {
+            bw.Write(0xED26FF3Au); bw.Write((ushort)1); bw.Write((ushort)0);
+            bw.Write((ushort)28); bw.Write((ushort)12);
+            bw.Write(4096u); bw.Write(6u); bw.Write(3u); bw.Write(0u);
+            bw.Write((ushort)0xCAC1); bw.Write((ushort)0); bw.Write(1u); bw.Write(12u + 4096u);
+            for (int i = 0; i < 4096; i++) bw.Write((byte)(i % 256));
+            bw.Write((ushort)0xCAC2); bw.Write((ushort)0); bw.Write(2u); bw.Write(16u);
+            bw.Write(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+            bw.Write((ushort)0xCAC3); bw.Write((ushort)0); bw.Write(3u); bw.Write(12u);
+        }
+        string spXml = Path.Combine(spDir, "rawprogram0.xml");
+        File.WriteAllText(spXml,
+            "<?xml version=\"1.0\" ?>\n<data>" +
+            "<program SECTOR_SIZE_IN_BYTES=\"512\" file_sector_offset=\"0\" filename=\"tiny.img\" label=\"x\" num_partition_sectors=\"12\" physical_partition_number=\"0\" size_in_KB=\"4.0\" sparse=\"true\" start_byte_hex=\"0x1000\" start_sector=\"8\"/>" +
+            "<program SECTOR_SIZE_IN_BYTES=\"512\" file_sector_offset=\"0\" filename=\"rawish.bin\" label=\"y\" num_partition_sectors=\"2\" physical_partition_number=\"0\" size_in_KB=\"1.0\" sparse=\"false\" start_byte_hex=\"0x2000\" start_sector=\"16\"/>" +
+            "</data>");
+        File.WriteAllBytes(Path.Combine(spDir, "rawish.bin"), new byte[] { 1, 2, 3, 4 });
+
+        int conv = ReviewSafety.ConvertSparseImages(spXml, spDir, null);
+        string rawOut = Path.Combine(spDir, "tiny_pmk_raw.img");
+        Check(conv == 1 && File.Exists(rawOut), "Sparse expand returns 1 and creates raw file");
+        byte[] ob = File.ReadAllBytes(rawOut);
+        Check(ob.Length == 6 * 4096, "Sparse expand length = blocks*blkSize");
+        bool rawOk = true;
+        for (int i = 0; i < 4096 && rawOk; i++) if (ob[i] != (byte)(i % 256)) rawOk = false;
+        Check(rawOk, "Sparse raw chunk content preserved");
+        bool fillOk = true;
+        for (int i = 4096; i < 4096 + 8192 && fillOk; i++)
+            if (ob[i] != new byte[] { 0xAA, 0xBB, 0xCC, 0xDD }[(i - 4096) % 4]) fillOk = false;
+        Check(fillOk, "Sparse fill chunk expanded with pattern");
+        bool dcaOk = true;
+        for (int i = 4096 + 8192; i < ob.Length && dcaOk; i++) if (ob[i] != 0) dcaOk = false;
+        Check(dcaOk, "Sparse don't-care chunk reads as zeros");
+
+        string xmlNow = File.ReadAllText(spXml);
+        Check(xmlNow.Contains("tiny_pmk_raw.img") && xmlNow.Contains("sparse=\"false\""),
+              "Sparse XML: filename renamed and sparse flag cleared");
+        Check(xmlNow.Contains("filename=\"rawish.bin\""), "Sparse XML: non-sparse entry untouched");
+
+        var xmlRegen = XDocument.Load(spXml);
+        xmlRegen.Descendants("program").First(p => (string?)p.Attribute("label") == "x")
+                .Attribute("filename")!.Value = "tiny.img";
+        xmlRegen.Save(spXml);
+        var mt0 = File.GetLastWriteTimeUtc(rawOut);
+        int conv2 = ReviewSafety.ConvertSparseImages(spXml, spDir, null);
+        Check(conv2 == 1 && File.GetLastWriteTimeUtc(rawOut) == mt0,
+              "Second run reuses existing expanded raw image (not rewritten)");
+        Check(new FileInfo(spSrc).Length == 28 + 12 + 4096 + 16 + 12, "Source sparse file untouched");
+    }
+    finally { try { Directory.Delete(spDir, true); } catch { } }
     File.WriteAllText(source, "<unexpected/>");
     bool rejected = false;
     try { ReviewSafety.FilterUserdata(source, target); } catch (InvalidDataException) { rejected = true; }

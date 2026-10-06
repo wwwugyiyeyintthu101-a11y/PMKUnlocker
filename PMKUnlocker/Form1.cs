@@ -54,9 +54,17 @@ namespace PMKUnlocker
 
         // Progress Bar Panel Controls
         private Panel panelProgress;
-        private ProgressBar pbarOperation;
+        private Panel pbarTrack;      // rounded custom progress bar (MST style)
+        private Panel pbarTicks;      // bottom row ruler ticks
+        private Label lblProgressTitle;
+        private Label lblProgressPercent;
         private Label lblProgressStatus;
+        private Label lblStatusCaption;
         private Label lblSpeedBadge;
+        private int progressPercent;
+        private long flashBytesDone;               // QC flash ပြီးသွားပြီးသား file တွေရဲ့ bytes (speed)
+        private long flashCurrentFileSize;         // လက်ရှိ ရေးနေတဲ့ file size (နောက် line ရောက်မှ count)
+        private Stopwatch flashSpeedWatch;
 
         // Layout containers — tab+partition (အပေါ်) နဲ့ log (အောက်) ကို ဆွဲကြီးငယ် လုပ်နိုင်ဖို့
         private SplitContainer splitMain;
@@ -97,8 +105,10 @@ namespace PMKUnlocker
         private Button btnFbRebootEdl;
         private Button btnFbFlash;
         private Button btnFbBootTemp;
+
         private Button btnFbErase;
 
+        private Button btnFbSwitchSlot;
         // MTK Controls (Updated with 4 Features)
         private Button btnMtkReadBrom;
         private Button btnMtkNvBackup;
@@ -214,6 +224,10 @@ namespace PMKUnlocker
         private CheckBox chkSamAutoReboot;
         private string qcFirmwareFolder = "";
         private readonly Dictionary<string, long> flashFileSizes = new(StringComparer.OrdinalIgnoreCase);
+        // MST style `Flashing [ file.img ] -> [ PART ]... Ok` log အတွက် rawprogram XML က
+        // filename → label map (same file တစ်ခုကို ၂ partition သုံးရင် queue အဖြစ် XML order အတိုင်း)
+        private readonly Dictionary<string, Queue<string>> flashPartTargets = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object flashPartLock = new();
         private string samFirmwareFile = "";
         private string spdFirmwareFile = "";
 
@@ -811,6 +825,12 @@ namespace PMKUnlocker
             btnFbErase = Create3DButton("🗑 Erase Userdata", UiX(3), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Red);
             btnFbErase.Click += BtnFbErase_Click;
 
+            // Current slot တစ်ချက်ချင်း toggle — A ဆို B, B ဆို A (set_active)
+            btnFbSwitchSlot = Create3DButton("🔁 Switch Slot (A⇄B)", UiX(4), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Cyan);
+            btnFbSwitchSlot.Click += BtnFbSwitchSlot_Click;
+            if (toolTipMain != null)
+                Tip(btnFbSwitchSlot, "Current slot ဖတ်ပြီး A↔B တစ်ချက်ချင်း ပြောင်းပေးတယ် (getvar current-slot + set_active).");
+
             // ROOT ရှိတဲ့ ဖုန်းအတွက် FRP Reset — su နဲ့ accounts/policies ဖျက်ပြီး frp partition ကို သုညဖြည့်
             btnAdbFrpRoot = Create3DButton("🔓 FRP Reset (ROOT)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Red);
             btnAdbFrpRoot.Click += async (s3, e3) =>
@@ -942,7 +962,7 @@ namespace PMKUnlocker
                 btnAdbRemoveLock, btnAdbFactoryReset);
 
             Panel grpFbInfo = CreateGroupPanel("FASTBOOT · INFO & FLASH", UiX(0), UiY(5), 4, btnFbInfo, btnFbArb, btnFbFlash, btnFbBootTemp);
-            Panel grpFbOps = CreateGroupPanel("FASTBOOT · UNLOCK & REBOOT", UiX(0), UiY(7), 4, btnFbErase, btnFbRebootSystem, btnFbRebootRecovery, btnFbRebootEdl);
+            Panel grpFbOps = CreateGroupPanel("FASTBOOT · UNLOCK & REBOOT", UiX(0), UiY(7), 5, btnFbErase, btnFbRebootSystem, btnFbRebootRecovery, btnFbRebootEdl, btnFbSwitchSlot);
             Panel grpAdbReboot = CreateGroupPanel("ADB · REBOOT", UiX(0), UiY(3), 3, lblAdbReboot, cmbAdbReboot, btnAdbRebootExecute);
             tabAdb.Controls.AddRange(new Control[] { grpAdbInfo, grpAdbApps, grpAdbLock, grpAdbReboot, grpFbInfo, grpFbOps });
 
@@ -1636,36 +1656,64 @@ namespace PMKUnlocker
                 BackColor = Color.FromArgb(26, 29, 35)
             };
 
-            pbarOperation = new ProgressBar
+            // MST style: title → percent → rounded bar → Status | ticks | Speed
+            lblProgressTitle = new Label
             {
-                Location = new Point(10, 7),
-                Size = new Size(640, 20),
-                Style = ProgressBarStyle.Continuous,
-                Value = 0,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Text = "Operation Progress",
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Color.FromArgb(150, 162, 180),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            lblProgressPercent = new Label
+            {
+                Text = "0%",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            pbarTrack = new Panel
+            {
+                BackColor = Color.FromArgb(38, 42, 50)
+            };
+            pbarTrack.Paint += PbarTrack_Paint;
+
+            lblStatusCaption = new Label
+            {
+                Text = "Status",
+                AutoSize = true,
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Color.FromArgb(130, 140, 156)
             };
 
             lblProgressStatus = new Label
             {
-                Text = "Status: Ready",
-                Location = new Point(660, 8),
+                Text = "Ready",
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(86, 145, 250),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                ForeColor = Color.FromArgb(86, 145, 250)
             };
+
+            pbarTicks = new Panel
+            {
+                BackColor = Color.FromArgb(26, 29, 35)
+            };
+            pbarTicks.Paint += PbarTicks_Paint;
 
             lblSpeedBadge = new Label
             {
-                Text = "Speed: 0 MB/s",
-                Location = new Point(830, 8),
-                AutoSize = true,
+                Text = "Speed: 0.0000 MB/s",
                 Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(0, 255, 128),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                TextAlign = ContentAlignment.MiddleRight
             };
 
-            panelProgress.Controls.AddRange(new Control[] { pbarOperation, lblProgressStatus, lblSpeedBadge });
+            panelProgress.Controls.AddRange(new Control[] {
+                lblProgressTitle, lblProgressPercent, pbarTrack,
+                lblStatusCaption, lblProgressStatus, pbarTicks, lblSpeedBadge });
+            panelProgress.Resize += (s, e) => LayoutProgressSection();
+            LayoutProgressSection();
 
             // ================= 4. STOP & CLEAR BUTTONS (log ရဲ့ အပေါ်၊ ညာဘက်) =================
             btnStopTask = Create3DButton("🛑 STOP", 0, 0, 110, 28, ButtonTheme.Red);
@@ -1936,12 +1984,13 @@ namespace PMKUnlocker
                 RowCount = 3,
                 BackColor = Color.FromArgb(18, 20, 24)
             };
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));   // progress bar + status
             logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));   // STOP / Clear Log (ခလုတ် အပြည့်မြင်ရဖို့)
             logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));   // LOG
-            logLayout.Controls.Add(panelProgress, 0, 0);
-            logLayout.Controls.Add(panelLogButtons, 0, 1);
-            logLayout.Controls.Add(rtbLog, 0, 2);
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // progress — ဘယ်ဘက်အောက်ဆုံး (title+percent+bar+status)
+
+            logLayout.Controls.Add(panelLogButtons, 0, 0);
+            logLayout.Controls.Add(rtbLog, 0, 1);
+            logLayout.Controls.Add(panelProgress, 0, 2);   // bottom-left
             splitMain.Panel1.Controls.Add(logLayout);   // ဘယ်ဘက်တိုင် — LOG (UNLOCKTOOL)
 
             // Root layout — header (80px = panelTopHeader နဲ့ တူရမည်; 60F ဆိုရင် row2 labels ဖြတ်) + split
@@ -2163,21 +2212,51 @@ namespace PMKUnlocker
         private void SetProgress(int percent, string status, string speed = "")
         {
             // output thread က app ပိတ်ပြီးဆုံးချိန် call ရင် crash မဖြစ်အောင်
-            if (pbarOperation == null || pbarOperation.IsDisposed || !pbarOperation.IsHandleCreated) return;
+            if (panelProgress == null || panelProgress.IsDisposed || !panelProgress.IsHandleCreated) return;
             try
             {
-                if (pbarOperation.InvokeRequired)
+                if (panelProgress.InvokeRequired)
                 {
-                    pbarOperation.Invoke(new Action(() => SetProgress(percent, status, speed)));
+                    panelProgress.Invoke(new Action(() => SetProgress(percent, status, speed)));
                     return;
                 }
 
-                pbarOperation.Value = Math.Min(100, Math.Max(0, percent));
-                lblProgressStatus.Text = status + " (" + percent.ToString() + "%)";
-                if (!string.IsNullOrEmpty(speed))
+                progressPercent = Math.Min(100, Math.Max(0, percent));
+                if (lblProgressPercent != null) lblProgressPercent.Text = progressPercent + "%";
+                if (lblProgressStatus != null) lblProgressStatus.Text = status;
+                if (!string.IsNullOrEmpty(speed) && lblSpeedBadge != null)
+                    lblSpeedBadge.Text = "Speed: " + FormatSpeed(speed);
+                if (pbarTrack != null) pbarTrack.Invalidate();
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        }
+
+        // "5.4 MB/s"/"12.3"/"0 MB/s" တွေကို MST style "0.0000 MB/s" format ပြောင်း
+        private static string FormatSpeed(string speed)
+        {
+            Match m = Regex.Match(speed?.Trim() ?? "", @"^([\d.]+)\s*(B/s|KB/s|MB/s|GB/s)$", RegexOptions.IgnoreCase);
+            if (m.Success &&
+                double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                return v.ToString("0.0000", CultureInfo.InvariantCulture) + " " + m.Groups[2].Value.ToUpperInvariant();
+            if (double.TryParse(speed, NumberStyles.Float, CultureInfo.InvariantCulture, out double n))
+                return n.ToString("0.0000", CultureInfo.InvariantCulture) + " MB/s";
+            return "0.0000 MB/s";   // Done / Calculating... / မသိတဲ့ input
+        }
+
+        // QC flash speed — file boundary တိုင်း update (percent line က speed label ကို မထိအောင်)
+        private void UpdateFlashSpeed(double mbps)
+        {
+            if (lblSpeedBadge == null || lblSpeedBadge.IsDisposed || !lblSpeedBadge.IsHandleCreated) return;
+            try
+            {
+                if (lblSpeedBadge.InvokeRequired)
                 {
-                    lblSpeedBadge.Text = "Speed: " + speed;
+                    lblSpeedBadge.Invoke(new Action(() => UpdateFlashSpeed(mbps)));
+                    return;
                 }
+                lblSpeedBadge.Text = "Speed: " +
+                    mbps.ToString("0.0000", CultureInfo.InvariantCulture) + " MB/s";
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
@@ -2185,7 +2264,90 @@ namespace PMKUnlocker
 
         private void ResetProgress()
         {
-            SetProgress(0, "Status: Ready", "0 MB/s");
+            SetProgress(0, "Ready", "0 MB/s");
+        }
+
+        // panelProgress အတွင်း layout — title / percent / bar / Status|ticks|Speed rows
+        private void LayoutProgressSection()
+        {
+            if (panelProgress == null || lblProgressTitle == null) return;
+            int w = panelProgress.ClientSize.Width;
+            if (w < 100) return;
+            lblProgressTitle.Bounds = new Rectangle(0, 2, w, 14);
+            lblProgressPercent.Bounds = new Rectangle(0, 15, w, 16);
+            pbarTrack.Bounds = new Rectangle(8, 33, Math.Max(40, w - 16), 14);
+            lblStatusCaption.Location = new Point(10, 53);
+            lblProgressStatus.Location = new Point(56, 52);
+            int speedW = 195;
+            lblSpeedBadge.Bounds = new Rectangle(w - speedW - 8, 52, speedW, 17);
+            int ticksL = 150, ticksR = w - speedW - 16;
+            pbarTicks.Bounds = new Rectangle(ticksL, 55, Math.Max(30, ticksR - ticksL), 12);
+        }
+
+        private static GraphicsPath RoundRectPath(Rectangle r, int rad)
+        {
+            var p = new GraphicsPath();
+            int d = rad * 2;
+            if (d < 2) { p.AddRectangle(r); return p; }
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        // MST style rounded bar: dark track + blue gradient fill (percent ပေါ်မူတည်)
+        private void PbarTrack_Paint(object sender, PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Rectangle r = new Rectangle(0, 0, pbarTrack.Width - 1, pbarTrack.Height - 1);
+            if (r.Width < 4 || r.Height < 4) return;
+            int rad = Math.Min(7, r.Height / 2);
+
+            using (GraphicsPath track = RoundRectPath(r, rad))
+            using (var tb = new SolidBrush(lightTheme ? Color.FromArgb(206, 213, 227) : Color.FromArgb(38, 42, 50)))
+            {
+                g.FillPath(tb, track);
+                int fill = (int)Math.Round(r.Width * (progressPercent / 100.0));
+                if (fill > 2)
+                {
+                    Rectangle fr = new Rectangle(r.X, r.Y, Math.Min(fill, r.Width), r.Height);
+                    using (GraphicsPath fp = RoundRectPath(fr, rad))
+                    using (var gb = new LinearGradientBrush(fr,
+                        lightTheme ? Color.FromArgb(120, 165, 255) : Color.FromArgb(110, 165, 255),
+                        Color.FromArgb(47, 110, 237), LinearGradientMode.Vertical))
+                    {
+                        g.SetClip(track);
+                        g.FillPath(gb, fp);
+                        g.ResetClip();
+                    }
+                }
+                using (var pen = new Pen(lightTheme ? Color.FromArgb(178, 186, 202) : Color.FromArgb(56, 61, 72)))
+                    g.DrawPath(pen, track);
+            }
+        }
+
+        // Status နဲ့ Speed ကြား ruler ticks (အမြင့်တူများပြား)
+        private void PbarTicks_Paint(object sender, PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Rectangle c = pbarTicks.ClientRectangle;
+            if (c.Width < 6 || c.Height < 6) return;
+            Color line = lightTheme ? Color.FromArgb(158, 166, 182) : Color.FromArgb(72, 78, 90);
+            Color tick = lightTheme ? Color.FromArgb(138, 146, 162) : Color.FromArgb(88, 95, 108);
+            int midY = c.Height / 2;
+            using (var pen = new Pen(line)) g.DrawLine(pen, 0, midY, c.Width, midY);
+            using (var tp = new Pen(tick))
+            {
+                int step = 10;
+                for (int x = 0; x <= c.Width; x += step)
+                {
+                    int h = (x % (step * 5) == 0) ? 9 : 5;
+                    g.DrawLine(tp, x, midY - h / 2, x, midY + h / 2);
+                }
+            }
         }
 
         private void DgvPartitions_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
@@ -2547,6 +2709,7 @@ namespace PMKUnlocker
                                 }
 
                                 // ========== Commercial Tool Log Style Formatting ==========
+                                bool handled = false;
 
                                 // ၁။ ဖိုင် ရေးသွင်းနေသည့် log ကို သန့်သန့်လေး ပြောင်းလဲခြင်း
                                 if (line.Contains("In handleProgram('"))
@@ -2556,35 +2719,60 @@ namespace PMKUnlocker
                                     if (start > 17 && end > start)
                                     {
                                         string fileNameOnly = line.Substring(start, end - start);
-                                        Log($" Flashing [ {fileNameOnly} ]{FlashSizeSuffix(fileNameOnly)} ... Ok", Color.White);
+                                        // MST style: Flashing [ file ] -> [ PART ] (size) ... Ok
+                                        string target = DequeueFlashTarget(fileNameOnly);
+                                        string targetPart = target.Length > 0 ? $" -> [ {target} ]" : "";
+                                        Log($" Flashing [ {fileNameOnly} ]{targetPart}{FlashSizeSuffix(fileNameOnly)} ... Ok", Color.White);
+
+                                        // Speed: ပြီးသား file တွေရဲ့ bytes / elapsed (file တစ်ခုချင်းစီ ပြီးတိုင်း update)
+                                        if (flashSpeedWatch != null && flashSpeedWatch.Elapsed.TotalSeconds > 0.3)
+                                        {
+                                            flashBytesDone += flashCurrentFileSize;
+                                            flashCurrentFileSize = FlashFileSize(fileNameOnly);
+                                            UpdateFlashSpeed(flashBytesDone / 1048576.0 / flashSpeedWatch.Elapsed.TotalSeconds);
+                                        }
                                     }
+                                    handled = true;
                                 }
                                 // ၂။ Patching လုပ်သည့် အပိုင်းကို ဖမ်းပြခြင်း
                                 else if (line.Contains("In handlePatch("))
                                 {
                                     Log(" Patching patch0.xml ... Ok", Color.LightGreen);
+                                    handled = true;
                                 }
                                 // ၃။ Percent ကို Textbox ထဲ မထည့်ဘဲ ProgressBar သို့သာ တိုက်ရိုက် Update လုပ်ခြင်း
-                                else if (line.Contains("{percent files transferred"))
+                                //     speed label ကို မထိ — handleProgram line တွေက bytes speed ပေးတယ်
+                                else if (line.Contains("percent files transferred"))
                                 {
                                     Match m = Regex.Match(line, @"(\d+(?:\.\d+)?)\s*%");
                                     if (m.Success && double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double p))
                                     {
-                                        SetProgress((int)p, "Flashing", $"{p:F1}%");
+                                        SetProgress((int)p, "Flashing");
                                     }
+                                    handled = true;
                                 }
                                 // ၄။ Device Information ပိုင်း ဖမ်းပြခြင်း
                                 else if (line.Contains("TARGET SAID:") && line.Contains("storage_type"))
                                 {
                                     Log(" Connecting to firehose mode... Ok", Color.LightGreen);
+                                    handled = true;
                                 }
                                 // ==========================================================
 
-                                bool handled = ParseCleanLogAndProgress(line);
+                                // chain က စီမံပြီးသား line တွေကို parser ပြန်မထိ (Transferring နဲ့ 0 speed ပြန်မတက်အောင်)
+                                if (!handled) handled = ParseCleanLogAndProgress(line);
 
                                 // ပုံမှန် raw output ရှုပ်ရှုပ်တွေကို မပြတော့ပါ
-                                if (!handled && showRawOutput && !string.IsNullOrWhiteSpace(line))
-                                    Log("    " + line, Color.FromArgb(150, 150, 150));
+                                // ဒါပေမဲ့ ERROR စာကြောင်းတွေကို showRawOutput ပိတ်ထားရင်တောင် အနီရောင်နဲ့ ပြ
+                                // (fh_loader က file write fail ဖြစ်လည်း exit 0 ပြန်တတ်တယ် — log မှာ မမြင်ရဘဲ ကျန်ခဲ့ရင် bootloop ရှာရခက်)
+                                if (!handled && !string.IsNullOrWhiteSpace(line))
+                                {
+                                    if (showRawOutput)
+                                        Log("    " + line, Color.FromArgb(150, 150, 150));
+                                    else if (line.Contains("ERROR") || line.Contains("FAILED") ||
+                                             line.Contains("Read 0 bytes") || line.Contains("GetFile:"))
+                                        Log("    " + line, Color.OrangeRed);
+                                }
                             };
 
                             process.OutputDataReceived += (s, args) => { if (args.Data != null) onData(args.Data, false); };
@@ -2649,6 +2837,12 @@ namespace PMKUnlocker
                 rawFile.Add("");
                 rawFile.AddRange(rawSnapshot);
                 File.WriteAllLines(rawLogPath, rawFile);
+                // tool အလိုက် သီးသန့် copy ထား — နောက် command (reboot/edl.py) က
+                // pmk_last_command.log ကို overwrite လုပ်လိုက်ရင် fh_loader output ပျောက်မသွားအောင်
+                string toolStem = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
+                foreach (char c in Path.GetInvalidFileNameChars()) toolStem = toolStem.Replace(c, '_');
+                if (toolStem.Length > 0)
+                    File.WriteAllLines(Path.Combine(Path.GetTempPath(), "pmk_last_" + toolStem + ".log"), rawFile);
             }
             catch (Exception ex)
             {
@@ -3152,6 +3346,8 @@ namespace PMKUnlocker
             SetDoubleBuffered(platformBar);
             SetDoubleBuffered(panelLogButtons);
             SetDoubleBuffered(panelProgress);
+            SetDoubleBuffered(pbarTrack);
+            SetDoubleBuffered(pbarTicks);
             SetDoubleBuffered(panelPartition);
             SetDoubleBuffered(panelPartitionHeader);
             SetDoubleBuffered(panelPartBtns);
@@ -3267,6 +3463,11 @@ namespace PMKUnlocker
             if (panelTopHeader != null) EnsureThemePaint(panelTopHeader);
             if (lblProgressStatus != null) lblProgressStatus.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
             if (lblSpeedBadge != null) lblSpeedBadge.ForeColor = lightTheme ? Color.FromArgb(0, 110, 50) : Color.FromArgb(0, 255, 128);
+            if (lblProgressTitle != null) lblProgressTitle.ForeColor = lightTheme ? Color.FromArgb(92, 100, 118) : Color.FromArgb(150, 162, 180);
+            if (lblProgressPercent != null) lblProgressPercent.ForeColor = lightTheme ? Color.FromArgb(35, 38, 48) : Color.White;
+            if (lblStatusCaption != null) lblStatusCaption.ForeColor = lightTheme ? Color.FromArgb(100, 108, 124) : Color.FromArgb(130, 140, 156);
+            if (pbarTicks != null) { pbarTicks.BackColor = chromeBg2; pbarTicks.Invalidate(); }
+            if (pbarTrack != null) pbarTrack.Invalidate();
 
             foreach (TabPage tp in tabControl.TabPages)
             {
@@ -4369,22 +4570,63 @@ namespace PMKUnlocker
 
         // flash log ထဲက file name ရဲ့ disk size — firmware folder (fh_loader --search_path) ကနေ
         // ရှာပြီး " (X MB)" suffix ပေးတယ် (split parts တွေလည်း အတူတူ folder မှာ ရှိလို့ တွေ့တယ်)
-        private string FlashSizeSuffix(string fileName)
+        private long FlashFileSize(string fileName)
         {
             try
             {
-                if (flashFileSizes.TryGetValue(fileName, out long cached)) return FormatFlashSize(cached);
-                if (string.IsNullOrEmpty(qcFirmwareFolder) || !Directory.Exists(qcFirmwareFolder)) return "";
+                if (flashFileSizes.TryGetValue(fileName, out long cached)) return cached;
+                if (string.IsNullOrEmpty(qcFirmwareFolder) || !Directory.Exists(qcFirmwareFolder)) return 0;
                 string full = Path.Combine(qcFirmwareFolder, fileName);
                 if (!File.Exists(full))
                     full = Directory.EnumerateFiles(qcFirmwareFolder, Path.GetFileName(fileName), SearchOption.AllDirectories)
                         .FirstOrDefault() ?? "";
-                if (full.Length == 0 || !File.Exists(full)) return "";
+                if (full.Length == 0 || !File.Exists(full)) return 0;
                 long bytes = new FileInfo(full).Length;
                 flashFileSizes[fileName] = bytes;
-                return FormatFlashSize(bytes);
+                return bytes;
             }
-            catch { return ""; }
+            catch { return 0; }
+        }
+
+        private string FlashSizeSuffix(string fileName)
+        {
+            long bytes = FlashFileSize(fileName);
+            return bytes > 0 ? FormatFlashSize(bytes) : "";
+        }
+
+        // flash XML (split/filter ပြီးသား နောက်ဆုံး XML) ကနေ file → partition label map တည်ဆောက်
+        // fh_loader က XML order အတိုင်း handleProgram ခေါ်လို့ queue နဲ့ တွဲပြီး MST style ပြမယ်
+        private void BuildFlashPartTargets(string xmlPath)
+        {
+            lock (flashPartLock) flashPartTargets.Clear();
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(xmlPath);
+                foreach (var program in doc.Descendants("program"))
+                {
+                    string fileName = Path.GetFileName((string)program.Attribute("filename") ?? "");
+                    string label = (string)program.Attribute("label") ?? "";
+                    if (fileName.Length == 0 || label.Length == 0) continue;
+                    if (!flashPartTargets.TryGetValue(fileName, out Queue<string> queue))
+                    {
+                        queue = new Queue<string>();
+                        flashPartTargets[fileName] = queue;
+                    }
+                    queue.Enqueue(label);
+                }
+            }
+            catch { /* map မရရင် file name ပဲ ပြတဲ့ format နဲ့ ဆက်သွား */ }
+        }
+
+        // XML ထဲက label အစဉ်အတိုင်း တစ်ခုချင်း ထုတ်ပေးတယ် — မကျန်တော့ရင် "" (fallback)
+        private string DequeueFlashTarget(string fileName)
+        {
+            lock (flashPartLock)
+            {
+                if (flashPartTargets.TryGetValue(fileName, out Queue<string> queue) && queue.Count > 0)
+                    return queue.Dequeue();
+            }
+            return "";
         }
 
         private static string FormatFlashSize(long bytes)
@@ -4427,6 +4669,7 @@ namespace PMKUnlocker
                 if (fbd.ShowDialog() != DialogResult.OK) return;
                 qcFirmwareFolder = fbd.SelectedPath;
                 flashFileSizes.Clear();   // folder ပြောင်းရင် size cache အဟောင်း မကျန်စေရ
+                lock (flashPartLock) flashPartTargets.Clear();
                 txtQcFirmware.Text = qcFirmwareFolder;
                 SaveSettings();
 
@@ -4472,6 +4715,9 @@ namespace PMKUnlocker
             if (!File.Exists(xmlFile)) throw new FileNotFoundException("Rawprogram XML not found.");
             string memoryType = detectedStorageKind == "UFS" ? "ufs" : "emmc";
             string patchFile = Directory.GetFiles(qcFirmwareFolder, "patch*.xml").Select(Path.GetFileName).FirstOrDefault();
+            flashBytesDone = 0;
+            flashCurrentFileSize = 0;
+            flashSpeedWatch = null;
 
             Log("Operation : QUALCOMM FLASH PARTITION\r\n", Color.FromArgb(0, 200, 255));
             Log($" Waiting Qualcomm 9008 Port... {port}", Color.White);
@@ -4570,8 +4816,9 @@ namespace PMKUnlocker
             {
                 string splitXmlPath = Path.Combine(qcFirmwareFolder,
                     Path.GetFileNameWithoutExtension(finalXmlFile) + ReviewSafety.SplitXmlSuffix);
-                int added = ReviewSafety.SplitOversizedImages(finalXmlFile, qcFirmwareFolder, splitXmlPath,
-                    msg => Log(msg, Color.Orange));
+                // GB ပမာណ copy ကို background thread မှာ — UI thread ပေါ်ဆို (Not Responding) ဖြစ်တယ်
+                int added = await Task.Run(() => ReviewSafety.SplitOversizedImages(finalXmlFile, qcFirmwareFolder, splitXmlPath,
+                    msg => Log(msg, Color.Orange)));
                 if (added > 0)
                 {
                     flashXmlFile = splitXmlPath;
@@ -4585,7 +4832,33 @@ namespace PMKUnlocker
                 return;
             }
 
+            // Android sparse image (vendor/cust/cache/userdata) — fh_loader 15.06 က expand မလုပ်ဘဲ
+            // container bytes ကို raw အနေရေးလို့ partition ပျက် → logo bootloop ဖြစ်တယ်။
+            // raw အဖြစ် ကြိုတင်ဖြည့် (xxx_pmk_raw.img) ပြီး XML ပြောင်းပေးမယ်။
+            // source XML (rawprogram0.xml) ကို မထိရ — derived copy ပြောင်းသုံးမယ်။
+            if (flashXmlFile == xmlFile)
+            {
+                flashXmlFile = Path.Combine(qcFirmwareFolder,
+                    Path.GetFileNameWithoutExtension(xmlFile) + ReviewSafety.SplitXmlSuffix);
+                File.Copy(xmlFile, flashXmlFile, true);
+            }
+            try
+            {
+                int expandedCount = await Task.Run(() =>
+                    ReviewSafety.ConvertSparseImages(flashXmlFile, qcFirmwareFolder, msg => Log(msg, Color.Orange)));
+                if (expandedCount > 0)
+                    Log($" Sparse images expanded ({expandedCount} file(s))... Ok", Color.LightGreen);
+            }
+            catch (Exception ex)
+            {
+                workflowFailed = true;
+                Log("[FAIL] Sparse image expand failed; flash cancelled: " + ex.Message, Color.Red);
+                return;
+            }
+
             // ၄။ Main Flash Execution
+            await Task.Run(() => BuildFlashPartTargets(flashXmlFile));   // file → partition map (MST style log)
+            flashSpeedWatch = Stopwatch.StartNew();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             string sendXmlParam = Path.GetFileName(flashXmlFile) + (!string.IsNullOrEmpty(patchFile) ? $",{patchFile}" : "");
 
@@ -4593,6 +4866,8 @@ namespace PMKUnlocker
             string fhArgs = $"--port=\\\\.\\{port} --sendxml=\"{sendXmlParam}\" --search_path=\"{qcFirmwareFolder}\" --noprompt --showpercentagecomplete --zlpawarehost=1 --memoryname={memoryType}";
 
             bool flashOk = await ExecuteCommandCleanAsync("fh_loader.exe", fhArgs, "Firehose Flash", false, false);
+            // flash fail → workflowFailed ချိုး → auto-reboot မလုပ်ဘဲ device က EDL မှာပဲ ကျန်ခဲ့ပြီး ချက်ချင်း retry လုပ်လို့ရ
+            if (!flashOk) workflowFailed = true;
 
             // ၅။ [FEATURE 3] Reset FRP after Flash - Flash ပြီးချိန်တွင် FRP Erase ပြုလုပ်ခြင်း
             if (flashOk && chkQcResetFrpAfter.Checked)
@@ -8634,6 +8909,139 @@ namespace PMKUnlocker
             {
                 Log("[!] Fastboot dump write failed: " + ex.Message, Color.Orange);
             }
+        }
+
+        // Current slot ဖတ်ပြီး A↔B toggle — ဖုန်းက A ဆို B, B ဆို A ချိန်းပေးတယ်
+        private async void BtnFbSwitchSlot_Click(object sender, EventArgs e)
+        {
+            if (!await FastbootReadyAsync("Switch Slot")) return;
+
+            string rawCur = await ExecuteCommandQuickAsync("fastboot.exe", "getvar current-slot");
+            string rawSfx = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-suffixes");
+            string rawCnt = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-count");
+            string rawUsr = await ExecuteCommandQuickAsync("fastboot.exe", "getvar is-userspace");
+            Log("---- slot info (raw) ----", Color.Gray);
+            foreach (string raw in new[] { rawCur, rawSfx, rawCnt, rawUsr })
+                foreach (string line in raw.Split('\n'))
+                {
+                    string t = line.Replace("(bootloader)", "").Trim();
+                    if (t.Length > 0 && t.Contains(':') && !t.StartsWith("Finished", StringComparison.OrdinalIgnoreCase))
+                        Log("   " + t, Color.Gray);
+                }
+
+            string before = SlotFromGetvar(rawCur);
+            if (before != "a" && before != "b")
+            {
+                Log("[!] Current slot ဖတ်လို့ မရ — " + (string.IsNullOrWhiteSpace(rawCur) ? "(no output)" : rawCur.Trim()), Color.Orange);
+                Log("[i] (A/B slot မရှိတဲ့ device/variant ဖြစ်နိုင် — 🔍 Read Fastboot နဲ့ current-slot စစ်ကြည့်ပါ)", Color.Gray);
+                return;
+            }
+
+            string cnt = GetvarValue(rawCnt, "slot-count");
+            string sfx = GetvarValue(rawSfx, "slot-suffixes").ToLowerInvariant().Replace("_", "").Trim();
+            bool singleSlot = cnt == "1" ||
+                (cnt.Length == 0 && sfx.Length > 0 && !(sfx.Contains('a') && sfx.Contains('b')));
+            if (singleSlot)
+            {
+                Log($"[!] ဒီဖုန်းက single-slot (A-only) device — A⇄B toggle မရနိုင်ဘူး (slot-count={cnt}, suffixes={(GetvarValue(rawSfx, "slot-suffixes") == "" ? "(empty)" : GetvarValue(rawSfx, "slot-suffixes"))})", Color.OrangeRed);
+                return;
+            }
+
+            if (GetvarValue(rawUsr, "is-userspace").StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                Log("[i] fastbootd (userspace) mode — slot ပြောင်းမှုက reboot ပြီးမှ effective ဖြစ်နိုင်တယ်", Color.Cyan);
+
+            string next = before == "a" ? "b" : "a";
+            string rawUnb = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-unbootable:" + next);
+            string rawSucc = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-successful:" + next);
+            string rawRetry = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-retry-count:" + next);
+            Log($"---- slot {next.ToUpperInvariant()} state ----", Color.Gray);
+            foreach (string raw in new[] { rawUnb, rawSucc, rawRetry })
+                foreach (string line in raw.Split('\n'))
+                {
+                    string t = line.Replace("(bootloader)", "").Trim();
+                    if (t.Length > 0 && t.Contains(':') && !t.StartsWith("Finished", StringComparison.OrdinalIgnoreCase))
+                        Log("   " + t, Color.Gray);
+                }
+            if (GetvarValue(rawUnb, "slot-unbootable:" + next).StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                Log($"[!] Slot {next.ToUpperInvariant()} is unbootable — bootloader က ငြင်းနိုင်တယ် (boot image မရှိ/မအောင်မြင်)", Color.Orange);
+
+            Log($"[*] Current slot: {before.ToUpperInvariant()} → switching to {next.ToUpperInvariant()}...", Color.Orange);
+            bool ok = await ExecuteCommandCleanAsync("fastboot.exe", "set_active " + next,
+                $"Switch Slot {before.ToUpperInvariant()} → {next.ToUpperInvariant()}", showRawOutput: true);
+            if (!ok) return;
+
+            // verify — တစ်ခါ retry (bootloader settle အတွက်)
+            await Task.Delay(500);
+            string after = SlotFromGetvar(await ExecuteCommandQuickAsync("fastboot.exe", "getvar current-slot"));
+            if (after != next && after != "a" && after != "b")
+            {
+                await Task.Delay(1500);
+                after = SlotFromGetvar(await ExecuteCommandQuickAsync("fastboot.exe", "getvar current-slot"));
+            }
+
+            if (after == next)
+            {
+                Log($"[+] Slot switched — current slot is now {next.ToUpperInvariant()}.", Color.LightGreen);
+                return;
+            }
+
+            if (after != "a" && after != "b")
+            {
+                Log("[i] set_active OK — verify မှာ current-slot output မရ (reboot ဖြစ်သွားလို့ ဖြစ်နိုင်)", Color.Gray);
+                return;
+            }
+
+            Log($"[!] set_active OKAY ပေမဲ့ current-slot = {after.ToUpperInvariant()} အတိုင်းကျန်နေသေးတယ်", Color.Orange);
+            Log("[i] တစ်ချို့ bootloader များ switch ကို reboot ပြီးမှ apply လုပ်တယ် — bootloader ပြန်ဝင်စစ်နိုင်တယ်", Color.Gray);
+
+            var ask = MessageBox.Show(
+                "set_active က device က OKAY ပြန်ပေမဲ့ current-slot က " + after.ToUpperInvariant() + " အတိုင်းပါ။\n\n" +
+                "တစ်ချို့ bootloader များ reboot ပြီးမှ switch ဖြစ်တယ်။\n" +
+                "Reboot to bootloader ပြီး ပြန်စစ်မလား?",
+                "Switch Slot", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (ask != DialogResult.Yes) return;
+
+            Log("[*] Rebooting to bootloader...", Color.Orange);
+            if (!await ExecuteCommandCleanAsync("fastboot.exe", "reboot-bootloader", "Reboot Bootloader", showRawOutput: true))
+            {
+                Log("[!] reboot-bootloader မအောင် — ကိုယ်တိုင် reboot bootloader ပြန်ဝင်ပြီး Switch Slot ထပ်စမ်းပါ", Color.Orange);
+                return;
+            }
+
+            string after2 = "";
+            for (int i = 0; i < 45; i++)
+            {
+                await Task.Delay(1000);
+                after2 = SlotFromGetvar(await ExecuteCommandQuickAsync("fastboot.exe", "getvar current-slot"));
+                if (after2 == "a" || after2 == "b") break;
+            }
+
+            if (after2 == next)
+                Log($"[+] Slot switched — current slot is now {next.ToUpperInvariant()} (reboot ပြီးမှ apply ဖြစ်တာ).", Color.LightGreen);
+            else if (after2 == before)
+                Log($"[!] Reboot ပြီးသားပါပေမဲ့ current-slot = {after2.ToUpperInvariant()} — bootloader က switch လက်မခံဘူး (locked? / slot state ကို အပေါ် block ကြည့်ပါ)", Color.OrangeRed);
+            else
+                Log("[!] Reboot ပြီး device ပြန် fastboot မဝင်လာ — ခဏစောင့်ပြီး Switch Slot ထပ်စမ်းပါ", Color.Orange);
+        }
+
+        // fastboot getvar output ထဲက value တန်ဖိုး (variant format အမျိုးမျိုးကို ကာကွယ်)
+        private static string GetvarValue(string raw, string key)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "";
+            var vars = ParseFastbootVars(raw);
+            if (vars.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v)) return v.Trim();
+            var m = System.Text.RegularExpressions.Regex.Match(raw,
+                System.Text.RegularExpressions.Regex.Escape(key) + @":[ \t]*([^\r\n]*)");
+            return m.Success ? m.Groups[1].Value.Replace("(bootloader)", "").Trim() : "";
+        }
+
+        private static string SlotFromGetvar(string raw)
+        {
+            string v = GetvarValue(raw, "current-slot").Trim().TrimStart('_').ToLowerInvariant();
+            if (v == "a" || v == "b") return v;
+            var m = System.Text.RegularExpressions.Regex.Match(raw ?? "",
+                @"current-slot:?\s*_?([ab])\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return m.Success ? m.Groups[1].Value.ToLowerInvariant() : v;
         }
 
         private async void BtnFbInfo_Click(object sender, EventArgs e)
