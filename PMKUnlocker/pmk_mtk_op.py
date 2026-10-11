@@ -361,11 +361,10 @@ def _write_child_result():
 def _install_bootmode_patch():
     """DAloader.shutdown() ကို bootmode အစားထိုးတဲ့ version နဲ့ လဲတယ်။
     ပြီးရင် အောင်/မအောင် ကို parent ဆီ marker နဲ့ ပြန်ပို့တယ်။"""
-    # default က HOME_SCREEN (1) — အရင် 2 (FASTBOOT) ကြောင့် reset ပြီးတိုင်း ဖုန်းက
-    # fastboot (headless/screen ပိတ်) ရောက်ပြီး Windows မှာလည်း "Unknown USB Device
-    # (Device Descriptor Request Failed)" ဖြစ်တယ်။ op ပြီးတိုင်း Android ပြန်
-    # ဝင်စေချင်တာမို့ 1 က default ဖြစ်ရမယ် (fastboot လိုချင်ရင် env နဲ့ 2 ပေး)။
-    forced = int(os.environ.get("PMK_MTK_BOOTMODE", "1"))
+    # default က POWER_OFF (0) — bootmode 1/2 နဲ့ reset ပြီးတိုင်း USB controller
+    # က error 43 မှာ ဆုံးဖြတ်တယ် (dandelion/MT6765)။ power off လုပ်ရင်
+    # USB ပြန်လျှင်း auto-power-on ဖြစ်ပြီး Android တက်တာကို စောင့်တယ်။
+    forced = int(os.environ.get("PMK_MTK_BOOTMODE", "0"))
     # env PMK_MTK_BOOTMODE က file override ထက် ပိုအားကိုး (flash flow က env=1 ပို့တယ် —
     # stale %TEMP%\pmk_bootmode.txt=2 ကြောင့် RTC latch fastboot ပြန်မဖြစ်စေချင်)
     #   %TEMP%\pmk_bootmode.txt ထဲ ၁ လိုင်း (0=power off | 1=home screen | 2=fastboot)

@@ -382,7 +382,7 @@ namespace PMKUnlocker
                 if (platform == "MTK")
                 {
                     lastMtkBootState = "";
-                    Environment.SetEnvironmentVariable("PMK_MTK_BOOTMODE", "1");
+                    Environment.SetEnvironmentVariable("PMK_MTK_BOOTMODE", "0");
                     Environment.SetEnvironmentVariable("PMK_MTK_SERIAL", serial);
                 }
                 Log("[*] Auto reboot after successful " + platform + " operation.", Color.Orange);
@@ -7903,11 +7903,12 @@ namespace PMKUnlocker
         {
             return new MtkEnvScope("PMK_MTK_TOLERATE_MISSING", "1");
         }
-        // preflight session က ကျန်ခဲ့တဲ့ stale COM port ကြောင့် serial/VCOM auto-pick မဖြစ်အောင်
-        // USB (libusb) transport ကို အတင်းသုံး — BROM path က ဒီ device မှာ အလုပ်လုပ်တဲ့ လမ်း
+        // auto-detect ချန်ပေး (MST လို serial/COM သုံး) — pmk_mtk_op.py က MediaTek VID
+        // (0E8D) ဒါမှမဟုတ် "mediatek" description နဲ့ COM port ရှာမယ်။ serial မရှိရင်
+        // USB (libusb) ကို အလိုအလျောက် သုံးမယ်။
         private static IDisposable MtkForceUsbTransport()
         {
-            return new MtkEnvScope("PMK_MTK_SERIAL", "off");
+            return new MtkEnvScope("PMK_MTK_SERIAL", "");
         }
 
         private static IDisposable MtkBootmodeNormal()
@@ -7915,7 +7916,7 @@ namespace PMKUnlocker
             // phase1-only flash (fbMap မရှိ) ပြီးရင် Android ပြန်တက်အောင် (MST လို) —
             // env က file override (%TEMP%\pmk_bootmode.txt) ကို ကျော်နိုင်အောင်
             // python ဘက်မှာ env ကို ပိုအားကိုး
-            return new MtkEnvScope("PMK_MTK_BOOTMODE", "1");
+            return new MtkEnvScope("PMK_MTK_BOOTMODE", "0");
         }
 
         private static IDisposable MtkBootmodeFastboot()
