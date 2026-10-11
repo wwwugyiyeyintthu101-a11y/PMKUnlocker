@@ -50,7 +50,7 @@ internal static class AdminHtml
   <strong>Create / update account</strong>
   <div class="row">
     <div><label>Email</label><input id="email" type="email" placeholder="user@gmail.com"/></div>
-    <div><label>Password (min 4 — leave empty to keep)</label><input id="pass" type="text" placeholder="password"/></div>
+    <div><label>Password (8–256 — leave empty to keep)</label><input id="pass" type="password" maxlength="256" placeholder="password"/></div>
     <div><label>Plan (သက်မှတ်ချက်)</label>
       <select id="plan">
         <option value="monthly">၁ လ (monthly)</option>
@@ -94,14 +94,19 @@ async function loadList(){
   const data=await api('/api/admin/list'); if(!data)return;
   const tb=document.getElementById('rows');
   if(!data.length){tb.innerHTML='<tr><td colspan="6">— empty —</td></tr>';setMsg('0 accounts',true);return}
-  tb.innerHTML=data.map(a=>{
-    let st;
-    if(a.blocked) st='<span class="tag block">BLOCKED</span>';
-    else if(a.pending) st='<span class="tag pend">PENDING</span>';
-    else if(a.expired) st='<span class="tag exp">EXPIRED</span>';
-    else st='<span class="tag ok">ACTIVE</span>';
-    return `<tr style="cursor:pointer" onclick="pick('${a.email}')"><td>${a.email}</td><td>${planLabel(a.plan)}</td><td>${(a.expiresAt||'').slice(0,10)}</td><td>${a.daysLeft}</td><td>${st}</td><td>${a.note||''}</td></tr>`;
-  }).join('');
+  tb.replaceChildren();
+  for(const a of data){
+    const row=document.createElement('tr');
+    row.style.cursor='pointer';
+    row.addEventListener('click',()=>pick(a.email));
+    const state=a.blocked?'BLOCKED':a.pending?'PENDING':a.expired?'EXPIRED':'ACTIVE';
+    for(const value of [a.email,planLabel(a.plan),(a.expiresAt||'').slice(0,10),a.daysLeft,state,a.note||'']){
+      const cell=document.createElement('td');
+      cell.textContent=String(value??'');
+      row.appendChild(cell);
+    }
+    tb.appendChild(row);
+  }
   const pend=data.filter(a=>a.pending).length;
   setMsg(data.length+' account(s)'+(pend?' — '+pend+' pending':''),true);
 }

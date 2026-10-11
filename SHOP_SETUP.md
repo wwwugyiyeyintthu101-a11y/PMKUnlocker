@@ -6,13 +6,20 @@ This is a release candidate. Device operations still require validation on the m
 
 1. Install Microsoft .NET 8 **Desktop Runtime x86**. An x64-only runtime is insufficient. The installer checks the normal x86 runtime location and stops if it is absent.
 2. Run the PMK installer. It installs for the current Windows user without requiring administrator rights.
+   The app itself currently requests administrator privileges. On a standard-user
+   account, test which Windows account owns settings when elevation uses another
+   account's credentials before using it in a shop.
 3. Open **Setup / Backups → Tool setup**. Bundled ADB, fastboot, Heimdall and Qualcomm executables are listed there. “File found” means only that the file exists; it does not certify drivers, runtime dependencies or device compatibility.
 4. Configure optional backends for the tabs you use:
    - MediaTek: `mtk.exe` and a `python.exe` environment with mtkclient and its required dependencies installed.
    - Qualcomm: a Python environment with the EDL module dependencies, and `edl.py`. Select the appropriate loader using the existing Qualcomm controls.
    - Spreadtrum/Unisoc: `spd_dump.exe`, `unpac.exe` and device-specific FDL files.
    - HiSilicon: a compatible bootloader package through the existing Bootloaders control.
-5. Use Drivers to check the USB setup. Test first with read-only operations on a shop-owned test phone.
+5. Configure the license service using **Server settings** on the login screen.
+   Supply the administrator's HTTPS address. No production service is bundled or
+   deployed automatically; see `LICENSE_SERVER_SETUP.md`. Localhost HTTP is for
+   development only.
+6. Use Drivers to check the USB setup. Test first with read-only operations on a shop-owned test phone.
 
 Do not copy a Python executable by itself: its standard library and installed modules are also required. Missing or incompatible optional backends do not become supported merely by selecting an executable.
 
@@ -34,7 +41,19 @@ NV Restore now requires this manifest and compares its files with a fresh device
 
 ## Firmware preflight
 
-MediaTek folder flashing checks names and image sizes against a fresh device GPT. Sparse image capacity is checked using expanded size. Unknown partitions, empty images and oversized images block the operation. Model, signatures, boot-chain compatibility and sparse chunk payload integrity are not certified by this size check. Confirm the firmware source and model before proceeding.
+MediaTek scatter flashing validates selected images against the live chipset,
+storage and GPT. Sparse capacity uses expanded size, and the guarded helper checks
+chunks before writing. These checks do not authenticate a firmware publisher or
+prove complete model/boot-chain compatibility. Confirm the source and model.
+
+Xiaomi BAT flashing requires a supported product guard and rejects unsupported
+batch control flow rather than discarding it. Files are checked and held open
+before erase, and required operation failures stop the sequence. Complex vendor
+scripts may need a supported vendor workflow. Qualcomm preparation expands sparse
+images before splitting raw ranges and rebuilds derived files from source.
+
+ADB/fastboot selections remain pinned even after disconnection. After changing
+phones, select the new serial in **Setup / Backups → Device selection** while idle.
 
 ## Device test records
 

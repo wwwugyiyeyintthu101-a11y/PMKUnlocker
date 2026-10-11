@@ -62,6 +62,11 @@ public class LoginForm : Form
         // + update gate check — form ပေါ်တာနဲ့ တပြိုင်နက် စ (login gate က စောင့်ယူ)
         Shown += (_, _) =>
         {
+            if (!LicenseClient.HasConfiguredServer)
+            {
+                LicenseSetup.Show(this);
+                lblStatus.Text = LicenseClient.HasConfiguredServer ? "License server configured — sign in" : "Server settings မှာ license လိပ်စာသတ်မှတ်ပါ";
+            }
             try
             {
                 if (!string.IsNullOrWhiteSpace(UpdateChecker.Repo))
@@ -218,6 +223,16 @@ public class LoginForm : Form
             Font = new Font("Segoe UI", 9f)
         };
         panelStatus.Controls.Add(lblStatus);
+        var serverSettings = new LinkLabel
+        {
+            Text = "Server settings", Dock = DockStyle.Right, Width = 100,
+            TextAlign = ContentAlignment.MiddleCenter, LinkColor = Color.White
+        };
+        serverSettings.LinkClicked += (_, _) =>
+        {
+            if (!loading && LicenseSetup.Show(this)) lblStatus.Text = "License server configured — sign in";
+        };
+        panelStatus.Controls.Add(serverSettings);
 
         // update download progress — status bar ညာဘက်မှာ (start hidden)
         updBar = new ProgressBar
@@ -651,7 +666,7 @@ public class LoginForm : Form
             lnkRegister.Text = "Already have account?  Login  Here";
             lnkRegister.Links.Clear();
             lnkRegister.Links.Add(21, 5, "login");
-            lblStatus.Text = "Register mode — Email + Password (min 4) → Admin approve မှ ဝင်ရ";
+            lblStatus.Text = "Register mode — Email + Password (8–256) → Admin approve မှ ဝင်ရ";
             txtEmail.Clear();
             txtPassword.Clear();
             chkRemember.Checked = false;
@@ -775,8 +790,8 @@ public class LoginForm : Form
     }
 
     // ===== LOGIN UPDATE GATE =====
-    // update ရှိ → update လုပ်ရမယ် (No နှိပ်ရင် app ပိတ်); check fail/offline → strict block;
-    // နောက်ဆုံး version ဆို Form1 ဝင်ခွင့်ပေး → true — failure ဆို ဘယ်တော့မှ false မပြန် (app ပိတ်)
+    // update ရှိ → update လုပ်ရမယ် (No နှိပ်ရင် app ပိတ်); check fail/offline → continue (warning);
+    // နောက်ဆုံး version ဆို Form1 ဝင်ခွင့်ပေး → true
     private async Task<bool> EnforceUpdateGateAsync()
     {
         UpdateInfo info;
@@ -788,12 +803,15 @@ public class LoginForm : Form
         }
         catch (Exception ex)
         {
+            // offline / GitHub timeout — update check မအောင်လို့ tool ကို မပိတ်တော့
+            // (customer network မကောင်းရင် အသုံးမပြုနိုင်တာ ကို ရှောင်) — update available
+            // ကိုတော့ check ပြီးမှပဲ gate ဝင်တယ်, check fail = continue offline
+            lblStatus.ForeColor = Danger;
+            lblStatus.Text = "Update check failed (offline?) — continuing";
             MessageBox.Show(this,
-                "Update check failed:\n" + ex.Message + "\n\n" +
-                "Cannot verify the latest version — the tool will close.",
-                "Update required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            Environment.Exit(0);
-            return false;
+                "Update check failed:\n" + ex.Message + "\n\nContinuing without update verification.",
+                "Update check", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return true;
         }
         if (info == null) return true;   // နောက်ဆုံး version (သို့) update source off
 
@@ -826,7 +844,7 @@ public class LoginForm : Form
             lblStatus.ForeColor = Success;
             lblStatus.Text = "SHA-256 verified — installing update...";
             updBar.Value = 100;
-            UpdateChecker.StartInstallAndExit(setup);
+            UpdateChecker.StartInstallAndExit(setup, info.Sha256.Trim());
             Environment.Exit(0);
         }
         catch (Exception ex)

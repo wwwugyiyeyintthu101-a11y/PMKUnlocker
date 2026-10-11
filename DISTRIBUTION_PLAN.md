@@ -2,6 +2,13 @@
 
 ရည်ရွယ်ချက်: အခြားဖုန်းပြင်ဆိုင်များတွင် တပ်ဆင်ပြီး တည်ငြိမ်စွာ အသုံးပြုနိုင်သော Windows tool ဖြစ်ရန်။
 
+## 2026-10-11 source repairs
+
+Safety/security/package fixes နှင့် 174 regression checks အခြေအနေကို
+`REPAIR_NOTES_2026-10-11.md` တွင်ကြည့်ပါ။ Production license hosting မရှိသေးသဖြင့်
+`LICENSE_SERVER_SETUP.md` အတိုင်း တပ်ဆင်ရန်လိုသည်။ အောက်ပါ 2026-09-23 status သည်
+သမိုင်းမှတ်တမ်းဖြစ်ပြီး လက်ရှိ test count မဟုတ်ပါ။ Hardware/clean-PC approval မပြီးသေးပါ။
+
 ## 2026-09-23 implementation status
 
 - Implemented: per-user installer source/build, x86 Desktop Runtime prerequisite check, user-data settings migration, configurable tools and readiness export, ADB/fastboot serial selection, MTK image/GPT size preflight, MTK backup manifests and restore verification, Backup Manager, operator device-test records.

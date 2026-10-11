@@ -12,11 +12,14 @@ function Invoke-CheckedDotnet([string[]]$Arguments) {
 }
 
 Invoke-CheckedDotnet @('build', $project, '--no-restore', '-c', 'Release', '-v', 'quiet')
+Invoke-CheckedDotnet @('build', (Join-Path $root 'PMKLicenseServer/PMKLicenseServer.csproj'), '--no-restore', '-c', 'Release', '-v', 'quiet')
+Invoke-CheckedDotnet @('build', (Join-Path $root 'PMKLicenseAdmin/PMKLicenseAdmin.csproj'), '--no-restore', '-c', 'Release', '-v', 'quiet')
 Invoke-CheckedDotnet @('run', '--project', (Join-Path $root 'tests/Regression/Regression.csproj'), '--no-restore')
 & (Join-Path $root 'tests/verify-loader-package.ps1')
 Invoke-CheckedDotnet @('publish', $project, '--no-build', '--no-restore', '-c', 'Release', '-o', $output, '-v', 'quiet')
 
 $required = @(
+    'pmk_flash_guard.py', 'pmk_sparse.py', 'pmk_gpt.py', 'pmk_models.json', 'integrity.json',
     'PMKUnlocker.exe', 'PMKUnlocker.dll', 'PMKUnlocker.deps.json', 'PMKUnlocker.runtimeconfig.json',
     'pmk_devices.json', 'pmk_mtk_op.py', 'pmk_qc_loaders.json', 'pmk_codenames.json', 'adb.exe', 'fastboot.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll',
     'fh_loader.exe', 'QSaharaServer.exe', 'samsung/heimdall.exe', 'samsung/libusb-1.0.dll',
@@ -28,7 +31,7 @@ foreach ($relative in $required) {
         throw "Missing or empty release file: $relative"
     }
 }
-foreach ($relative in @('pmk_devices.json', 'pmk_mtk_op.py', 'pmk_qc_loaders.json', 'pmk_codenames.json')) {
+foreach ($relative in @('pmk_devices.json', 'pmk_mtk_op.py', 'pmk_qc_loaders.json', 'pmk_codenames.json', 'pmk_flash_guard.py', 'pmk_sparse.py', 'pmk_gpt.py', 'pmk_models.json')) {
     if ((Get-FileHash (Join-Path $root "PMKUnlocker/$relative")).Hash -ne
         (Get-FileHash (Join-Path $output $relative)).Hash) { throw "Stale published file: $relative" }
 }

@@ -1,0 +1,23 @@
+# Local build preferences
+
+Use the existing desktop app output location for ongoing local changes:
+
+`PMKUnlocker/bin/Debug/net8.0-windows/PMKUnlocker.exe`
+
+Build with `dotnet build PMKUnlocker/PMKUnlocker.csproj --no-restore`.
+Do not create another review-publish/output directory as a workaround for a locked executable.
+If the application is running, ask the user to close it after any device operation finishes;
+never terminate an active flashing operation to complete a build.
+
+The user does not want additional hardware-free test files. Use build/syntax checks and
+report device validation separately; do not claim throughput gains without a measured flash.
+
+The solution now includes desktop, license server, admin, and regression projects.
+Use `dotnet build PMKUnlocker/PMKUnlocker.sln --no-restore -m:1` to check all four.
+The build writes a runtime integrity manifest from the bundled inventory plus
+project helpers/libraries. `dependency-lock.json` pins the inventory and native
+library bytes; missing optional external backends are not silently certified.
+Release builds and publishing verify all bundled inventory hashes. Restore the
+approved tool inventory when cloning; do not replace missing tools with an empty
+manifest. The per-process PowerShell execution setting in the build does not
+change machine-wide execution policy.

@@ -20,6 +20,16 @@ internal static class LicenseClient
 
     private static string UrlFile => ShopServices.DataPath("pmk_license_url.txt");
 
+    internal static bool IsServerUrl(string value) =>
+        Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) &&
+        uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0 &&
+        (uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback));
+
+    internal static bool HasConfiguredServer
+    {
+        get { try { return File.Exists(UrlFile) && IsServerUrl(File.ReadAllText(UrlFile)); } catch (IOException) { return false; } }
+    }
+
     internal static string BaseUrl
     {
         get
@@ -30,9 +40,7 @@ internal static class LicenseClient
                 {
                     string u = File.ReadAllText(UrlFile).Trim().TrimEnd('/');
                     // http/https သာ — loopback က http ရပါမယ်; remote ဆို https သာ (password လုံခြုံရေး)
-                    if (Uri.TryCreate(u, UriKind.Absolute, out var uri) &&
-                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) &&
-                        (uri.IsLoopback || uri.Scheme == Uri.UriSchemeHttps))
+                    if (IsServerUrl(u))
                         return u;
                 }
             }
@@ -41,7 +49,10 @@ internal static class LicenseClient
         }
         set
         {
-            try { File.WriteAllText(UrlFile, value.Trim()); } catch { }
+            if (!IsServerUrl(value)) throw new ArgumentException("Use an HTTPS server address. HTTP is allowed only for localhost.");
+            string normalized = value.Trim().TrimEnd('/');
+            if (!string.Equals(BaseUrl, normalized, StringComparison.OrdinalIgnoreCase)) LocalLogin.ClearRemembered();
+            File.WriteAllText(UrlFile, normalized);
         }
     }
 
@@ -74,8 +85,8 @@ internal static class LicenseClient
             return new Result { Message = "Email/Password ထည့်ပါ" };
         if (!LocalLogin.IsValidEmail(email))
             return new Result { Message = "Email မှားနေသည် (user@gmail.com)" };
-        if (password.Length < 4)
-            return new Result { Message = "Password အနည်းဆုံး 4 လုံး" };
+        if (password.Length < 8 || password.Length > 256)
+            return new Result { Message = "Password 8–256 လုံး ထည့်ပါ" };
 
         return await PostAsync("/api/register", new { email, password }, ct);
     }
@@ -84,7 +95,9 @@ internal static class LicenseClient
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            if (!HasConfiguredServer)
+                return new Result { Message = "License server မသတ်မှတ်ရသေးပါ — Server settings မှာ လိပ်စာထည့်ပါ။" };
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
             var payload = JsonSerializer.Serialize(payloadObj);
             using var content = new StringContent(payload, Encoding.UTF8, "application/json");
             using var resp = await http.PostAsync(BaseUrl + path, content, ct);

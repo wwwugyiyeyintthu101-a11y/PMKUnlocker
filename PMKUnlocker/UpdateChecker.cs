@@ -81,9 +81,12 @@ internal static class UpdateChecker
     private static string ManifestUrl(string repo)
     {
         repo = repo.Trim().TrimEnd('/');
-        if (!repo.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            repo = "https://github.com/" + repo;
+        if (!repo.Contains("://", StringComparison.Ordinal)) repo = "https://github.com/" + repo;
+        if (!Uri.TryCreate(repo, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
+            uri.Host != "github.com" || uri.UserInfo.Length != 0 || !uri.IsDefaultPort ||
+            uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
+            !System.Text.RegularExpressions.Regex.IsMatch(uri.AbsolutePath, @"^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+            throw new InvalidDataException("Update source must be an HTTPS GitHub owner/repository URL.");
         return repo + "/releases/latest/download/update.json";
     }
 
@@ -102,18 +105,35 @@ internal static class UpdateChecker
         string repo = Repo;
         if (string.IsNullOrWhiteSpace(repo)) return null;
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        string json = await http.GetStringAsync(ManifestUrl(repo), ct);
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        string json = "";
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                json = await http.GetStringAsync(ManifestUrl(repo), ct);
+                break;
+            }
+            catch (Exception ex) when (attempt < 3 &&
+                (ex is HttpRequestException || ex is TaskCanceledException))
+            {
+                // transient GitHub hiccup (release upload ပြီးချင်း 500 / offline blip) — retry 2 ကြိမ်
+                await Task.Delay(1500, ct);
+            }
+        }
         if (json.Length > 0 && json[0] == '\uFEFF') json = json.Substring(1);   // BOM (UTF-8-encoded manifest)
         UpdateInfo? info = JsonSerializer.Deserialize<UpdateInfo>(json, JsonOpts);
-        if (info == null) return null;
+        if (info == null) throw new InvalidDataException("Empty update manifest.");
 
         string ver = (info.Version ?? "").Trim().TrimStart('v', 'V');
-        if (!Version.TryParse(ver, out Version? v)) return null;
+        if (!Version.TryParse(ver, out Version? v)) throw new InvalidDataException("Invalid update version.");
         if (string.IsNullOrWhiteSpace(info.Url) ||
             !Uri.TryCreate(info.Url.Trim(), UriKind.Absolute, out Uri? u) || u.Scheme != Uri.UriSchemeHttps)
-            return null;
-        if (!IsHex64((info.Sha256 ?? "").Trim())) return null;
+            throw new InvalidDataException("Installer URL must use HTTPS.");
+        string repoUrl = ManifestUrl(repo).Replace("/releases/latest/download/update.json", "", StringComparison.Ordinal);
+        if (!info.Url.StartsWith(repoUrl + "/releases/download/", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Installer must belong to the configured GitHub repository.");
+        if (!IsHex64((info.Sha256 ?? "").Trim())) throw new InvalidDataException("Invalid installer checksum.");
 
         return v > CurrentVersion ? info : null;
     }
@@ -121,7 +141,9 @@ internal static class UpdateChecker
     // download → SHA-256 verify (fail ရင် ဖိုင်ဖျက်ပြီး exception); ပြန်တဲ့ path = verified setup file
     internal static async Task<string> DownloadAsync(UpdateInfo info, Action<int> onPercent, CancellationToken ct = default)
     {
-        string dir = Path.Combine(Path.GetTempPath(), "pmk_update");
+        if (!Uri.TryCreate(info.Url, UriKind.Absolute, out var downloadUri) || downloadUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidDataException("Installer download requires HTTPS.");
+        string dir = Path.Combine(ShopServices.DataDirectory, "Updates", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         string file = Path.Combine(dir, "PMKUpdate-Setup.exe");
 
@@ -129,6 +151,8 @@ internal static class UpdateChecker
         using (var resp = await http.GetAsync(info.Url, HttpCompletionOption.ResponseHeadersRead, ct))
         {
             resp.EnsureSuccessStatusCode();
+            if (resp.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
+                throw new InvalidDataException("Insecure installer redirect rejected.");
             long? total = resp.Content.Headers.ContentLength;
             using Stream input = await resp.Content.ReadAsStreamAsync(ct);
             using var output = File.Create(file);
@@ -165,17 +189,16 @@ internal static class UpdateChecker
         return file;
     }
 
-    internal static void StartInstallAndExit(string setupFile)
+    internal static void StartInstallAndExit(string setupFile, string expectedSha256)
     {
-        string appExe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "PMKUnlocker.exe");
-        // setup ကို ၂ စက္ကန့် delay နဲ့ run (app exit ပြီး file lock ကင်းအောင်) → install ပြီးရင် app ပြန်ဖွင့်
-        string cmd = "/c ping -n 3 127.0.0.1 >nul & start \"\" /wait \"" + setupFile +
-            "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART & start \"\" \"" + appExe + "\"";
-        Process.Start(new ProcessStartInfo("cmd.exe")
+        using var installer = new FileStream(setupFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (!IsHex64(expectedSha256) || !Convert.ToHexString(SHA256.HashData(installer)).Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Installer changed after download; install cancelled.");
+        // Start the verified installer directly; never interpret local paths as shell commands.
+        using var process = Process.Start(new ProcessStartInfo(setupFile)
         {
-            Arguments = cmd,
-            CreateNoWindow = true,
-            UseShellExecute = false
+            Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+            UseShellExecute = true
         });
     }
 }

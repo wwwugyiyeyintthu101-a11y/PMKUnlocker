@@ -42,11 +42,11 @@ namespace PMKUnlocker
         // ဆက်ရှိ — နောက် tool ဖွင့်ရင် port ဖွင့်ထားလို့ ချက်ချင်း reuse။
         private static void EnsureLicenseServer()
         {
+#if DEBUG
             try
             {
                 string url = LicenseClient.BaseUrl;
-                if (!url.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
-                    !url.Contains("localhost", StringComparison.OrdinalIgnoreCase)) return;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var endpoint) || !endpoint.IsLoopback) return;
 
                 int port = 5260;
                 var m = System.Text.RegularExpressions.Regex.Match(url, @":(\d+)");
@@ -76,6 +76,7 @@ namespace PMKUnlocker
                 for (int i = 0; i < 30 && !IsPortOpen(port); i++) Thread.Sleep(100);
             }
             catch { }
+#endif
         }
 
         private static bool IsPortOpen(int port)

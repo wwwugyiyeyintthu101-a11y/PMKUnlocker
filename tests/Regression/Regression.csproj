@@ -11,5 +11,11 @@
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
     <Compile Include="../../PMKUnlocker/KernelExploit.cs" Link="KernelExploit.cs" />
     <Compile Include="../../PMKUnlocker/ToolIntegrity.cs" Link="ToolIntegrity.cs" />
+    <Compile Include="../../PMKUnlocker/MiFlash.cs" Link="MiFlash.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterModels.cs" Link="MtkFirmware/ScatterModels.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterParser.cs" Link="MtkFirmware/ScatterParser.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/FirmwarePreflight.cs" Link="MtkFirmware/FirmwarePreflight.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
   </ItemGroup>
 </Project>

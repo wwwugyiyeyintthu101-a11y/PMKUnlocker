@@ -50,136 +50,92 @@ internal static class ReviewSafety
         Action<string>? log = null, Func<string, string, bool>? writeChunk = null, long? maxImageBytes = null)
     {
         var doc = XDocument.Load(sourceXml);
-        if (doc.Root?.Name != "data") return 0;
-
-        long chunkLimit = ((maxImageBytes ?? FhLoaderMaxImageBytes) / 512) * 512;
-        int addedEntries = 0;
-        var cache = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-
+        if (doc.Root?.Name != "data") throw new InvalidDataException("Unrecognized rawprogram XML.");
+        int addedEntries = 0, entryIndex = 0;
         foreach (var program in doc.Descendants("program").ToList())
         {
-            string fileName = (string?)program.Attribute("filename") ?? "";
-            if (fileName.Length == 0) continue;
-
-            string full = Path.IsPathRooted(fileName) ? fileName : Path.Combine(searchPath, fileName);
-            if (!File.Exists(full)) continue;
-
-            var fi = new FileInfo(full);
-            if (fi.Length <= chunkLimit) continue;
-
-            if (!cache.TryGetValue(full, out List<string>? parts))
+            entryIndex++;
+            string filename = (string?)program.Attribute("filename") ?? "";
+            if (filename.Length == 0) continue;
+            string full = PackageImagePath(searchPath, filename);
+            var info = new FileInfo(full);
+            if (!info.Exists || info.Length == 0) throw new InvalidDataException("Missing or empty image: " + filename);
+            if (IsAndroidSparse(full)) throw new InvalidDataException("Expand sparse images before splitting.");
+            long limit = maxImageBytes ?? FhLoaderMaxImageBytes;
+            if (info.Length <= limit) continue;
+            long Number(string name, long? fallback = null)
             {
-                parts = new List<string>();
-                string stem = Path.GetFileNameWithoutExtension(full);
-                string ext = Path.GetExtension(full);
-                string dir = Path.GetDirectoryName(full) ?? searchPath;
-
-                // ပြီးခဲ့တဲ့ flash က part files တွေ size/mtime ကိုက်နေရင် — ပြန်မဖတ်/မရေးတော့ဘူး (GB copy ~seconds ပျောက်)
-                long remainLen = fi.Length;
-                var expected = new List<(string Name, long Len)>();
-                for (int i = 1; remainLen > 0; i++)
-                {
-                    long take = Math.Min(chunkLimit, remainLen);
-                    expected.Add(($"{stem}__pmkpart{i}{ext}", take));
-                    remainLen -= take;
-                }
-                bool reuse = expected.All(e =>
-                {
-                    string p = Path.Combine(dir, e.Name);
-                    if (!File.Exists(p)) return false;
-                    var pf = new FileInfo(p);
-                    return pf.Length == e.Len && pf.LastWriteTimeUtc >= fi.LastWriteTimeUtc;
-                });
-
-                if (reuse)
-                {
-                    foreach (var e in expected) parts.Add(e.Name);
-                    log?.Invoke($"[*] {Path.GetFileName(full)} — reusing {parts.Count} existing split parts (unchanged).");
-                }
-                else
-                {
-                    using (var src = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
-                    {
-                        int index = 1;
-                        while (src.Position < src.Length)
-                        {
-                            long remain = src.Length - src.Position;
-                            int take = (int)Math.Min(chunkLimit, remain);
-                            string partName = $"{stem}__pmkpart{index}{ext}";
-                            string partPath = Path.Combine(dir, partName);
-                            using (var dst = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
-                            {
-                                byte[] buf = new byte[1 << 20];
-                                int left = take;
-                                while (left > 0)
-                                {
-                                    int want = Math.Min(buf.Length, left);
-                                    int got = src.Read(buf, 0, want);
-                                    if (got <= 0) break;
-                                    if (writeChunk != null) writeChunk(partPath, partName);
-                                    dst.Write(buf, 0, got);
-                                    left -= got;
-                                }
-                            }
-                            parts.Add(partName);
-                            index++;
-                        }
-                    }
-                    log?.Invoke($"[*] {Path.GetFileName(full)} is {fi.Length / 1024 / 1024} MB (>2GB) — split into {parts.Count} parts for fh_loader.");
-                }
-                cache[full] = parts;
+                string? raw = (string?)program.Attribute(name);
+                if (raw == null && fallback.HasValue) return fallback.Value;
+                if (!long.TryParse(raw, out long n) || n < 0)
+                    throw new InvalidDataException("Unsupported or missing " + name + " in " + filename);
+                return n;
             }
-
-            long sectorSize = 512;
-            long startSector = 0;
-            long fileOffset = 0;
-            var first = program;
-
-            // template = original entry (မပြောင်း) — node ကို တစ်ပိုင်းချင်း fresh clone ယူပြီး
-            // မဟုတ်ရင် in-document element ကိုပဲ ပြန်ပြင်မိပြီး part1 entry ပျောက်/order ပျက်တယ်။
-            var template = new XElement(program);
-            if (template.Attribute("SECTOR_SIZE_IN_BYTES") is XAttribute ss)
-                long.TryParse(ss.Value, out sectorSize);
-            if (sectorSize <= 0) sectorSize = 512;
-            if (template.Attribute("start_sector") is XAttribute st)
-                long.TryParse(st.Value, out startSector);
-
-            foreach (string partName in parts)
+            long sector = Number("SECTOR_SIZE_IN_BYTES");
+            if (sector != 512 && sector != 4096) throw new InvalidDataException("Unsupported sector size.");
+            long chunk = limit / sector * sector;
+            if (chunk <= 0) throw new InvalidDataException("Split limit is smaller than a sector.");
+            long start = Number("start_sector"), offset = checked(Number("file_sector_offset", 0) * sector);
+            long bytes = checked(Number("num_partition_sectors") * sector);
+            if (bytes <= 0 || offset > info.Length || bytes > info.Length - offset)
+                throw new InvalidDataException("XML image range exceeds file: " + filename);
+            using var input = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+            input.Position = offset;
+            long copied = 0;
+            int index = 0;
+            XElement previous = program;
+            while (copied < bytes)
             {
-                long partBytes = new FileInfo(Path.Combine(Path.GetDirectoryName(full) ?? searchPath, partName)).Length;
-                long sectors = partBytes / sectorSize;
-
-                var node = new XElement(template);
-                if (node.Attribute("filename") is XAttribute fn) fn.Value = partName;
-                if (node.Attribute("num_partition_sectors") is XAttribute ns) ns.Value = sectors.ToString();
-                if (node.Attribute("start_sector") is XAttribute ss2) ss2.Value = (startSector + fileOffset / sectorSize).ToString();
-                if (node.Attribute("file_sector_offset") is XAttribute fso) fso.Value = "0";
-                if (node.Attribute("size_in_KB") is XAttribute kb)
-                    kb.Value = (partBytes / 1024.0).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                if (node.Attribute("start_byte_hex") is XAttribute sb)
+                long take = Math.Min(chunk, bytes - copied);
+                // Separate names for repeated references to different ranges of one image.
+                string suffix = entryIndex == 1 ? "" : "_entry" + entryIndex;
+                string name = Path.GetFileNameWithoutExtension(full) + suffix + "__pmkpart" + (++index) + Path.GetExtension(full);
+                string target = Path.Combine(Path.GetDirectoryName(full)!, name);
+                string temp = target + "." + Guid.NewGuid().ToString("N") + ".part";
+                try
                 {
-                    long baseByte = 0;
-                    string raw = ((string?)template.Attribute("start_byte_hex") ?? "").Trim();
-                    if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                        long.TryParse(raw[2..], System.Globalization.NumberStyles.HexNumber,
-                            System.Globalization.CultureInfo.InvariantCulture, out baseByte);
-                    sb.Value = "0x" + (baseByte + fileOffset).ToString("x");
+                    using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        byte[] buffer = new byte[1024 * 1024];
+                        long remaining = take;
+                        while (remaining > 0)
+                        {
+                            if (writeChunk != null && !writeChunk(target, name)) throw new OperationCanceledException();
+                            int count = input.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                            if (count == 0) throw new EndOfStreamException("Image changed during split.");
+                            output.Write(buffer, 0, count);
+                            remaining -= count;
+                        }
+                        output.Flush(true);
+                    }
+                    File.Move(temp, target, true);
                 }
-
-                if (fileOffset == 0) first.ReplaceWith(node);
-                else first.AddAfterSelf(node);
-                first = node;
-
-                fileOffset += partBytes;
+                finally { if (File.Exists(temp)) File.Delete(temp); }
+                var node = new XElement(program);
+                node.SetAttributeValue("filename", Path.GetRelativePath(searchPath, target));
+                node.SetAttributeValue("num_partition_sectors", take / sector);
+                node.SetAttributeValue("start_sector", checked(start + copied / sector));
+                node.SetAttributeValue("file_sector_offset", 0);
+                node.SetAttributeValue("size_in_KB", (take / 1024.0).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                node.SetAttributeValue("start_byte_hex", "0x" + checked(start * sector + copied).ToString("x"));
+                if (copied == 0) program.ReplaceWith(node); else previous.AddAfterSelf(node);
+                previous = node;
+                copied += take;
                 addedEntries++;
             }
-
-            // နောက်ဆုံး entry ကို partition စုစုပေါင်း sectors ပေးရင် နောက် partition ထဲ ရောက်သွားနိုင်လို့
-            // မပေးဘူး — တစ် entry ချင်းစီရဲ့ sectors က file size နဲ့ အတိအကျ ကိုက်ပြီးသား။
+            log?.Invoke("[*] Rebuilt " + index + " split parts from verified XML range: " + filename);
         }
-
         doc.Save(destinationXml);
         return addedEntries;
+    }
+
+    private static string PackageImagePath(string directory, string filename)
+    {
+        string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(Path.Combine(root, filename));
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Image path escapes firmware folder: " + filename);
+        return full;
     }
 
     // Android sparse image (magic 0xED26FF3A) — fh_loader 15.06 က expand မလုပ်ဘဲ
@@ -197,26 +153,18 @@ internal static class ReviewSafety
         {
             string fileName = (string?)program.Attribute("filename") ?? "";
             if (fileName.Length == 0) continue;
-            string full = Path.IsPathRooted(fileName) ? fileName : Path.Combine(searchPath, fileName);
-            if (!File.Exists(full) || !IsAndroidSparse(full)) continue;
+            string full = PackageImagePath(searchPath, fileName);
+            if (!File.Exists(full)) throw new FileNotFoundException("Missing firmware image.", full);
+            if (!IsAndroidSparse(full)) continue;
 
             long expanded = ReadSparseExpandedSize(full);
             string rawName = Path.GetFileNameWithoutExtension(fileName) + SparseRawSuffix;
-            string rawPath = Path.Combine(searchPath, rawName);
+            string rawPath = Path.Combine(Path.GetDirectoryName(full)!, rawName);
+            rawName = Path.GetRelativePath(searchPath, rawPath);
 
-            var rawFi = File.Exists(rawPath) ? new FileInfo(rawPath) : null;
-            bool reuse = rawFi != null && rawFi.Length == expanded &&
-                         rawFi.LastWriteTimeUtc >= File.GetLastWriteTimeUtc(full);
-            if (reuse)
-            {
-                log?.Invoke($"[*] {Path.GetFileName(full)} — sparse image, reusing expanded {rawName}.");
-            }
-            else
-            {
-                log?.Invoke($"[*] {Path.GetFileName(full)} — Android sparse image, expanding to {(expanded / 1048576.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} MB (raw)...");
-                ExpandSparseImage(full, rawPath);
-                log?.Invoke($"    → {rawName} ... Ok");
-            }
+            // Rebuild from the source; length/mtime are not evidence of identical content.
+            log?.Invoke("[*] Expanding and validating " + fileName);
+            ExpandSparseImage(full, rawPath);
 
             if (program.Attribute("filename") is XAttribute fnA) fnA.Value = rawName;
             program.Attribute("sparse")?.SetValue("false");
@@ -234,7 +182,7 @@ internal static class ReviewSafety
         try
         {
             using var fs = File.OpenRead(path);
-            if (fs.Length < 28) return false;
+            if (fs.Length < 4) return false;
             Span<byte> b = stackalloc byte[4];
             fs.ReadExactly(b);
             return b[0] == 0x3A && b[1] == 0xFF && b[2] == 0x26 && b[3] == 0xED;
@@ -248,20 +196,21 @@ internal static class ReviewSafety
         using var br = new BinaryReader(fs);
         uint magic = br.ReadUInt32();
         if (magic != 0xED26FF3A) throw new InvalidDataException("Not a sparse image: " + path);
-        br.ReadUInt16(); br.ReadUInt16();                 // major, minor version
+        if (br.ReadUInt16() != 1) throw new InvalidDataException("Unsupported sparse major version.");
+        br.ReadUInt16(); // minor
         ushort fileHdrSz = br.ReadUInt16();
         ushort chunkHdrSz = br.ReadUInt16();
         uint blkSz = br.ReadUInt32();
         uint totalBlks = br.ReadUInt32();
-        if (fileHdrSz < 28 || chunkHdrSz < 12 || blkSz == 0)
+        if (fileHdrSz < 28 || chunkHdrSz < 12 || blkSz == 0 || blkSz % 4 != 0 || totalBlks == 0)
             throw new InvalidDataException("Bad sparse header: " + path);
-        return (long)blkSz * totalBlks;
+        return checked((long)blkSz * totalBlks);
     }
 
     internal static void ExpandSparseImage(string source, string destination)
     {
         long expected = ReadSparseExpandedSize(source);
-        string temp = destination + ".part";
+        string temp = destination + "." + Guid.NewGuid().ToString("N") + ".part";
         try
         {
             using (var inp = File.OpenRead(source))
@@ -274,7 +223,8 @@ internal static class ReviewSafety
                 uint blkSz = br.ReadUInt32();
                 br.ReadUInt32();                            // total blocks
                 uint totalChunks = br.ReadUInt32();
-                br.ReadUInt32();                            // image checksum
+                uint imageChecksum = br.ReadUInt32();
+                uint crc = uint.MaxValue;
                 if (fileHdrSz > 28) inp.Seek(fileHdrSz - 28, SeekOrigin.Current);
 
                 using var outp = File.Create(temp);
@@ -287,9 +237,15 @@ internal static class ReviewSafety
                     br.ReadUInt16();                        // reserved
                     uint chunkBlocks = br.ReadUInt32();
                     uint totalSz = br.ReadUInt32();
-                    long dataLen = totalSz - chunkHdrSz;
+                    long dataLen = (long)totalSz - chunkHdrSz;
                     if (dataLen < 0) throw new InvalidDataException("Sparse chunk total_sz too small: " + source);
-                    long outLen = (long)chunkBlocks * blkSz;
+                    long outLen = checked((long)chunkBlocks * blkSz);
+                    if (chunkStart + totalSz > inp.Length || outLen > expected - outp.Position)
+                        throw new InvalidDataException("Sparse chunk exceeds declared bounds.");
+                    if ((type == 0xCAC1 && dataLen != outLen) ||
+                        (type == 0xCAC2 && dataLen != 4) || (type == 0xCAC3 && dataLen != 0) ||
+                        (type == 0xCAC4 && (dataLen != 4 || chunkBlocks != 0)))
+                        throw new InvalidDataException("Invalid sparse chunk length.");
                     inp.Position = chunkStart + chunkHdrSz;
 
                     switch (type)
@@ -303,6 +259,7 @@ internal static class ReviewSafety
                                 int got = inp.Read(buf, 0, want);
                                 if (got <= 0) throw new InvalidDataException("Sparse raw chunk truncated: " + source);
                                 outp.Write(buf, 0, got);
+                                crc = UpdateCrc(crc, buf, got);
                                 remaining -= got;
                             }
                             break;
@@ -322,14 +279,23 @@ internal static class ReviewSafety
                             {
                                 int want = (int)Math.Min(fillBuf.Length, remaining);
                                 outp.Write(fillBuf, 0, want);
+                                crc = UpdateCrc(crc, fillBuf, want);
                                 remaining -= want;
                             }
                             break;
                         }
-                        case 0xCAC3:                        // don't care → holes (NTFS reads as zeros)
+                        case 0xCAC3:                        // don't care → holes; checksum includes zeros
+                            Array.Clear(buf);
+                            for (long left = outLen; left > 0;)
+                            {
+                                int count = (int)Math.Min(buf.Length, left);
+                                crc = UpdateCrc(crc, buf, count);
+                                left -= count;
+                            }
                             outp.Seek(outLen, SeekOrigin.Current);
                             break;
-                        case 0xCAC4:                        // crc32 — data skipped
+                        case 0xCAC4:
+                            if (br.ReadUInt32() != ~crc) throw new InvalidDataException("Sparse CRC32 chunk mismatch.");
                             break;
                         default:
                             throw new InvalidDataException($"Unknown sparse chunk type 0x{type:X4}: {source}");
@@ -337,9 +303,12 @@ internal static class ReviewSafety
                     inp.Position = chunkStart + chunkHdrSz + dataLen;
                 }
 
+                if (inp.Position != inp.Length) throw new InvalidDataException("Trailing sparse data.");
                 outp.SetLength(outp.Position);
                 if (outp.Length != expected)
                     throw new InvalidDataException($"Sparse expand size mismatch: {outp.Length} != {expected} ({source})");
+                if (imageChecksum != 0 && imageChecksum != ~crc)
+                    throw new InvalidDataException("Sparse image CRC32 mismatch.");
             }
             File.Move(temp, destination, overwrite: true);
         }
@@ -348,6 +317,19 @@ internal static class ReviewSafety
             try { File.Delete(temp); } catch { }
             throw;
         }
+    }
+
+    private static readonly uint[] CrcTable = Enumerable.Range(0, 256).Select(i =>
+    {
+        uint value = (uint)i;
+        for (int bit = 0; bit < 8; bit++) value = (value >> 1) ^ ((value & 1) != 0 ? 0xedb88320U : 0);
+        return value;
+    }).ToArray();
+
+    private static uint UpdateCrc(uint crc, byte[] data, int count)
+    {
+        for (int i = 0; i < count; i++) crc = (crc >> 8) ^ CrcTable[(crc ^ data[i]) & 0xff];
+        return crc;
     }
 
     internal static long ParseSize(string value)

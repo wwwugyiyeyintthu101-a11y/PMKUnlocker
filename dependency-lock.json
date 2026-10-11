@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "bundledInventory": {
+    "path": "PMKUnlocker/bundled-tools/integrity.json",
+    "sha256": "18d27c38f628225c088e0a89876316fcd183b05b3166a9fdbb1572c89f985fc5",
+    "entries": 973
+  },
+  "libraries": [
+    {
+      "path": "PMKUnlocker/libs/potato/libusb-1.0.dll",
+      "target": "libusb-1.0.dll",
+      "sha256": "1269e6338da5ee738b4b4a24c091773a56559f0b515d002624e675e854c3ea3a",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/LibUsbDotNet.LibUsbDotNet.dll",
+      "target": "LibUsbDotNet.LibUsbDotNet.dll",
+      "sha256": "b6de87ff6fdde6d0a245ef37fe81fac49523c35115c61bc002e4935d99875508",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/Potato.Fastboot.dll",
+      "target": "Potato.Fastboot.dll",
+      "sha256": "00cf20e4d4bc5d822568637a10a87c7b06a62554b653394d57446ad461d8600f",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/Potato.ImageFlasher.dll",
+      "target": "Potato.ImageFlasher.dll",
+      "sha256": "b0e4ff754a5d1a1e281c5d94305b4dac0a7e5931e8e2532184ec8913c81ffa36",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    }
+  ],
+  "optionalBackends": {
+    "mtkclient": "External, not bundled; exact version and device compatibility must be recorded before enabling at a shop",
+    "python": "External, not bundled; supply a complete environment rather than python.exe alone",
+    "edl.py": "External, not bundled; dependencies and approved loader must be configured"
+  },
+  "note": "Locks the current file bytes, not device compatibility or redistribution permission. Update only after reviewing replacement source and licenses."
+}

@@ -28,7 +28,7 @@ public class AdminForm : Form
     private readonly Label lblMsg;
     private readonly DataGridView grid;
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
 
     public AdminForm()
     {
@@ -338,6 +338,10 @@ public class AdminForm : Form
     {
         try
         {
+            if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var server) ||
+                server.UserInfo.Length != 0 || server.Query.Length != 0 || server.Fragment.Length != 0 ||
+                (server.Scheme != Uri.UriSchemeHttps && !(server.Scheme == Uri.UriSchemeHttp && server.IsLoopback)))
+                throw new InvalidOperationException("Use HTTPS for a remote license server. HTTP is allowed only on localhost.");
             using var req = new HttpRequestMessage(body == null ? HttpMethod.Get : HttpMethod.Post, BaseUrl + path);
             req.Headers.Add("X-Admin-Key", AdminKey);
             if (body != null)

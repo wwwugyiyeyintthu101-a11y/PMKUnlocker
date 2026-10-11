@@ -22,15 +22,9 @@ internal static class ShopServices
         return selected;
     }
 
-    // Device swap: pinned serial gone + exactly one phone left → clear pin (rebind).
-    // 0 or 2+ phones → keep pin so SelectSerial still rejects (no silent switch).
-    internal static string ResolvePreferred(string output, bool adb, string? preferred)
-    {
-        if (string.IsNullOrEmpty(preferred)) return "";
-        var serials = DeviceSerials(output, adb);
-        if (serials.Contains(preferred)) return preferred;
-        return serials.Length == 1 ? "" : preferred;
-    }
+    // A disconnected selection never rebinds implicitly to a different phone.
+    // The operator can select a new device while no operation is running.
+    internal static string ResolvePreferred(string output, bool adb, string? preferred) => preferred ?? "";
 
     internal static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PMKMobileTool");
     internal static string DataPath(string name)
@@ -159,16 +153,27 @@ internal static class ShopServices
         return checked((long)block * blocks);
     }
 
-    internal static List<string> CheckImages(string directory, IReadOnlyDictionary<string, long> layout, bool skipUserdata)
+    internal static List<string> CheckImages(string directory, IReadOnlyDictionary<string, long> layout, bool skipUserdata, out List<string> skipped)
     {
+        skipped = new List<string>();
         var problems = new List<string>();
-        int count = 0;
+        int matched = 0;
         foreach (string path in Directory.EnumerateFiles(directory).Where(p => new[] { ".img", ".bin" }.Contains(Path.GetExtension(p).ToLowerInvariant())))
         {
             string partition = Path.GetFileNameWithoutExtension(path);
             if (skipUserdata && partition.Equals("userdata", StringComparison.OrdinalIgnoreCase)) continue;
-            count++;
-            if (!layout.TryGetValue(partition, out long capacity)) { problems.Add("Partition not in device GPT: " + partition); continue; }
+            if (!layout.TryGetValue(partition, out long capacity))
+            {
+                // MIUI firmware ထဲမှာ partition နာမည် + suffix ထပ်ပါတဲ့ ဖိုင်တွေ ရှိတယ်
+                // (preloader_dandelion_*.bin → preloader) — prefix match ကြိုးစား၊
+                // မကိုက်ရင် mtkclient wl ကလည်း skip မှာမို့ fatal မလုပ်ဘဲ note ပဲထား
+                string? prefix = layout.Keys.FirstOrDefault(k =>
+                    partition.StartsWith(k + "_", StringComparison.OrdinalIgnoreCase));
+                if (prefix == null) { skipped.Add(Path.GetFileName(path)); continue; }
+                partition = prefix;
+                capacity = layout[prefix];
+            }
+            matched++;
             try
             {
                 long size = ExpandedImageSize(path);
@@ -176,7 +181,7 @@ internal static class ShopServices
             }
             catch (Exception ex) { problems.Add(Path.GetFileName(path) + ": " + ex.Message); }
         }
-        if (count == 0) problems.Add("No images selected.");
+        if (matched == 0) problems.Add("No images matched device partitions.");
         return problems;
     }
 }

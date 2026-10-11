@@ -8,12 +8,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- PotatoNV library တွေ (x86) နဲ့ libusb-1.0.dll (32-bit) အတွက် x86 ဖြစ်ရမယ် -->
     <PlatformTarget>x86</PlatformTarget>
-    <Version>7.3.4</Version>
-    <FileVersion>7.3.4.0</FileVersion>
-    <InformationalVersion>7.3.4-preview</InformationalVersion>
+    <Version>7.3.5</Version>
+    <FileVersion>7.3.5.0</FileVersion>
+    <InformationalVersion>7.3.5-preview</InformationalVersion>
     <Product>PMK Mobile Tool</Product>
     <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
     <ApplicationIcon>pmk.ico</ApplicationIcon>
+    <!-- fh_loader / fastboot / mtk ops တွေ admin လိုလို့ tool ကိုယ်တိုင် admin -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -50,6 +52,8 @@
        (mtkclient CLI ရဲ့ `reset` က power off သာ လုပ်လို့) — exe ဘေးမှာ ရှိရမယ် -->
   <ItemGroup>
     <Content Include="..\SHOP_SETUP.md" Link="SHOP_SETUP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\LICENSE_SERVER_SETUP.md" Link="LICENSE_SERVER_SETUP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\REPAIR_NOTES_2026-10-11.md" Link="REPAIR_NOTES_2026-10-11.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Remove="bundled-tools\**\*" />
     <Content Include="bundled-tools\**\*">
       <TargetPath>%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
@@ -62,6 +66,9 @@
     <None Update="pmk_mtk_op.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="pmk_flash_guard.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="pmk_sparse.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="pmk_gpt.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="pmk_qc_loaders.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -75,4 +82,23 @@
     </None>
   </ItemGroup>
 
+  <!-- MTK Auth Bypass (in-tool) — MTK-bypass/bypass_utility (MIT) + exploits_collection payloads
+       + UsbDk installer — '🔐 MTK Auth Bypass' ခလုတ်က ခေါ်တယ် (external MABT exe မသုံး) -->
+  <ItemGroup>
+    <None Remove="tools\mtkbypass\**\*" />
+    <None Remove="tools\mtkbypass\**\__pycache__\**" />
+    <Content Include="tools\mtkbypass\**\*" Exclude="tools\mtkbypass\**\__pycache__\**;tools\mtkbypass\**\__pycache__\*.*">
+      <TargetPath>tools\mtkbypass\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="WriteBuildIntegrity" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup><IntegrityReleaseArguments Condition="'$(Configuration)' == 'Release'">-VerifyBundled</IntegrityReleaseArguments></PropertyGroup>
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File &quot;$(MSBuildProjectDirectory)\..\scripts\write_runtime_integrity.ps1&quot; -SourceRoot &quot;$(MSBuildProjectDirectory)&quot; -OutputRoot &quot;$(TargetDir).&quot; $(IntegrityReleaseArguments)" />
+  </Target>
+  <Target Name="WritePublishIntegrity" AfterTargets="Publish">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File &quot;$(MSBuildProjectDirectory)\..\scripts\write_runtime_integrity.ps1&quot; -SourceRoot &quot;$(MSBuildProjectDirectory)&quot; -OutputRoot &quot;$(PublishDir).&quot; -VerifyBundled" />
+  </Target>
 </Project>

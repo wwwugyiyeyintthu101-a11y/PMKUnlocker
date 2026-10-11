@@ -1,4 +1,5 @@
 using PMKUnlocker;
+using PMKUnlocker.MtkFirmware;
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.Reflection;
@@ -45,8 +46,8 @@ try
     try { ShopServices.SelectSerial("other\tdevice", true, "missing"); } catch (InvalidOperationException) { multiRejected = true; }
     Check(multiRejected, "Disconnected selection never switches to another phone");
     Check(ShopServices.SelectSerial("abc\tfastboot", false, "") == "abc", "Single fastboot device can be pinned");
-    Check(ShopServices.ResolvePreferred("List of devices attached\nnew\tdevice\n", true, "old") == "",
-        "Stale ADB pin clears when a single phone remains (device swap)");
+    Check(ShopServices.ResolvePreferred("List of devices attached\nnew\tdevice\n", true, "old") == "old",
+        "Missing selected phone remains pinned when another phone is connected");
     Check(ShopServices.ResolvePreferred("List of devices attached\na\tdevice\nb\tdevice\n", true, "old") == "old",
         "Stale ADB pin kept when multiple phones (no silent switch)");
     Check(ShopServices.ResolvePreferred("List of devices attached\nold\tdevice\n", true, "old") == "old",
@@ -77,9 +78,9 @@ try
 
     string firmwareDir = Path.Combine(dir, "firmware"); Directory.CreateDirectory(firmwareDir);
     File.WriteAllBytes(Path.Combine(firmwareDir, "boot.img"), new byte[32]);
-    Check(ShopServices.CheckImages(firmwareDir, layout, false).Count == 0, "Raw image fitting the device GPT passes size preflight");
+    Check(ShopServices.CheckImages(firmwareDir, layout, false, out var sk1).Count == 0, "Raw image fitting the device GPT passes size preflight");
     File.WriteAllBytes(Path.Combine(firmwareDir, "unknown.img"), new byte[1]);
-    Check(ShopServices.CheckImages(firmwareDir, layout, false).Count == 1, "Unknown partition blocks preflight");
+    Check(ShopServices.CheckImages(firmwareDir, layout, false, out var sk2).Count == 0 && sk2.Contains("unknown.img"), "Unknown partition is skipped with a note (wl skips it too)");
     File.Delete(Path.Combine(firmwareDir, "unknown.img"));
     using (var sparse = new BinaryWriter(File.Create(Path.Combine(firmwareDir, "boot.img"))))
     {
@@ -87,7 +88,7 @@ try
         sparse.Write((ushort)28); sparse.Write((ushort)12); sparse.Write(4096U); sparse.Write(8U); sparse.Write(0U); sparse.Write(0U);
     }
     Check(ShopServices.ExpandedImageSize(Path.Combine(firmwareDir, "boot.img")) == 32768, "Sparse preflight uses expanded size, not file length");
-    Check(ShopServices.CheckImages(firmwareDir, layout, false).Count == 1, "Oversized sparse image blocks preflight");
+    Check(ShopServices.CheckImages(firmwareDir, layout, false, out var sk3).Count == 1, "Oversized sparse image blocks preflight");
     Check(ReviewSafety.ShouldReboot(true, true, false, false), "Successful operation permits enabled auto-reboot");
     Check(!ReviewSafety.ShouldReboot(true, true, true, false), "Failed operation cannot auto-reboot");
     Check(!ReviewSafety.ShouldReboot(true, false, false, false), "Cancelled dialog without a command cannot auto-reboot");
@@ -138,7 +139,21 @@ try
     Check(splitAgain == 3 && splitParts2.Count == 3 &&
           (string?)splitParts2[0].Attribute("filename") == "system__pmkpart1.img" &&
           (string?)splitParts2[1].Attribute("start_sector") == "180" &&
-          (string?)splitParts2[2].Attribute("start_sector") == "260", "Split reuses existing parts with same entries");
+          (string?)splitParts2[2].Attribute("start_sector") == "260", "Split rebuilds parts with the same correct entries");
+
+    File.WriteAllBytes(Path.Combine(splitDir, "system__pmkpart1.img"), new byte[40960]);
+    ReviewSafety.SplitOversizedImages(splitSrc, splitDir, splitDst, null, null, 40 * 1024);
+    Check(File.ReadAllBytes(Path.Combine(splitDir, "system__pmkpart1.img"))[4096] == 1,
+        "Split rebuilds same-size corrupted cached part");
+    string ranged = Path.Combine(splitDir, "range.xml");
+    File.WriteAllText(ranged, "<data><program filename='system.img' SECTOR_SIZE_IN_BYTES='512' start_sector='200' file_sector_offset='8' num_partition_sectors='80'/></data>");
+    ReviewSafety.SplitOversizedImages(ranged, splitDir, splitDst, null, null, 40 * 1024);
+    var rangedEntry = XDocument.Load(splitDst).Descendants("program").Single();
+    Check(File.ReadAllBytes(Path.Combine(splitDir, (string)rangedEntry.Attribute("filename")!))[0] == 1 &&
+        (string?)rangedEntry.Attribute("start_sector") == "200" &&
+        (string?)rangedEntry.Attribute("file_sector_offset") == "0" &&
+        (string?)rangedEntry.Attribute("num_partition_sectors") == "80",
+        "Split preserves nonzero source offset and entry length");
 
     // ---- Sparse image expansion (fh_loader 15.06 container-as-raw → bootloop) ----
     string spDir = Path.Combine(Path.GetTempPath(), "pmk_reg_sparse" + Guid.NewGuid().ToString("N"));
@@ -192,10 +207,27 @@ try
         xmlRegen.Descendants("program").First(p => (string?)p.Attribute("label") == "x")
                 .Attribute("filename")!.Value = "tiny.img";
         xmlRegen.Save(spXml);
-        var mt0 = File.GetLastWriteTimeUtc(rawOut);
+        File.WriteAllBytes(rawOut, new byte[ob.Length]); // same size, newer timestamp, wrong content
         int conv2 = ReviewSafety.ConvertSparseImages(spXml, spDir, null);
-        Check(conv2 == 1 && File.GetLastWriteTimeUtc(rawOut) == mt0,
-              "Second run reuses existing expanded raw image (not rewritten)");
+        Check(conv2 == 1 && File.ReadAllBytes(rawOut).SequenceEqual(ob),
+              "Second run rebuilds a same-size corrupted raw image");
+        string badCrc = Path.Combine(spDir, "bad-crc.img");
+        byte[] invalidSparse = File.ReadAllBytes(spSrc);
+        BitConverter.GetBytes(1U).CopyTo(invalidSparse, 24);
+        File.WriteAllBytes(badCrc, invalidSparse);
+        bool crcBlocked = false;
+        try { ReviewSafety.ExpandSparseImage(badCrc, Path.Combine(spDir, "bad.raw")); }
+        catch (InvalidDataException) { crcBlocked = true; }
+        Check(crcBlocked && !File.Exists(Path.Combine(spDir, "bad.raw")), "Invalid sparse CRC rejects output");
+        string pipelineXml = Path.Combine(spDir, "pipeline.xml");
+        File.WriteAllText(pipelineXml, "<data><program filename='tiny.img' SECTOR_SIZE_IN_BYTES='512' start_sector='100' file_sector_offset='0' num_partition_sectors='48' sparse='true'/></data>");
+        ReviewSafety.ConvertSparseImages(pipelineXml, spDir);
+        string pipelineOut = Path.Combine(spDir, "pipeline-final.xml");
+        ReviewSafety.SplitOversizedImages(pipelineXml, spDir, pipelineOut, null, null, 8192);
+        var pipelineParts = XDocument.Load(pipelineOut).Descendants("program").ToList();
+        Check(pipelineParts.Count == 3 && pipelineParts.All(p =>
+            new FileInfo(Path.Combine(spDir, (string)p.Attribute("filename")!)).Length == 8192),
+            "Small sparse container expands then splits below the loader limit");
         Check(new FileInfo(spSrc).Length == 28 + 12 + 4096 + 16 + 12, "Source sparse file untouched");
     }
     finally { try { Directory.Delete(spDir, true); } catch { } }
@@ -329,6 +361,501 @@ try
           glBad.Contains("kernel"),
         "GhostLock rejects non-matching kernel");
 
+    // --- MI FLASH (Xiaomi fastboot flash_all.bat parser) ---
+    string romBase = Path.Combine(dir, "ROM Air MIUI");
+    var parsed = MiFlash.ParseLines(new[]
+    {
+        "@echo off",
+        "color 07",
+        "rem fastboot flash fake boot.img",
+        ":: fastboot flash commented vendor.img",
+        "set FASTBOOT=",
+        "fastboot %FASTBOOT% flash logo \"%~dp0images\\logo.bin\"",
+        "fastboot %FASTBOOT% flash super %~dp0images\\super image.img",
+        "fastboot %FASTBOOT% erase userdata",
+        "fastboot %FASTBOOT% set_active b",
+        "fastboot reboot",
+        "timeout /t 2 /nobreak >nul",
+        "echo Flashing done",
+        "\"%~dp0tools\\fastboot.exe\" flash dtbo %~dp0images\\dtbo.img"
+    }, romBase);
+    Check(parsed.Count == 6, "flash_all.bat: comment/echo/timeout lines skipped, 6 real ops kept");
+    Check(parsed[0].Kind == "flash" && parsed[0].Partition == "logo" &&
+          parsed[0].File == Path.Combine(romBase, "images", "logo.bin"),
+        "flash_all.bat: quoted %~dp0 path resolves to absolute image path");
+    Check(parsed[1].Kind == "flash" && parsed[1].File == Path.Combine(romBase, "images", "super image.img"),
+        "flash_all.bat: unquoted path with spaces joins remaining tokens");
+    Check(parsed[2].Kind == "erase" && parsed[2].Partition == "userdata",
+        "flash_all.bat: erase command parsed");
+    Check(parsed[3].Kind == "set_active" && parsed[3].Raw.StartsWith("set_active b"),
+        "flash_all.bat: set_active parsed as own op");
+    Check(parsed[4].Kind == "reboot", "flash_all.bat: reboot captured for Auto Reboot handling");
+    Check(parsed[5].Kind == "flash" && parsed[5].Partition == "dtbo" &&
+          parsed[5].File == Path.Combine(romBase, "images", "dtbo.img"),
+        "flash_all.bat: bundled \"fastboot.exe\" path form parsed");
+    var slotOps = MiFlash.ParseLines(new[]
+        { "set FASTBOOT=--slot=all", "fastboot %FASTBOOT% flash boot x.img" }, romBase);
+    Check(slotOps.Count == 1 && slotOps[0].Kind == "flash" && slotOps[0].Partition == "boot" &&
+          slotOps[0].File.EndsWith("x.img", StringComparison.Ordinal),
+        "flash_all.bat: %FASTBOOT% option var skipped when locating flash verb");
+    var starOps = MiFlash.ParseLines(new[]
+    {
+        "fastboot %* flash boot %~dp0images\\boot.img || @echo \"Flash boot error\" && exit /B 1",
+        "fastboot %* getvar product 2>&1 | findstr /r /c:\"^product: *air\" || echo Missmatching image and device",
+        "fastboot %* erase expdb    || @echo \"Erase expdb error\" && exit /B 1",
+        "fastboot %* oem cdms",
+        "fastboot %* set_active a  || @echo \"set_active a error\" && exit /B 1",
+        "fastboot %* reboot || @echo \"Reboot error\" && exit /B 1"
+    }, romBase);
+    Check(starOps.Count == 5, "flash_all.bat: %* skipped, product guard retained as plan metadata, 5 real ops kept");
+    Check(starOps[0].Kind == "flash" && starOps[0].File == Path.Combine(romBase, "images", "boot.img") &&
+          !starOps[0].File.Contains("||"),
+        "flash_all.bat: flash file path free of || @echo tail");
+    Check(starOps[1].Kind == "erase" && starOps[1].Partition == "expdb",
+        "flash_all.bat: %* erase parsed");
+    Check(starOps[2].Kind == "raw" && starOps[2].Raw == "oem cdms",
+        "flash_all.bat: oem cdms kept as raw op");
+    Check(starOps[3].Kind == "set_active" && starOps[3].Raw.StartsWith("set_active a") &&
+          !starOps[3].Raw.Contains("||"),
+        "flash_all.bat: set_active raw tail stripped");
+    Check(starOps[4].Kind == "reboot" && starOps[4].Raw == "reboot",
+        "flash_all.bat: reboot op raw = reboot");
+    var condOps = MiFlash.ParseLines(new[]
+    {
+        "fastboot %* getvar partition-type:opcust 2>&1 | findstr /r /c:\"^partition-type:opcust: raw\"",
+        "if %errorlevel% equ 0 (",
+        "fastboot %* erase opcust || @echo \"Erase opcust error\" && exit /B 1",
+        ")",
+        "fastboot %* erase metadata || @echo \"Erase metadata error\" && exit /B 1",
+        "fastboot %* getvar crc 2>&1 | findstr /r /c:\"^crc: 1\" && if %errorlevel% equ 0 (",
+        "fastboot %* flash crclist %~dp0images\\crclist.txt || @echo err",
+        ")"
+    }, romBase);
+    Check(condOps.Count == 3, "flash_all.bat: getvar guard lines dropped, 3 ops kept");
+    Check(condOps[0].Kind == "erase" && condOps[0].Partition == "opcust" &&
+          condOps[0].Cond == "partition-type:opcust",
+        "flash_all.bat: partition-type guard attached to erase op");
+    Check(condOps[1].Kind == "erase" && condOps[1].Cond == "",
+        "flash_all.bat: ')' block end clears guard — metadata erase unconditional");
+    Check(condOps[2].Kind == "flash" && condOps[2].Cond == "crc" &&
+          condOps[2].File == Path.Combine(romBase, "images", "crclist.txt"),
+        "flash_all.bat: crc guard attached to crclist flash");
+    string batPath = Path.Combine(dir, "flash_all_lock.bat");
+    File.WriteAllText(batPath, "fastboot flash boot boot.img");
+    Check(MiFlash.FindFlashAllBat(dir) == Path.GetFullPath(batPath), "FindFlashAllBat prefers flash_all*.bat by name");
+    Check(MiFlash.EraseFirst.Contains("boot_a") && MiFlash.EraseFirst.Contains("metadata") && MiFlash.EraseFirst.Length == 6,
+        "MST erase-first list has 6 partitions incl. boot_a + metadata");
+
+    Check(starOps.All(o => o.ExpectedProduct == "air"), "Product guard protects the entire plan");
+    bool wrongModel = false;
+    try { MiFlash.ValidateDevice(starOps, "(bootloader) product: other"); } catch (InvalidDataException) { wrongModel = true; }
+    Check(wrongModel, "Wrong model is rejected before any write");
+    MiFlash.ValidateDevice(starOps, "(bootloader) product: air\n(bootloader) anti: 1");
+    Check(slotOps[0].Options == "--slot=all", "Slot option is preserved for command execution");
+    bool controlFlowRejected = false;
+    try { MiFlash.ParseLines(new[] { "if %ANTI% GTR 1 exit /b 1", "fastboot flash boot boot.img" }, romBase); }
+    catch (InvalidDataException) { controlFlowRejected = true; }
+    Check(controlFlowRejected, "Unknown rollback control flow is rejected instead of stripped");
+    bool noGuard = false;
+    try { MiFlash.ValidateDevice(parsed, "product: air"); } catch (InvalidDataException) { noGuard = true; }
+    Check(noGuard, "Missing product guard blocks flashing");
+
+    Check(!MiFlash.GuardMatches("crc", "crc: 11") && MiFlash.GuardMatches("crc", "(bootloader) crc: 1"),
+        "Conditional CRC guard matches the exact value");
+    bool chained = false;
+    try { MiFlash.ParseLines(new[] { "fastboot flash boot boot.img && fastboot flashing lock" }, romBase); }
+    catch (InvalidDataException) { chained = true; }
+    Check(chained, "Unsupported chained BAT commands are rejected");
+    string leasedImage = Path.Combine(dir, "leased.img");
+    File.WriteAllBytes(leasedImage, new byte[512]);
+    using (var lease = new MiFlash.ImageLease(new[] { new MiFlashOp { Kind = "flash", File = leasedImage } }))
+    {
+        bool imageLocked = false;
+        try { using var writer = new FileStream(leasedImage, FileMode.Open, FileAccess.Write); }
+        catch (IOException) { imageLocked = true; }
+        Check(imageLocked, "Firmware image cannot be changed while the flash plan holds its lease");
+    }
+    bool missingImage = false;
+    try { using var lease = new MiFlash.ImageLease(new[] { new MiFlashOp { Kind = "flash", File = leasedImage }, new MiFlashOp { Kind = "flash", File = Path.Combine(dir, "missing.img") } }); }
+    catch (FileNotFoundException) { missingImage = true; }
+    Check(missingImage, "Whole-plan image preflight rejects a missing later image before erase");
+    using (var unlocked = new FileStream(leasedImage, FileMode.Open, FileAccess.Write))
+        Check(unlocked.CanWrite, "Failed image preflight releases earlier file handles");
+
+    string integrityPath = Path.Combine(AppContext.BaseDirectory, "integrity.json");
+    byte[]? originalIntegrity = File.Exists(integrityPath) ? File.ReadAllBytes(integrityPath) : null;
+    string probeName = "integrity-probe-" + Guid.NewGuid().ToString("N") + ".bin";
+    string probeFile = Path.Combine(AppContext.BaseDirectory, probeName);
+    try
+    {
+        File.WriteAllBytes(probeFile, new byte[] { 1, 2, 3 });
+        File.WriteAllText(integrityPath, System.Text.Json.JsonSerializer.Serialize(new[] { new { k = probeName, h = ShopServices.Hash(probeFile) } }));
+        ToolIntegrity.Verify(probeFile);
+        File.WriteAllBytes(probeFile, new byte[] { 3, 2, 1 });
+        bool tampered = false;
+        try { ToolIntegrity.Verify(probeFile); } catch (InvalidDataException) { tampered = true; }
+        Check(tampered, "Bundled tool changed after first verification is rejected");
+        File.Delete(integrityPath);
+        bool noManifest = false;
+        try { ToolIntegrity.Verify(probeFile); } catch (InvalidDataException) { noManifest = true; }
+        Check(noManifest, "Missing bundled integrity manifest fails closed");
+    }
+    finally
+    {
+        File.Delete(probeFile);
+        if (originalIntegrity != null) File.WriteAllBytes(integrityPath, originalIntegrity);
+        else if (File.Exists(integrityPath)) File.Delete(integrityPath);
+    }
+
+    // ===== MtkFirmware layer: scatter parser / risk / preflight / backend / redactor =====
+    string fwDir = Path.Combine(dir, "fw"); Directory.CreateDirectory(fwDir);
+    string GoodScatter(string blocks) =>
+        "MTK_SCATTER_V11_LIO\r\n- general:\r\n  - platform: MT6765\r\n  - project: dandelion\r\n" +
+        "  - config_version: V1.1.5\r\n  - storage: EMMC\r\n" + blocks;
+    string Blk(string name, string file, string start, string size,
+        string region = "EMMC_USER", bool dl = true, string op = "FLASH") =>
+        "- partition_index: SYS\r\n" +
+        "  - partition_name: " + name + "\r\n" +
+        "  - file_name: " + file + "\r\n" +
+        "  - is_download: " + (dl ? "true" : "false") + "\r\n" +
+        "  - linear_start_addr: " + start + "\r\n" +
+        "  - partition_size: " + size + "\r\n" +
+        "  - region: " + region + "\r\n" +
+        "  - storage: HW_STORAGE_EMMC\r\n" +
+        "  - operation_type: " + op + "\r\n";
+    void MkImg(string name, int bytes) => File.WriteAllBytes(Path.Combine(fwDir, name), new byte[bytes]);
+    void WriteSparse(string path, uint blkSz, uint blocks)
+    {
+        using var bw = new BinaryWriter(File.Create(path));
+        bw.Write((uint)0xED26FF3A);
+        bw.Write((ushort)1); bw.Write((ushort)0);
+        bw.Write((ushort)28); bw.Write((ushort)12);
+        bw.Write(blkSz); bw.Write(blocks);
+        bw.Write((uint)0); bw.Write((uint)0);
+    }
+
+    MkImg("preloader_x.bin", 1024);
+    MkImg("boot.img", 2048);
+    MkImg("super.img", 4096);
+    MkImg("vendor.img", 4096);
+    string sGood = Path.Combine(fwDir, "good_scatter.txt");
+    File.WriteAllText(sGood, GoodScatter(
+        Blk("preloader", "preloader_x.bin", "0x0", "0x40000") +
+        Blk("boot", "boot.img", "0x1000000", "0x2000000") +
+        Blk("super", "super.img", "0x5d000000", "0x120000000") +
+        Blk("pgpt", "NONE", "0x0", "0x8000", dl: false)));
+    var good = ScatterParser.Load(sGood);
+    Check(good.FormatSupported && good.Platform == "MT6765" && good.ConfigVersion == "V1.1.5",
+        "scatter: well-formed parses with platform/config");
+    Check(good.Entries.Count == 4 && good.FlashableEntries.Count() == 3,
+        "scatter: 4 rows parsed, 3 flashable (is_download=false skipped)");
+    Check(good.Find("preloader") is { NumbersValid: true, Selectable: true },
+        "scatter: preloader start 0x0 parses as valid number");
+    Check(!good.HasBlockingErrors, "scatter: clean package has no blocking errors");
+
+    string sBad = Path.Combine(fwDir, "bad_scatter.txt");
+    File.WriteAllText(sBad, "just some text\r\nno blocks here\r\n");
+    var bad = ScatterParser.Load(sBad);
+    Check(!bad.FormatSupported && bad.Issues.Any(i => i.Code == "unsupported-format"),
+        "scatter: non-scatter text rejected as unsupported (no guessing)");
+
+    string sHex = Path.Combine(fwDir, "hex_scatter.txt");
+    File.WriteAllText(sHex, GoodScatter(Blk("boot", "boot.img", "0x1000", "0xZZZ")));
+    var badHex = ScatterParser.Load(sHex);
+    Check(badHex.Find("boot") is { LoadError: not null, Selectable: false } &&
+          badHex.Issues.Any(i => i.Code == "invalid-number"),
+        "scatter: invalid hex size flagged and excluded from flash map");
+
+    string sDup = Path.Combine(fwDir, "dup_scatter.txt");
+    File.WriteAllText(sDup, GoodScatter(
+        Blk("boot", "boot.img", "0x1000", "0x2000") +
+        Blk("boot", "vendor.img", "0x5000", "0x2000")));
+    var dup = ScatterParser.Load(sDup);
+    Check(dup.Entries.Count == 2 && dup.Entries[1].LoadError != null &&
+          dup.Issues.Any(i => i.Code == "duplicate-name"),
+        "scatter: duplicate partition name flagged");
+
+    string sTrav = Path.Combine(fwDir, "trav_scatter.txt");
+    File.WriteAllText(sTrav, GoodScatter(Blk("boot", "..\\evil.img", "0x1000", "0x2000")));
+    var trav = ScatterParser.Load(sTrav);
+    Check(trav.Find("boot") is { LoadError: not null, ResolvedPath: null } &&
+          trav.Issues.Any(i => i.Code == "path-traversal"),
+        "scatter: file_name escaping firmware folder blocked");
+    Check(ScatterParser.ResolveInside(fwDir, "boot.img") != null &&
+          ScatterParser.ResolveInside(fwDir, "..\\evil.img") == null,
+        "path: in-folder resolves, parent-dir blocked");
+
+    string sOv = Path.Combine(fwDir, "ov_scatter.txt");
+    File.WriteAllText(sOv, GoodScatter(
+        Blk("boot", "boot.img", "0x1000", "0x2000") +
+        Blk("vendor", "vendor.img", "0x2000", "0x3000")));
+    var ov = ScatterParser.Load(sOv);
+    Check(ov.Entries.All(e => e.LoadError != null) &&
+          ov.Issues.Any(i => i.Code == "address-overlap" && i.Severity == IssueSeverity.Error),
+        "overlap: two flashable entries overlapping both excluded with error");
+
+    string sRes = Path.Combine(fwDir, "reserved_scatter.txt");
+    File.WriteAllText(sRes, GoodScatter(
+        Blk("super", "super.img", "0x100000000", "0x40000000") +
+        Blk("sgpt", "NONE", "0x110000000", "0x4200", dl: false)));
+    var resv = ScatterParser.Load(sRes);
+    Check(resv.Find("super") is { Selectable: true } &&
+          resv.Issues.Any(i => i.Code == "address-overlap" && i.Severity == IssueSeverity.Warning) &&
+          !resv.Issues.Any(i => i.Code == "address-overlap" && i.Severity == IssueSeverity.Error),
+        "overlap: reserved (non-download) entry inside super stays warning — vendor layout tolerated");
+
+    string sMiss = Path.Combine(fwDir, "miss_scatter.txt");
+    File.WriteAllText(sMiss, GoodScatter(Blk("odin", "nope.img", "0x1000", "0x2000")));
+    var miss = ScatterParser.Load(sMiss);
+    Check(miss.Find("odin") is { ImageExists: false, Selectable: true } &&
+          miss.Issues.Any(i => i.Code == "missing-image" && i.Severity == IssueSeverity.Warning),
+        "scatter: missing image → warning, entry still listed for dialog");
+
+    string sSparse = Path.Combine(fwDir, "sparse_scatter.txt");
+    File.WriteAllText(sSparse, GoodScatter(Blk("vendor2", "sparse.img", "0x100000000", "0x1000000")));
+    WriteSparse(Path.Combine(fwDir, "sparse.img"), 4096, 0x10000);
+    var sp = ScatterParser.Load(sSparse);
+    Check(sp.Find("vendor2")!.EffectiveImageSize == 268435456L,
+        "sparse: expanded size computed from 28-byte header");
+    Check(sp.Issues.Any(i => i.Code == "image-larger-than-partition" && i.Partition == "vendor2"),
+        "sparse: image larger than partition flagged");
+    Check(sp.Find("vendor2") is { Selectable: true },
+        "sparse: oversize entry still listed (preflight blocks when selected)");
+
+    Check(FlashRisk.Classify(good.Find("preloader")!) == RiskLevel.HighRisk &&
+          !FlashRisk.DefaultSelected(good.Find("preloader")!),
+        "risk: preloader is high-risk and default-unselected");
+    Check(FlashRisk.Classify(good.Find("boot")!) == RiskLevel.Normal &&
+          FlashRisk.DefaultSelected(good.Find("boot")!),
+        "risk: normal partition default-selected");
+    Check(!FlashRisk.DefaultSelected(good.Find("pgpt")!),
+        "risk: non-download table entry never default-selected");
+    string sData = Path.Combine(fwDir, "data_scatter.txt");
+    File.WriteAllText(sData, GoodScatter(
+        Blk("userdata", "userdata.img", "0x140000000", "0x200000000") +
+        Blk("nvram", "nvram.img", "0x1000000", "0x200000") +
+        Blk("mystery", "mystery.img", "0x2000000", "0x1000", op: "PROTECTED")));
+    var dataPkg = ScatterParser.Load(sData);
+    Check(FlashRisk.Classify(dataPkg.Find("userdata")!) == RiskLevel.HighRisk &&
+          FlashRisk.Classify(dataPkg.Find("nvram")!) == RiskLevel.HighRisk &&
+          FlashRisk.Classify(dataPkg.Find("mystery")!) == RiskLevel.HighRisk,
+        "risk: userdata + nvram + PROTECTED op all high-risk");
+
+    var capsOk = new BackendCapabilities { Name = "test-backend", SupportsFlash = true };
+    var capsNo = new BackendCapabilities { Name = "test-no-flash", SupportsFlash = false };
+
+    var rep1 = FirmwarePreflight.Run(good, new[] { "boot" }, null, capsOk);
+    Check(rep1.Overall == VerifyState.UnableToVerify && rep1.CanFlash,
+        "preflight: no device → unable-to-verify overall, flash allowed");
+    Check(rep1.Checks.Single(c => c.Name == "Scatter structure").State == VerifyState.VerifiedCompatible,
+        "preflight: clean scatter structure verified");
+    Check(rep1.Checks.Single(c => c.Name == "Selected image files").State == VerifyState.VerifiedCompatible,
+        "preflight: selected images present + fit");
+    Check(rep1.SummaryNote.Contains("not a full compatibility proof"),
+        "preflight: summary warns platform match alone is not proof");
+
+    var repBad = FirmwarePreflight.Run(badHex, new[] { "boot" }, null, capsOk);
+    Check(repBad.Overall == VerifyState.Mismatch && !repBad.CanFlash,
+        "preflight: structural scatter error blocks flash");
+
+    var repMiss = FirmwarePreflight.Run(miss, new[] { "odin" }, null, capsOk);
+    Check(repMiss.Overall == VerifyState.Mismatch && !repMiss.CanFlash,
+        "preflight: selected missing image blocks flash");
+
+    var repEmpty = FirmwarePreflight.Run(good, Array.Empty<string>(), null, capsOk);
+    Check(repEmpty.Overall == VerifyState.UnableToVerify && repEmpty.CanFlash,
+        "preflight: empty selection unverifiable, not a mismatch");
+
+    var repStruct = FirmwarePreflight.Run(sp, Array.Empty<string>(), null, capsOk);
+    Check(repStruct.Checks.Single(c => c.Name == "Scatter structure").State == VerifyState.VerifiedCompatible,
+        "preflight: image-size issue does not poison structure check");
+    var repOversel = FirmwarePreflight.Run(sp, new[] { "vendor2" }, null, capsOk);
+    Check(repOversel.Overall == VerifyState.Mismatch && !repOversel.CanFlash,
+        "preflight: oversize image selected → blocked");
+
+    var probeMatch = new DeviceProbeResult
+    {
+        Connected = true, Transport = "brom", Chipset = "MT6765",
+        StorageType = "eMMC", CapacityBytes = 58240000000L
+    };
+    var repMatch = FirmwarePreflight.Run(good, new[] { "boot" }, probeMatch, capsOk);
+    Check(repMatch.Checks.Single(c => c.Name == "Chipset platform").State == VerifyState.VerifiedCompatible,
+        "preflight: matching chipset verified");
+    Check(repMatch.Overall == VerifyState.UnableToVerify && repMatch.CanFlash,
+        "preflight: auth stays unverifiable even with device connected");
+    var probeBad = new DeviceProbeResult
+    {
+        Connected = true, Transport = "brom", Chipset = "MT6768",
+        StorageType = "eMMC", CapacityBytes = 58240000000L
+    };
+    Check(!FirmwarePreflight.Run(good, new[] { "boot" }, probeBad, capsOk).CanFlash,
+        "preflight: mismatched chipset blocks flash");
+    var probeUfs = new DeviceProbeResult
+    {
+        Connected = true, Transport = "brom", Chipset = "MT6765",
+        StorageType = "UFS", CapacityBytes = 128000000000L
+    };
+    Check(!FirmwarePreflight.Run(good, new[] { "boot" }, probeUfs, capsOk).CanFlash,
+        "preflight: UFS device vs EMMC scatter blocks flash");
+    Check(!FirmwarePreflight.Run(good, new[] { "boot" }, null, capsNo).CanFlash,
+        "preflight: backend without flash support blocks flash");
+
+    var st = FlashOperationState.Idle;
+    Check(FlashStateMachine.TryTransition(ref st, FlashOperationState.Connecting) && st == FlashOperationState.Connecting,
+        "state: Idle→Connecting allowed");
+    Check(FlashStateMachine.CanTransition(FlashOperationState.Connecting, FlashOperationState.Writing) &&
+          FlashStateMachine.CanTransition(FlashOperationState.Writing, FlashOperationState.Completed) &&
+          FlashStateMachine.CanTransition(FlashOperationState.Completed, FlashOperationState.Idle),
+        "state: happy path transitions allowed");
+    Check(FlashStateMachine.CanTransition(FlashOperationState.Failed, FlashOperationState.Connecting) &&
+          FlashStateMachine.CanTransition(FlashOperationState.Interrupted, FlashOperationState.Connecting) &&
+          FlashStateMachine.CanTransition(FlashOperationState.Interrupted, FlashOperationState.Idle) &&
+          FlashStateMachine.CanTransition(FlashOperationState.Interrupted, FlashOperationState.Failed),
+        "state: Interrupted only → Connecting/Idle/Failed");
+    Check(!FlashStateMachine.CanTransition(FlashOperationState.Interrupted, FlashOperationState.Writing) &&
+          !FlashStateMachine.CanTransition(FlashOperationState.Writing, FlashOperationState.Idle) &&
+          !FlashStateMachine.CanTransition(FlashOperationState.Idle, FlashOperationState.Writing) &&
+          !FlashStateMachine.CanTransition(FlashOperationState.Writing, FlashOperationState.Writing),
+        "state: unsafe transitions refused (incl. self-loop)");
+
+    var mplan = new FlashPlan();
+    mplan.Items.Add(new FlashPlanItem { Partition = "a", Phase = "BROM", ImagePath = "a.img", SizeBytes = 10 });
+    mplan.Items.Add(new FlashPlanItem { Partition = "b", Phase = "Fastboot", ImagePath = "b.img", SizeBytes = 20 });
+    mplan.Items.Add(new FlashPlanItem { Partition = "c", Phase = "Fastboot", ImagePath = "c.img", SizeBytes = 30 });
+    Check(mplan.BromItems.Count() == 1 && mplan.FastbootItems.Count() == 2 && mplan.TotalBytes == 60,
+        "plan: phase split + total bytes");
+
+    var sync = new SyncProgress<FlashProgress>();
+    var mock = new MockMtkBackend();
+    var mres = await mock.FlashAsync(mplan, sync, CancellationToken.None);
+    Check(mres.Success && mres.Written.Count == 3,
+        "mock backend: happy path writes all partitions");
+    Check(mres.Verification == VerificationState.NotPerformed,
+        "mock: verification honestly reported as not performed");
+    Check(mock.Capabilities.IsMock && mock.Capabilities.Name.Contains("MOCK") &&
+          mres.BackendNote.Contains("MOCK"),
+        "mock: backend labeled mock/test-only");
+    Check(sync.V.Count == 3 && sync.V.All(p => p.Percent == null),
+        "mock: progress carries no fabricated percent");
+    Check(mock.LastPlan.Items.Count == 3,
+        "mock: observed plan recorded for assertions");
+
+    var mfail = new MockMtkBackend(fail: true);
+    var fres = await mfail.FlashAsync(mplan, null, CancellationToken.None);
+    Check(!fres.Success && fres.Failed.Count == 1 && fres.Failed[0].Category == ErrorCategory.Write,
+        "mock: failure surfaces with error category");
+    Check(fres.Skipped.Count > 0 && fres.Verification == VerificationState.NotPerformed,
+        "mock: remaining partitions skipped, no fake verification");
+
+    var mcan = new MockMtkBackend(cancelMidway: true);
+    var cres = await mcan.FlashAsync(mplan, null, CancellationToken.None);
+    Check(cres.Cancelled && cres.Written.Count == 1 && cres.Skipped.Count == 2,
+        "mock: cancel midway → partial write + explicit skips");
+    Check(cres.NeedsRedetection, "mock: cancelled run flags device redetection");
+
+    using (var cts = new CancellationTokenSource())
+    {
+        cts.Cancel();
+        var pres = await new MockMtkBackend().FlashAsync(mplan, null, cts.Token);
+        Check(pres.Cancelled && pres.Written.Count == 0,
+            "mock: pre-cancelled token writes nothing");
+    }
+
+    bool bromCalled = false, fbCalled = false;
+    var adapterOk = new MtkBackendAdapter(
+        (fp, pr, ct) => { bromCalled = true; var o = new PhaseOutcome(); o.Written.AddRange(fp.BromItems.Select(i => i.Partition)); return Task.FromResult(o); },
+        (fp, pr, ct) => { fbCalled = true; var o = new PhaseOutcome(); o.Written.AddRange(fp.FastbootItems.Select(i => i.Partition)); return Task.FromResult(o); });
+    var ares = await adapterOk.FlashAsync(mplan, null, CancellationToken.None);
+    Check(ares.Success && ares.Written.Count == 3 && bromCalled && fbCalled,
+        "adapter: real-interface path runs both phases");
+    Check(ares.Verification == VerificationState.NotPerformed && ares.BackendNote.Contains("readback"),
+        "adapter: result states no post-write readback");
+    Check(!adapterOk.Capabilities.IsMock && adapterOk.Capabilities.SupportsFlash &&
+          !adapterOk.Capabilities.SupportsReadbackHash && !adapterOk.Capabilities.SafeCancelDuringWrite,
+        "adapter: real caps honest (no readback hash, no safe cancel)");
+
+    bool fbAfterStop = false;
+    var adapterStop = new MtkBackendAdapter(
+        (fp, pr, ct) =>
+        {
+            var o = new PhaseOutcome();
+            o.Failed.Add(("preloader", ErrorCategory.Connection, "usb gone"));
+            o.StopFurtherPhases = true;
+            o.AbortCategory = ErrorCategory.Connection;
+            return Task.FromResult(o);
+        },
+        (fp, pr, ct) => { fbAfterStop = true; return Task.FromResult(new PhaseOutcome()); });
+    var sres = await adapterStop.FlashAsync(mplan, null, CancellationToken.None);
+    Check(!sres.Success && !fbAfterStop, "adapter: phase1 stop skips fastboot phase");
+    Check(sres.NeedsRedetection && sres.Failed[0].Category == ErrorCategory.Connection,
+        "adapter: connection failure flags redetection");
+
+    var adapterThrow = new MtkBackendAdapter(
+        (fp, pr, ct) => throw new InvalidOperationException("fastboot USB connect timeout"),
+        (fp, pr, ct) => Task.FromResult(new PhaseOutcome()));
+    var tres = await adapterThrow.FlashAsync(mplan, null, CancellationToken.None);
+    Check(!tres.Success && tres.Failed.Count == 1 && tres.Failed[0].Category == ErrorCategory.Connection,
+        "adapter: exception classified as connection error");
+    Check(tres.NeedsRedetection && tres.Verification == VerificationState.NotPerformed,
+        "adapter: exception → redetection, no fake verification");
+
+    var adapterOce = new MtkBackendAdapter(
+        (fp, pr, ct) => throw new OperationCanceledException(),
+        (fp, pr, ct) => Task.FromResult(new PhaseOutcome()));
+    var ores = await adapterOce.FlashAsync(mplan, null, CancellationToken.None);
+    Check(ores.Cancelled && !ores.Success && ores.NeedsRedetection,
+        "adapter: OperationCanceledException → cancelled result");
+
+    bool bromHandoff = false;
+    var adapterFbOnly = new MtkBackendAdapter(
+        (fp, pr, ct) => { bromHandoff = true; return Task.FromResult(new PhaseOutcome()); },
+        (fp, pr, ct) => { var o = new PhaseOutcome(); o.Written.Add("super"); return Task.FromResult(o); });
+    var fonly = new FlashPlan();
+    fonly.Items.Add(new FlashPlanItem { Partition = "super", Phase = "Fastboot" });
+    var fbOnlyRes = await adapterFbOnly.FlashAsync(fonly, null, CancellationToken.None);
+    Check(bromHandoff && fbOnlyRes.Success,
+        "adapter: fastboot-only plan still runs BROM handoff phase");
+
+    string hex40 = new string('a', 40);
+    string r1 = LogRedactor.Redact("IMEI: 123456789012345\r\nother line");
+    Check(!r1.Contains("123456789012345") && r1.Contains("other line"),
+        "redact: IMEI line redacted, other lines kept");
+    string r2 = LogRedactor.Redact("da " + hex40 + " end");
+    Check(!r2.Contains(hex40) && r2.Contains("[REDACTED-HEX]"),
+        "redact: 40-char hex id removed");
+    string r3 = LogRedactor.Redact("fastboot -s \"5TUW8T75JJ5PGURC\" flash boot");
+    Check(!r3.Contains("5TUW8T75JJ5PGURC") && r3.Contains("-s \"[REDACTED]\""),
+        "redact: fastboot serial argument removed");
+    string r4 = LogRedactor.Redact("device id 866754012345678 done");
+    Check(!r4.Contains("866754012345678") && r4.Contains("done"),
+        "redact: long digit identifier removed");
+    string r5 = LogRedactor.Redact("flash boot.img in 12.3s, 45 files");
+    Check(r5 == "flash boot.img in 12.3s, 45 files",
+        "redact: normal log text untouched");
+
+    var hr = new FlashResult();
+    hr.Written.Add("boot");
+    hr.Failed.Add(("super", ErrorCategory.Write, "timeout"));
+    hr.Skipped.Add(("userdata", "cancelled by user"));
+    string sum = hr.BuildHonestSummary();
+    Check(sum.Contains("FAILED") && sum.Contains("Verification: not performed"),
+        "summary: honest result states verification not performed");
+    Check(sum.Contains("boot") && sum.Contains("super") && sum.Contains("userdata"),
+        "summary: written/failed/skipped all listed");
+    var hs = new FlashResult { Success = true };
+    hs.Written.Add("boot");
+        hs.BackendNote = "Backend: MOCK (test only) — no device was touched.";
+    string hsum = hs.BuildHonestSummary();
+    Check(hsum.Contains("SUCCESS") && hsum.Contains("MOCK"),
+        "summary: success line includes backend note");
+
     Console.WriteLine($"{passed} regression checks passed.");
 }
 finally { Directory.Delete(dir, recursive: true); }
+
+// Progress<T> dispatches on the thread pool - synchronous recorder avoids assertion races
+internal sealed class SyncProgress<T> : IProgress<T>
+{
+    public List<T> V { get; } = new();
+    public void Report(T value) { lock (V) V.Add(value); }
+}

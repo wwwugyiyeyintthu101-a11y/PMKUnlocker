@@ -17,6 +17,10 @@ video-review/
 
 # runtime data
 **/licenses.json
+**/licenses.json.bak
+**/licenses.json.lock
+**/__pycache__/
+port_trace.txt
 **/hwparam.json
 **/adminkey.txt
 

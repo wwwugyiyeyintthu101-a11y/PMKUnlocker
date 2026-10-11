@@ -1,4 +1,4 @@
-﻿#nullable disable
+#nullable disable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,6 +9,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -43,6 +44,7 @@ namespace PMKUnlocker
         // UI Tabs
         private TabControl tabControl;
         private TabPage tabAdb;
+        private TabPage tabFb;
         private TabPage tabMtk;
         private TabPage tabQc;
         private TabPage tabSamsung;
@@ -109,6 +111,22 @@ namespace PMKUnlocker
         private Button btnFbErase;
 
         private Button btnFbSwitchSlot;
+
+        private Panel grpMiFlash;
+
+        private Button btnMiRomFolder;
+
+        private Button btnMiFlashGo;
+
+        private Label lblMiRomPath;
+
+        private CheckBox chkMiEraseFirst;
+
+        private CheckBox chkMiAutoReboot;
+
+        private DataGridView dgvMiParts;
+
+        private List<MiFlashOp> miFlashOps = new();
         // MTK Controls (Updated with 4 Features)
         private Button btnMtkReadBrom;
         private Button btnMtkNvBackup;
@@ -132,7 +150,42 @@ namespace PMKUnlocker
         private CheckBox chkMtkResetFrpAfter;
         private CheckBox chkMtkSkipUserdata;
         private string mtkFirmwareFolder = "";
+        // scatter ထဲက is_download=true entries — flash ကို ဒီ file↔partition map အတိုင်း
+        // ရေးတယ် (mtkclient wl ရဲ့ name-equality နဲ့ scp.img→scp1+scp2 / tee.img→tee1+tee2 /
+        // preloader_*.bin→preloader စတာတွေ လွဲသွားလို့ MST ပုံစံ map သုံး)
+        private readonly List<(string Partition, string File, string SizeHex, string StartHex)> mtkScatterMap = new();
+        // scatter parse result (validated: risk class, image status, issues) — dialog + preflight သုံး
+        private MtkFirmware.FirmwarePackage mtkFirmwarePkg;
+        private MtkFirmware.FlashOperationState mtkFlashState = MtkFirmware.FlashOperationState.Idle;
+        private volatile bool mtkFirmwareSessionProtected;
+        private string mtkFirmwareCancelPath;
+        private static readonly MtkFirmware.BackendCapabilities MtkRealCaps = new()
+        {
+            Name = "mtkclient BROM/DA (PMKUnlocker)",
+            IsMock = false,
+            SupportsFlash = true,
+            SupportsReadbackHash = false,
+            SupportsPreflightProbe = false,
+            SupportsBromPhase = true,
+            SupportsFastbootPhase = false,
+            SafeCancelDuringWrite = false
+        };
+        // flash အတွင်း real-time progress (file name + overall %) — mtkclient bar က
+        // per-partition % ပဲပေးလို့ scatter size နဲ့ overall ပြန်တွက်ပြ
+        private List<string> mtkFlashPlanFiles = new();
+        private List<long> mtkFlashPlanSizes = new();
+        private int mtkFlashDoneCount;
+        private int mtkFlashAnnouncedCount;
+        // same file → multiple partitions (scp.img → scp1+scp2) — Wrote line တိုင်း
+        // file ပေါ် ဘယ်နှစ်ကြိမ် တွေ့ပြီးပြီလဲ မှတ်ထား (counter slot တိုးတက်အောင်)
+        private readonly Dictionary<string, int> mtkFlashFileSeen = new();
         private Button btnMtkFrpRemove;
+        private Button btnMtkMiAccountBypass;
+        // MTK Auth Bypass — tool ထဲကနေ လုပ် (tools\mtkbypass\pmk_mtk_bypass.py)၊ external MABT မသုံး
+        private Button btnMtkAuthBypass;
+        private DateTime authBypassDoneUtc = DateTime.MinValue;
+        private bool authBypassEverOk;
+        private bool authBypassHintLogged;
         private Button btnMtkOrangeStateFix;
         private Button btnMtkDmFix;
         private Button btnMtkUndoVbmeta;
@@ -286,6 +339,26 @@ namespace PMKUnlocker
         // MTK op ပြီးနောက် auto reboot ရဲ့ တကယ့်ရလဒ် — pmk_mtk_op.py က ပို့တဲ့ marker ကနေ ဖြည့်တယ်
         // (exit code 0 က operation အောင်တာသာ ပြတယ်၊ ဖုန်း တက်တာကို မပြနိုင်ဘူး)။
         private string lastMtkBootState = "";
+        private bool mtkRefreshGpt = true;
+        // mtkclient က BROM device ရှာနေစဉ် retry spam/dots/hint တွေပဲ ပို့တယ် — parser က
+        // ဖျက်ထားတာမို့ log ရပ်သွားတယ်လို့ ထင်ရတယ်။ ဒီ state နဲ့ heartbeat ပြတယ်။
+        private bool mtkBromWaiting = false;
+        // [1/4] stage header ပြီးသားဆို legacy "Initializing usb.../Waiting for device..."
+        // စာကြောင်းတွေ ထပ်မပေါ်အောင် ကာကွယ် (lastDeviceState ကို Auto-Detect က ဖျက်နိုင်လို့
+        // သီးသန့် flag သုံးရတယ်)။ op တစ်ခုချင်းစီမှာ reset လုပ်တယ်။
+        private bool mtkStage1Shown = false;
+        // [2/4] header က bypass ကို ပြီးသားဆို legacy "[OK] Bypassing authentication"
+        // စာကြောင်း redundant ဖြစ် — ထပ်မရေးအောင် flag
+        private bool mtkStage2Shown = false;
+        // op အတွင်း multi ";reset" နဲ့ reboot ပို့ပြီးသားဆို workflow ဘက်က နောက်တစ်ခါ
+        // သီးခြား reset process ထပ်မဖွင့်အောင် (ဖုန်း boot နေရင် 60s ထပ်စောင့်ရတယ်)
+        private bool mtkRebootedInSession = false;
+        // mtkclient က DA/bypass marker တွေကို session အတွင်း ၂ကြိမ်ထက်ပို့လို့ parser က
+        // ၂ကြိမ် log ဖြစ်တယ် — message တစ်ခုချင်းစီရဲ့ နောက်ဆုံးထွက်ချိန် မှတ်ထားပြီး
+        // window အတွင်း ထပ်ထွက်ရင် ကျော်တယ် (ကြားက စာကြောင်းတွေ ပါလို့ရတယ်)
+        private readonly Dictionary<string, DateTime> lastLogUtc = new Dictionary<string, DateTime>();
+        private DateTime mtkWaitStartUtc = DateTime.MinValue;
+        private DateTime mtkWaitHeartbeatUtc = DateTime.MinValue;
         private bool isDetecting = false;
         private Process activeProcess = null;
         private bool isTaskRunning = false;
@@ -316,7 +389,7 @@ namespace PMKUnlocker
                 // timeoutSec: edl.py reset က device reboot ပြီးမှ port မှာ hang နေတတ်တယ် —
                 // 60s ကျော်ရင် kill ပြီး device drop = reboot complete အဖြစ် သတ်မှတ် (UI မချိတ်ကျစေရ)
                 bool rebooted = await ExecuteCommandCleanAsync("python", arguments, "Auto Reboot (" + platform + ")",
-                    quiet: true, timeoutSec: 60, timeoutMeansSuccess: true);
+                    quiet: true, timeoutSec: 180, timeoutMeansSuccess: true);
                 // reboot ပြီးရင် device ပြန် boot/ADB ပြန်တက်လာမလား background မှာစောင့်ပြီး log ပြ
                 if (rebooted && !stopRequested) _ = WaitAndroidAfterRebootAsync();
             }
@@ -358,9 +431,10 @@ namespace PMKUnlocker
                     string fbRes = await ExecuteCommandQuickAsync("fastboot.exe", "devices", 3000);
                     if (!string.IsNullOrEmpty(fbRes) && fbRes.Contains("fastboot"))
                     {
-                        Log("[OK] Device back online: FASTBOOT", Color.DeepSkyBlue);
-                        _ = CheckAllDevicesAsync(false);
-                        return;
+                        // fastboot ရောက်နေရင် Android မဟုတ်သေး — reboot ပို့ပြီး ဆက်စောင့်
+                        Log("[i] FASTBOOT detected - sending fastboot reboot to Android...", Color.DeepSkyBlue);
+                        await ExecuteCommandQuickAsync("fastboot.exe", "reboot", 15000);
+                        continue;
                     }
                 }
                 Log("[!] Device not back after 300s — screen ပေါ်ကြည့်ပါ / USB ပြန်ဆွဲပါ။", Color.Orange);
@@ -385,6 +459,7 @@ namespace PMKUnlocker
             flashWorkflowContext.Value = true;
             stopRequested = false;
             workflowDidOp = false;
+            mtkRebootedInSession = false;
             var inputs = AllControls(this).Where(c => c != btnStopTask &&
                 (c is Button || c is ComboBox || c is CheckBox || c is TextBox || c is DataGridView || c is TabControl))
                 .Where(c => c.Enabled).ToList();
@@ -400,12 +475,25 @@ namespace PMKUnlocker
                 string rebootArguments = rebootPlatform == "MTK" ? BuildMtkOpArgs("reset") :
                     rebootPlatform == "QC" ? BuildQcRebootArgs() : "";
                 bool qcFirehoseFallback = rebootPlatform == "QC" && rebootArguments.Length == 0;
-                if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled &&
+                if (rebootPlatform == "MTK" && mtkRebootedInSession)
+                {
+                    // op က multi ";reset" နဲ့ session အတွင်း reboot ပို့ပြီးသား —
+                    // နောက်တစ်ခါ သီးခြား reset process ထပ်ဖွင့်ရင် ဖုန်း boot နေလို့
+                    // 60s ထပ်စောင့်ပြီး ဘာမှ မလုပ်နိုင်ဘူး
+                }
+                else if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled &&
                     (rebootArguments.Length > 0 || qcFirehoseFallback),
                     workflowDidOp, workflowFailed, stopRequested))
                 {
                     if (rebootArguments.Length > 0)
+                    {
+                        // MTK: COM port က op အတွင်း ပြောင်းသွားတတ် (DA session ပြီးရင်
+                        // preloader VCOM အသစ်) — workflow အစ snapshot အဟောင်းသုံးရင်
+                        // USB/libusb path ကျပြီး 0E8D:2001 wdm_usb ကို ကိုင်မရဘူး
+                        if (rebootPlatform == "MTK" && !string.IsNullOrWhiteSpace(cachedMtkComPort))
+                            rebootSerial = cachedMtkComPort;
                         await MaybeAutoRebootAsync(rebootPlatform, rebootArguments, rebootSerial);
+                    }
                     else
                         await QcFirehoseRebootAsync();   // edl.py မရှိ → fh_loader firehose power reset
                 }
@@ -481,6 +569,13 @@ namespace PMKUnlocker
             // App ပိတ်ရင် running child process + poll timer ကို ရှင်း
             this.FormClosing += (s, e) =>
             {
+                if (mtkFirmwareSessionProtected)
+                {
+                    e.Cancel = true;
+                    BtnStopTask_Click(s, e);
+                    Log("[!] Waiting for a partition boundary before closing. Close again after the operation ends.", Color.Orange);
+                    return;
+                }
                 SaveSettings();
                 try { devicePollTimer?.Stop(); devicePollTimer?.Dispose(); } catch { }
                 try { clockTimer?.Stop(); clockTimer?.Dispose(); } catch { }
@@ -579,7 +674,7 @@ namespace PMKUnlocker
         private void SetupProfessionalUI()
         {
             this.Text = "PMK Mobile Tool V" + UpdateChecker.CurrentVersion;
-            this.Size = new Size(1400, 900);
+            this.Size = new Size(1310, 900);
             // PC တိုင်းနဲ့ အဆင်ပြေအောင် — window ကို ဆွဲကြီး/ကျုံ့ လို့မရစေရ၊ maximize လည်း ပိတ်
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -619,7 +714,7 @@ namespace PMKUnlocker
             };
 
             btnRefreshPorts = Create3DButton("🔄 Scan Port", 285, 12, 100, 34, ButtonTheme.Cyan);
-            btnRefreshPorts.Click += async (s, e) => { await CheckAllDevicesAsync(true); };
+            btnRefreshPorts.Click += async (s, e) => { TryUsbDescriptorRecovery(); await CheckAllDevicesAsync(true); };
 
             btnOpenDeviceManager = Create3DButton("⚙ Dev Manager", 395, 12, 130, 34, ButtonTheme.Purple);
             btnOpenDeviceManager.Click += (s, e) => { Process.Start(new ProcessStartInfo { FileName = "devmgmt.msc", UseShellExecute = true }); };
@@ -654,7 +749,7 @@ namespace PMKUnlocker
 
             lblPlatformStatus = new Label
             {
-                Text = "Platform: ADB / FB",
+                Text = "Platform: ADB",
                 Location = new Point(15, 53),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(139, 92, 246),
@@ -745,14 +840,15 @@ namespace PMKUnlocker
             tabControl.ItemSize = new Size(0, 1);
             tabControl.SizeMode = TabSizeMode.Fixed;
 
-            tabAdb = new TabPage("ADB / FB") { BackColor = Color.FromArgb(28, 31, 38) };
+            tabAdb = new TabPage("ADB") { BackColor = Color.FromArgb(28, 31, 38) };
+            tabFb = new TabPage("Fastboot") { BackColor = Color.FromArgb(28, 31, 38) };
             tabMtk = new TabPage("MediaTek") { BackColor = Color.FromArgb(28, 31, 38) };
             tabQc = new TabPage("Qualcomm") { BackColor = Color.FromArgb(28, 31, 38) };
             tabSamsung = new TabPage("Samsung") { BackColor = Color.FromArgb(28, 31, 38) };
             tabSpd = new TabPage("Spreadtrum") { BackColor = Color.FromArgb(28, 31, 38) };
             tabHisi = new TabPage("HiSilicon") { BackColor = Color.FromArgb(28, 31, 38) };
 
-            tabControl.TabPages.AddRange(new TabPage[] { tabAdb, tabMtk, tabQc, tabSamsung, tabSpd, tabHisi });
+            tabControl.TabPages.AddRange(new TabPage[] { tabAdb, tabFb, tabMtk, tabQc, tabSamsung, tabSpd, tabHisi });
 
             // --- 1. ADB TAB ---
             btnAdbInfo = Create3DButton("🔍 Read Full Info", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
@@ -937,7 +1033,7 @@ namespace PMKUnlocker
             Panel grpAdbInfo = CreateGroupPanel("ADB · INFO", UiX(0), UiY(0), 2, btnAdbInfo, btnAdbBatteryInfo, btnAdbPartitions);
             Panel grpAdbApps = CreateGroupPanel("ADB · APPS", UiX(0) + 360, UiY(0), 3, btnAdbListApps, btnAdbInstallApk, btnAdbScreenshot);
             // FRP Reset ကို "Install APK" ရဲ့ အောက်မှာ ထည့်တယ် (APPS group ရဲ့ ဒုတိယ row)
-            grpAdbApps.Height = 115;                                  // row ၂ ခု (Install APK အောက် တစ်တန်း)
+            grpAdbApps.Height = 104;                                  // row ၂ ခု (Install APK အောက် တစ်တန်း)
             grpAdbApps.Controls.Add(btnAdbFrp);
             btnAdbFrp.Location = new Point(10 + UiColStep, 26 + UiRowStep);            // Install APK အောက်
             grpAdbApps.Controls.Add(btnAdbFrpRoot);
@@ -961,10 +1057,168 @@ namespace PMKUnlocker
             Panel grpAdbLock = CreateGroupPanel("ADB · LOCK / RESET", 540, UiY(3), 2,
                 btnAdbRemoveLock, btnAdbFactoryReset);
 
-            Panel grpFbInfo = CreateGroupPanel("FASTBOOT · INFO & FLASH", UiX(0), UiY(5), 4, btnFbInfo, btnFbArb, btnFbFlash, btnFbBootTemp);
-            Panel grpFbOps = CreateGroupPanel("FASTBOOT · UNLOCK & REBOOT", UiX(0), UiY(7), 5, btnFbErase, btnFbRebootSystem, btnFbRebootRecovery, btnFbRebootEdl, btnFbSwitchSlot);
+            Panel grpFbInfo = CreateGroupPanel("FASTBOOT · INFO & FLASH", UiX(0), UiY(0), 4, btnFbInfo, btnFbArb, btnFbFlash, btnFbBootTemp);
+            Panel grpFbOps = CreateGroupPanel("FASTBOOT · UNLOCK & REBOOT", UiX(0), UiY(2), 5, btnFbErase, btnFbRebootSystem, btnFbRebootRecovery, btnFbRebootEdl, btnFbSwitchSlot);
             Panel grpAdbReboot = CreateGroupPanel("ADB · REBOOT", UiX(0), UiY(3), 3, lblAdbReboot, cmbAdbReboot, btnAdbRebootExecute);
-            tabAdb.Controls.AddRange(new Control[] { grpAdbInfo, grpAdbApps, grpAdbLock, grpAdbReboot, grpFbInfo, grpFbOps });
+
+            // --- MI FLASH · Xiaomi fastboot (MST style, flash_all.bat) ---
+            grpMiFlash = new Panel
+            {
+                Location = new Point(UiX(0), UiY(4)),
+                Size = new Size(840, 500),
+                BackColor = Color.FromArgb(23, 26, 32),
+                Tag = "grp"
+            };
+            EnsureThemePaint(grpMiFlash);
+            grpMiFlash.Controls.Add(new Label
+            {
+                Text = "MI FLASH · XIAOMI FASTBOOT FLASHING",
+                Location = new Point(9, 4),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(86, 145, 250),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Tag = "accent"
+            });
+
+            btnMiRomFolder = Create3DButton("📄 flash_all.bat", 0, 0, 150, UiBtnH, ButtonTheme.Cyan);
+            btnMiRomFolder.Click += BtnMiRomFolder_Click;
+            btnMiRomFolder.Location = new Point(10, 26);
+            grpMiFlash.Controls.Add(btnMiRomFolder);
+
+            lblMiRomPath = new Label
+            {
+                Location = new Point(168, 34),
+                Size = new Size(330, 30),
+                AutoEllipsis = true,
+                ForeColor = Color.FromArgb(150, 162, 180),
+                Font = new Font("Segoe UI", 8.5f),
+                Text = "(flash_all.bat ကို ရွေးပါ)"
+            };
+            grpMiFlash.Controls.Add(lblMiRomPath);
+
+            chkMiEraseFirst = new CheckBox
+            {
+                Text = "Erase first",
+                Location = new Point(505, 34),
+                AutoSize = true,
+                Checked = true,
+                ForeColor = Color.FromArgb(255, 200, 90),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+            };
+            grpMiFlash.Controls.Add(chkMiEraseFirst);
+
+            chkMiAutoReboot = new CheckBox
+            {
+                Text = "Auto Reboot",
+                Location = new Point(620, 34),
+                AutoSize = true,
+                Checked = true,
+                ForeColor = Color.FromArgb(0, 230, 118),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+            };
+            grpMiFlash.Controls.Add(chkMiAutoReboot);
+
+            btnMiFlashGo = Create3DButton("⚡ FLASH", 0, 0, 115, UiBtnH, ButtonTheme.Green);
+            btnMiFlashGo.Click += BtnMiFlash_Click;
+            btnMiFlashGo.Location = new Point(715, 26);
+            grpMiFlash.Controls.Add(btnMiFlashGo);
+
+            dgvMiParts = new DataGridView
+            {
+                Location = new Point(10, 68),
+                Size = new Size(820, 422),
+                BackColor = Color.FromArgb(30, 33, 40),
+                ForeColor = Color.FromArgb(220, 226, 236),
+                BackgroundColor = Color.FromArgb(30, 33, 40),
+                BorderStyle = BorderStyle.FixedSingle,
+                GridColor = Color.FromArgb(45, 50, 60),
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                ReadOnly = true,
+                RowHeadersVisible = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                EnableHeadersVisualStyles = false,
+                Font = new Font("Segoe UI", 8f),
+                ColumnHeadersHeight = 21,
+                RowTemplate = { Height = 19 }
+            };
+            dgvMiParts.DefaultCellStyle.BackColor = Color.FromArgb(30, 33, 40);
+            dgvMiParts.DefaultCellStyle.SelectionBackColor = Color.FromArgb(60, 84, 130);
+            dgvMiParts.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgvMiParts.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(38, 44, 54);
+            dgvMiParts.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            dgvMiParts.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8f, FontStyle.Bold);
+            var miColChk = new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "",
+                Width = 28,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                ReadOnly = false
+            };
+            var miColPart = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Partition Name",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 26,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+            var miColFile = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "File Name",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 24,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+            var miColOffset = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Offset",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 16,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight }
+            };
+            var miColLength = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Length",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 15,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight }
+            };
+            var miColSize = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Size",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 9,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight }
+            };
+            var miColType = new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Phys",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 10,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+            dgvMiParts.Columns.AddRange(miColChk, miColPart, miColFile, miColOffset, miColLength, miColSize, miColType);
+            dgvMiParts.ColumnHeaderMouseClick += (s2, e2) =>
+            {
+                if (e2.ColumnIndex != 0 || dgvMiParts.Rows.Count == 0) return;
+                bool all = true;
+                foreach (DataGridViewRow r in dgvMiParts.Rows)
+                    if (!(r.Cells[0].Value is bool b && b)) { all = false; break; }
+                foreach (DataGridViewRow r in dgvMiParts.Rows) r.Cells[0].Value = !all;
+            };
+            grpMiFlash.Controls.Add(dgvMiParts);
+            if (toolTipMain != null)
+                Tip(btnMiFlashGo, "flash_all.bat အတိုင်း tick ထားတဲ့ ops တွေကို fastboot နဲ့ flash — MST style log။");
+            if (toolTipMain != null)
+                Tip(btnMiRomFolder, "MIUI Fastboot ROM ရဲ့ flash_all.bat (flash_all_lock.bat) ကို ရွေး — op list ပြောင်းပြီး flash။");
+
+            tabAdb.Controls.AddRange(new Control[] { grpAdbInfo, grpAdbApps, grpAdbLock, grpAdbReboot });
+            tabFb.Controls.AddRange(new Control[] { grpFbInfo, grpFbOps, grpMiFlash });
 
 
             
@@ -1001,6 +1255,25 @@ namespace PMKUnlocker
 
             btnMtkDeviceModel = Create3DButton("🏷 Device Model", UiX(0), UiY(3), UiBtnW, UiBtnH, ButtonTheme.Purple);
             btnMtkDeviceModel.Click += BtnMtkDeviceModel_Click;
+
+            // Mi Account Bypass — persist erase (TTA "No need VPN" method, mtkclient)။
+            // fastboot erase persist က Redmi 9A လိုမျိုးအချို့မှာ work ပေမယ့် Xiaomi MTK အများစု fail —
+            // mtkclient command နဲ့ erase ရတာ ကိုကဒီ 1-click လမ်းကြောင်း။ server/VPN မလို။
+            btnMtkMiAccountBypass = Create3DButton("📱 Mi Account Bypass", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
+            btnMtkMiAccountBypass.Click += BtnMtkMiAccountBypass_Click;
+            if (toolTipMain != null)
+                Tip(btnMtkMiAccountBypass,
+                    "Xiaomi Mi Account / Mi Cloud lock bypass — no VPN, no server.\r\n" +
+                    "mtkclient နဲ့ persist partition erase + auto reboot (IMEI မပျက်ပါ)။");
+
+            // MTK Auth Bypass — tool ထဲမှာပဲ run (tools\mtkbypass\pmk_mtk_bypass.py, bypass_utility MIT)။
+            // external MABT exe မသုံးဘူး။ success = "Protection disabled"
+            btnMtkAuthBypass = Create3DButton("🔐 MTK Auth Bypass", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Purple);
+            btnMtkAuthBypass.Click += BtnMtkAuthBypass_Click;
+            if (toolTipMain != null)
+                Tip(btnMtkAuthBypass,
+                    "MTK BROM SLA/DAA auth bypass (built-in, MIT bypass_utility) — MTK operation မတိုင်ခင် အရင်နှိပ်ပါ။\r\n" +
+                    "ဖုန်း power off → Vol+ & Vol- ဆုပ်ထားကာ USB ထိုးပါ။ 'Protection disabled' ထွက်ရင် အဆင်ပြေပြီ။");
 
             // Column 2
             btnMtkFullDump = Create3DButton("📦 Full ROM Dump", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Orange);
@@ -1053,15 +1326,6 @@ namespace PMKUnlocker
             btnMtkUndoVbmeta.Click += BtnMtkUndoVbmeta_Click;
 
             // --- Scatter-based firmware flash (SP Flash ပုံစံ) ---
-            Label lblFlashTitle = new Label
-            {
-                Text = "⚡ FIRMWARE FLASH  —  pick the scatter file, then press START FLASH",
-                Location = new Point(UiX(0), UiY(3) + 8),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(86, 145, 250),
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
-            };
-
             txtScatterFolder = new TextBox
             {
                 Location = new Point(UiX(0), UiY(4) - 17),
@@ -1091,6 +1355,8 @@ namespace PMKUnlocker
 
             chkMtkResetFrpAfter = new CheckBox
             {
+                Visible = false,
+                Enabled = false,
                 Text = "Reset FRP after flash",
                 Location = new Point(UiX(0) + 210, UiY(4) + 106),
                 AutoSize = true,
@@ -1189,9 +1455,13 @@ namespace PMKUnlocker
             Panel grpMtkUnlock = CreateGroupPanel("UNLOCK / SAFE / BOOT FIX", UiX(0), UiY(3), 4,
                 btnMtkUnlockBL, btnMtkRelockBL, btnMtkUserlockReset, btnMtkFrpRemove,
                 btnMtkOrangeStateFix, btnMtkDmFix, btnMtkUndoVbmeta, btnMtkSafeBackup);
+            // UNLOCK(15..650) နောက်က empty strip (665..855, UiY(3)) မှာ AUTH + MI ACCOUNT group —
+            // destructive op ကို INFO ထဲ မထည့်ဘဲ နေရာလွတ်ကိုပါ အသုံးချ။ 2-row (h=104) ဆိုတော့
+            // UNLOCK bottom (UiY(3)+104=239) နဲ့ တန်းညီပြီး checkbox row (UiY(4)+78=253) နဲ့ overlap မရှိ။
+            Panel grpMtkMiAcc = CreateGroupPanel("AUTH / MI ACCOUNT", 665, UiY(3), 1,
+                btnMtkAuthBypass, btnMtkMiAccountBypass);
 
-            // Flash block — UNLOCK UiY(3)+115=259 အောက်ကို ရွှေ့ (+30) ပြီး checkbox ၂ ခု Y ခွဲ
-            lblFlashTitle.Location = new Point(UiX(0), UiY(4) + 85);
+            // Flash block — checkbox row ကို Y ခွဲ
             txtScatterFolder.Location = new Point(UiX(0), UiY(4) + 107);
             btnMtkPickScatter.Location = new Point(UiX(0) + 400, UiY(4) + 105);
             btnMtkFlashScatter.Location = new Point(UiX(0) + 510, UiY(4) + 100);
@@ -1202,8 +1472,8 @@ namespace PMKUnlocker
             chkMtkSkipUserdata.Location = new Point(UiX(0) + 420, UiY(4) + 136);
 
             tabMtk.Controls.AddRange(new Control[] {
-                grpMtkInfo, grpMtkBackup, grpMtkUnlock,
-                lblFlashTitle, txtScatterFolder, btnMtkPickScatter, btnMtkFlashScatter, chkMtkAutoReboot,
+                grpMtkInfo, grpMtkBackup, grpMtkUnlock, grpMtkMiAcc,
+                txtScatterFolder, btnMtkPickScatter, btnMtkFlashScatter, chkMtkAutoReboot,
                 chkMtkBackupNvFirst, chkMtkResetFrpAfter, chkMtkSkipUserdata, chkMtkBackupVbmetaFirst
             });
 // --- 5. QUALCOMM TAB (EDL 9008 — edl.py / bkerler EDL) ---
@@ -1230,16 +1500,7 @@ namespace PMKUnlocker
             btnQcReset = Create3DButton("🔄 Reset Device", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Green);
             btnQcReset.Click += BtnQcReset_Click;
 
-            // Firmware flash panel (edl.py) — MTK panel နဲ့ တူတူပုံစံ
-            Label lblQcFlashTitle = new Label
-            {
-                Text = "⚡ FIRMWARE FLASH  —  pick the firmware folder, then press START FLASH",
-                Location = new Point(UiX(0), UiY(2) + 2),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(86, 145, 250),
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
-            };
-
+            // Firmware flash panel (edl.py) — title label ဖယ် (user request)
             txtQcFirmware = new TextBox
             {
                 Location = new Point(UiX(0), UiY(2) + 22),
@@ -1259,11 +1520,11 @@ namespace PMKUnlocker
             if (toolTipMain != null)
                 Tip(btnQcStartFlash, "Flash rawprogram XML partitions via fh_loader (EDL 9008). Requires COM port + firmware folder.");
 
-            // ---- Flash Option row (MobileSea ပုံစံ) ----
+            // ---- Flash Option row — UNLOCK ညာဘက် pocket ထဲ (flash block အပေါ် 55px တက်ပြီး) ----
             chkQcBackupEfsFirst = new CheckBox
             {
                 Text = "Backup EFS (persist/modemst) first",
-                Location = new Point(UiX(0), UiY(4) + 106),
+                Location = new Point(375, 100),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -1272,7 +1533,7 @@ namespace PMKUnlocker
             chkQcSkipUserdata = new CheckBox
             {
                 Text = "Skip userdata",
-                Location = new Point(UiX(0) + 275, UiY(4) + 106),
+                Location = new Point(610, 100),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -1281,7 +1542,7 @@ namespace PMKUnlocker
             chkQcResetFrpAfter = new CheckBox
             {
                 Text = "Reset FRP after flash",
-                Location = new Point(UiX(0) + 420, UiY(4) + 106),
+                Location = new Point(375, 126),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -1318,23 +1579,23 @@ namespace PMKUnlocker
             var lblBrandTag = new Label { Text = "Brand:", Location = new Point(175, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
             cmbQcBrand = new ComboBox { Location = new Point(225, 10), Size = new Size(160, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
             var lblModelTag = new Label { Text = "Model:", Location = new Point(405, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
-            cmbQcModel = new ComboBox { Location = new Point(455, 10), Size = new Size(220, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
-            lblQcLoaderStatus = new Label { Text = "Auto Detect (saved / auto loader)", Location = new Point(690, 14), AutoSize = false, Size = new Size(230, 20), ForeColor = Color.FromArgb(86, 145, 250), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
+            cmbQcModel = new ComboBox { Location = new Point(455, 10), Size = new Size(190, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
+            lblQcLoaderStatus = new Label { Text = "Auto Detect (saved / auto loader)", Location = new Point(655, 14), AutoSize = false, Size = new Size(195, 20), ForeColor = Color.FromArgb(86, 145, 250), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
 
             grpQcLoaderPicker.Controls.AddRange(new Control[] { lblQcLoaderTitle, lblBrandTag, cmbQcBrand, lblModelTag, cmbQcModel, lblQcLoaderStatus });
             cmbQcBrand.SelectedIndexChanged += CmbQcBrand_SelectedIndexChanged;
             cmbQcModel.SelectedIndexChanged += CmbQcModel_SelectedIndexChanged;
             LoadQcLoaderDb();   // event wire ပြီးမှ — Auto Detect default select က model combo ပါ fill အောင်
 
-            lblQcFlashTitle.Location = new Point(UiX(0), UiY(4) + 55);
-            txtQcFirmware.Location = new Point(UiX(0), UiY(4) + 77);
-            btnQcPickFirmware.Location = new Point(UiX(0) + 400, UiY(4) + 75);
-            btnQcStartFlash.Location = new Point(UiX(0) + 510, UiY(4) + 70);
-            chkQcAutoReboot.Location = new Point(UiX(0) + 697, UiY(4) + 78);
+            // flash block — UNLOCK (UiY(2)+64=159) အောက် 16px gap အထိ 55px တက်
+            txtQcFirmware.Location = new Point(UiX(0), UiY(4) + 22);
+            btnQcPickFirmware.Location = new Point(UiX(0) + 400, UiY(4) + 20);
+            btnQcStartFlash.Location = new Point(UiX(0) + 510, UiY(4) + 15);
+            chkQcAutoReboot.Location = new Point(UiX(0) + 697, UiY(4) + 23);
 
             tabQc.Controls.AddRange(new Control[] {
     grpQcInfo, grpQcBackup, grpQcUnlock, grpQcLoaderPicker,
-    lblQcFlashTitle, txtQcFirmware, btnQcPickFirmware, btnQcStartFlash, chkQcAutoReboot,
+                txtQcFirmware, btnQcPickFirmware, btnQcStartFlash, chkQcAutoReboot,
     chkQcBackupEfsFirst, chkQcSkipUserdata, chkQcResetFrpAfter
 });
             // --- 6. SAMSUNG TAB (adb / fastboot) ---
@@ -1388,15 +1649,6 @@ namespace PMKUnlocker
                 Font = new Font("Segoe UI", 8.5f)
             };
 
-            Label lblSamFlashTitle = new Label
-            {
-                Text = "⚡ FIRMWARE FLASH (heimdall CLI)  —  .img or .tar/.tar.md5",
-                Location = new Point(UiX(0), UiY(3) + 2),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(86, 145, 250),
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
-            };
-
             txtSamFirmware = new TextBox
             {
                 Location = new Point(UiX(0), UiY(3) + 22),
@@ -1446,7 +1698,6 @@ namespace PMKUnlocker
             // cols=2 → Info + SoftBrick Fix (same row, MTP group width 345)
             Panel grpSamDl = CreateGroupPanel("DOWNLOAD MODE", UiX(0) + 540, UiY(3), 2, btnSamDlInfo, btnSamSoftBrick);
 
-            lblSamFlashTitle.Location = new Point(UiX(0), UiY(4) + 55);
             txtSamFirmware.Location = new Point(UiX(0), UiY(4) + 77);
             btnSamPickFirmware.Location = new Point(UiX(0) + 400, UiY(4) + 75);
             btnSamStartFlash.Location = new Point(UiX(0) + 510, UiY(4) + 70);
@@ -1455,7 +1706,7 @@ namespace PMKUnlocker
 
             tabSamsung.Controls.AddRange(new Control[] {
     grpSamInfo, grpSamUnlock, grpSamMtp, grpSamReboot, grpSamDl,
-    lblSamFlashTitle, txtSamFirmware, btnSamPickFirmware, btnSamStartFlash, btnSamDownloadPit,
+                txtSamFirmware, btnSamPickFirmware, btnSamStartFlash, btnSamDownloadPit,
     chkSamBackupPit, chkSamAutoReboot
 });
             // --- 7. SPREADTRUM / UNISOC TAB (adb / fastboot) ---
@@ -1478,15 +1729,6 @@ namespace PMKUnlocker
                 AutoSize = true,
                 ForeColor = Color.FromArgb(150, 165, 185),
                 Font = new Font("Segoe UI", 8.5f)
-            };
-
-            Label lblSpdFlashTitle = new Label
-            {
-                Text = "⚡ FIRMWARE FLASH (spd_dump CLI)  —  PAC firmware",
-                Location = new Point(UiX(0), UiY(2) + 2),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(86, 145, 250),
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
             txtSpdFirmware = new TextBox
@@ -1527,22 +1769,23 @@ namespace PMKUnlocker
             btnSpdDiagUserlock = Create3DButton("🔒 Userlock+FRP", UiX(0) + 675, UiY(2) + 69, UiBtnW, UiBtnH, ButtonTheme.Orange);
             btnSpdDiagUserlock.Click += BtnSpdDiagUserlock_Click;
 
+            // row0 — ၃ group ကို အညီအမျှ ခွဲ (gap 100/100) — ညာဘက် pocket 135px ပပျောက်
             Panel grpSpdInfo = CreateGroupPanel("INFO", UiX(0), UiY(0), 1, btnSpdInfo);
-            Panel grpSpdUnlock = CreateGroupPanel("UNLOCK", UiX(0) + 195, UiY(0), 1, btnSpdFrp);
-            Panel grpSpdReboot = CreateGroupPanel("REBOOT", UiX(0) + 390, UiY(0), 2, btnSpdReboot, btnSpdFastboot);
-            Panel grpSpdDiag = CreateGroupPanel("UNLOCK (Diag)", UiX(0) + 510, UiY(2) + 69, 2, btnSpdDiagFrp, btnSpdDiagUserlock);
-            Panel grpSpdPart = CreateGroupPanel("PARTITIONS (spd_dump)", UiX(0), UiY(4) + 56, 4,
+            Panel grpSpdUnlock = CreateGroupPanel("UNLOCK", UiX(0) + 270, UiY(0), 1, btnSpdFrp);
+            Panel grpSpdReboot = CreateGroupPanel("REBOOT", UiX(0) + 540, UiY(0), 2, btnSpdReboot, btnSpdFastboot);
+            // row4 — Diag ကို REBOOT အောက် column-align (x=555)၊ PARTITIONS 3col နဲ့ တန်းညီ
+            Panel grpSpdDiag = CreateGroupPanel("UNLOCK (Diag)", UiX(0) + 540, UiY(4), 2, btnSpdDiagFrp, btnSpdDiagUserlock);
+            Panel grpSpdPart = CreateGroupPanel("PARTITIONS (spd_dump)", UiX(0), UiY(4), 3,
                                                 btnSpdReadGpt, btnSpdReadPart, btnSpdWritePart, btnSpdErasePart);
 
-            lblSpdFlashTitle.Location = new Point(UiX(0), UiY(2) - 9);
             txtSpdFirmware.Location = new Point(UiX(0), UiY(2) + 13);
             btnSpdPickFirmware.Location = new Point(UiX(0) + 400, UiY(2) + 11);
-            btnSpdDirectFlash.Location = new Point(UiX(0) + 510, UiY(2) + 6);
+            btnSpdDirectFlash.Location = new Point(UiX(0) + 540, UiY(2) + 6);   // x=555 — REBOOT/Diag column နဲ့ တန်းညီ
             lblSpdHint.Location = new Point(UiX(0), UiY(2) + 50);
 
             tabSpd.Controls.AddRange(new Control[] {
     grpSpdInfo, grpSpdUnlock, grpSpdReboot, grpSpdPart, grpSpdDiag,
-    lblSpdFlashTitle, txtSpdFirmware, btnSpdPickFirmware, btnSpdDirectFlash
+                txtSpdFirmware, btnSpdPickFirmware, btnSpdDirectFlash
 });
             // --- 8. HISILICON (HUAWEI / HONOR) TAB — PotatoNV core နဲ့ Kirin unlock ---
             // Row 1: Kirin model + COM port (testpoint mode) + START
@@ -1625,13 +1868,16 @@ namespace PMKUnlocker
             Label lblHisiHint = new Label
             {
                 Text = "Kirin unlock: testpoint short → 'HUAWEI USB COM 1.0' → pick Kirin → START UNLOCK → then OEM Unlock (code).  Kirin 620-960 only.  Drivers first: Install Drivers → Enable ADB → Reboot → FRP Reset.",
-                Location = new Point(UiX(0), UiY(2) + 8),
+                Location = new Point(UiX(0), UiY(5) + 72 + 4),
                 AutoSize = true,
+                // tab အကျယ်ထက် ကျယ်ရင် ညာဘက် cut — wrap ပြောင်း (TabNeededHeight က အမြင့် ချိန်ပေးတယ်)
+                MaximumSize = new Size(850, 0),
                 ForeColor = Color.FromArgb(150, 165, 185),
                 Font = new Font("Segoe UI", 8.5f)
             };
 
-            Panel grpHisiUnlock = CreateGroupPanel("KIRIN UNLOCK", UiX(0), UiY(0), 4,
+            // cols=5 — content နဲ့ ပြည့်အောင် (cols4 က tab ညာဘက် pocket 215px ကျန်)
+            Panel grpHisiUnlock = CreateGroupPanel("KIRIN UNLOCK", UiX(0), UiY(0), 5,
                 btnHisiStartUnlock, lblKirin, cmbKirin, lblHisiPort, cmbHisiPort, btnHisiRefreshPorts);
             // CreateGroupPanel grid ကြောင့် COM dropdown က row 2 ကျသွား — တစ်ကြောင်းတည်း ပြန်ချိန်
             lblKirin.Location = new Point(185, 30);
@@ -1857,7 +2103,7 @@ namespace PMKUnlocker
                 BackColor = Color.FromArgb(22, 25, 30),
                 Padding = new Padding(6, 7, 0, 0)   // raised border + button gap
             };
-            string[] platformNames = { "ADB / FB", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon" };
+            string[] platformNames = { "ADB", "Fastboot", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon" };
             platformBtns = new List<Button>();
             for (int i = 0; i < platformNames.Length; i++)
             {
@@ -1958,6 +2204,7 @@ namespace PMKUnlocker
                         // port list ကို ၃ စက္ကန့်တစ်ခါ (အလွန် ပေါ့)၊ device status ကို ၆ စက္ကန့်တစ်ခါ
                         // (adb/fastboot/PowerShell query တွေ ပါတာမို့ ပိုလေးတယ်)။
                         RefillPortCombo();
+                        TryUsbDescriptorRecovery();   // descriptor fail ကျန်ရင် port ပြန်ပေါ်အောင်
                         pollTick++;
                         if (pollTick % 2 == 0)
                         {
@@ -2018,6 +2265,12 @@ namespace PMKUnlocker
                 if (isTaskRunning || flashWorkflowRunning)
                 {
                     stopRequested = true;
+                    if (mtkFirmwareSessionProtected)
+                    {
+                        File.WriteAllText(mtkFirmwareCancelPath, "cancel");
+                        Log("[!] Stop requested. Waiting for the current partition/connection step; power and USB must remain connected.", Color.Orange);
+                        return;
+                    }
                     var process = activeProcess;
                     try { if (process != null && !process.HasExited) process.Kill(true); }
                     catch (InvalidOperationException) { }
@@ -2056,8 +2309,12 @@ namespace PMKUnlocker
                 if (sfd.ShowDialog() != DialogResult.OK) return;
                 try
                 {
-                    File.WriteAllText(sfd.FileName, rtbLog.Text, Encoding.UTF8);
-                    Log("[OK] Log exported: " + sfd.FileName, Color.LightGreen);
+                    // export မှာ identifier (IMEI/serial/hex id) တွေ ပါမသွားအောင် redact
+                    string redacted = MtkFirmware.LogRedactor.Redact(rtbLog.Text);
+                    File.WriteAllText(sfd.FileName, redacted, Encoding.UTF8);
+                    bool changed = !string.Equals(redacted, rtbLog.Text, StringComparison.Ordinal);
+                    Log("[OK] Log exported: " + sfd.FileName +
+                        (changed ? " (identifiers redacted)" : ""), Color.LightGreen);
                 }
                 catch (Exception ex)
                 {
@@ -2360,9 +2617,56 @@ namespace PMKUnlocker
         }
 
         // ================= UNIFIED SMART LOG & PROGRESS PARSER =================
+        // BROM wait-loop အတွင်း ဖုန်း မဝင်လာရင် ၈ စက္ကန့်တစ်ခါ အချိန်ပါတဲ့ မြန်မာစာ heartbeat ပြတယ် —
+        // retry spam တွေကို log မရှုပ်အောင် ဖျက်ထားတာမို့ ဒါမှမဟုတ်ရင် user က hang ထင်တယ်။
+        private void MtkWaitHeartbeat()
+        {
+            if (!mtkBromWaiting) return;
+            DateTime now = DateTime.UtcNow;
+            if ((now - mtkWaitHeartbeatUtc).TotalSeconds < 8) return;
+            mtkWaitHeartbeatUtc = now;
+            int secs = Math.Max(1, (int)(now - mtkWaitStartUtc).TotalSeconds);
+            Log("[i] ဖုန်း မတွေ့ရသေးဘူး (" + secs + "s) — power off (~10s) လုပ်ပြီး Vol+ & Vol- ကို ဆုပ်ထားကာ USB ပြန်တပ်ပါ။ မရရင် STOP နှိပ်ပြီး ပြန်စမ်းပါ။", Color.Orange);
+        }
+
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> mtkWrittenEvidence = new(StringComparer.OrdinalIgnoreCase);
+
         private bool ParseCleanLogAndProgress(string rawLine)
         {
             if (string.IsNullOrWhiteSpace(rawLine)) return true;
+            if (mtkFirmwareSessionProtected && rawLine.StartsWith("PMK_FLASH_WRITTEN:", StringComparison.Ordinal))
+            {
+                string partition = rawLine.Substring("PMK_FLASH_WRITTEN:".Length).Trim();
+                if (Regex.IsMatch(partition, @"^[A-Za-z0-9_-]+$")) mtkWrittenEvidence.TryAdd(partition, 0);
+                Log(rawLine, Color.LightGreen);
+                return true;
+            }
+            if (rawLine.StartsWith("PMK_PREP|", StringComparison.Ordinal))
+            {
+                string[] fields = rawLine.Split('|');
+                if (fields.Length == 4 && long.TryParse(fields[2], out long done) &&
+                    long.TryParse(fields[3], out long total) && total > 0)
+                {
+                    int percent = (int)Math.Clamp(done * 100.0 / total, 0, 100);
+                    SetProgress(percent, fields[1] + " (preparation)", "0 MB/s");
+                    Log("[Preparing] " + fields[1] + " — " + percent + "% (" +
+                        (done / 1048576) + "/" + (total / 1048576) + " MiB); not writing yet", Color.Cyan);
+                }
+                return true;
+            }
+            if (rawLine.StartsWith("PMK_PREFLIGHT_OK:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_BOOT:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_LAYOUT:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_SESSION:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_TIMING:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_GPT:", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK: Preparing sparse", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK: XFlash USB", StringComparison.Ordinal) ||
+                rawLine.StartsWith("PMK_ERROR: Firmware", StringComparison.Ordinal))
+            {
+                Log(rawLine, rawLine.StartsWith("PMK_ERROR:") ? Color.Red : Color.Cyan);
+                return true;
+            }
 
             Match mPct = Regex.Match(rawLine, @"(\d+(?:\.\d+)?)\s*%");
             Match mSpd = Regex.Match(rawLine, @"([\d\.]+\s*(?:KB/s|MB/s|GB/s|B/s))");
@@ -2374,9 +2678,81 @@ namespace PMKUnlocker
                 SetProgress((int)pct, "Transferring", speed);
             }
 
+            // mtkclient progress bar line (python throttle ပြီးသား) — log မရှုပ်အောင်
+            // bar ကို overall % + လက်ရှိ file name နဲ့ status မှာပဲ ပြ
+            bool isBar = (rawLine.Contains("|") && mPct.Success) || rawLine.StartsWith("Progress:");
+            if (isBar && mtkFlashPlanFiles.Count > 0)
+            {
+                int idx = Math.Min(mtkFlashDoneCount, mtkFlashPlanFiles.Count - 1);
+                // partition တစ်ခုစီ စတာကို log ပြ (announce — bar update တွေကြား spam မဖြစ်)
+                // preloader က device GPT မှာ mtkclient မတွေ့လို့ skip ဖြစ်တတ် — ပထမ bar မှာ
+                // မမှားစေချင် (recovery စရေးနေချိန် "preloader" မပြချင်) — first Wrote ကို စောင့်
+                bool skipFirstPreloaderAnnounce =
+                    mtkFlashDoneCount == 0 &&
+                    mtkFlashPlanFiles[0].StartsWith("preloader", StringComparison.OrdinalIgnoreCase);
+                if (!skipFirstPreloaderAnnounce &&
+                    mtkFlashDoneCount == mtkFlashAnnouncedCount && mtkFlashAnnouncedCount < mtkFlashPlanFiles.Count)
+                {
+                    mtkFlashAnnouncedCount = mtkFlashDoneCount + 1;
+                    Log("[i] Writing (" + mtkFlashAnnouncedCount + "/" + mtkFlashPlanFiles.Count + ") " +
+                        mtkFlashPlanFiles[idx] + " ...", Color.Cyan);
+                }
+                // overall % = (ပြီးသွားတဲ့ bytes + လက်ရှိ file %) / စုစုပေါင်း
+                if (mPct.Success && mtkFlashPlanSizes.Count == mtkFlashPlanFiles.Count)
+                {
+                    double curPct = double.Parse(mPct.Groups[1].Value, CultureInfo.InvariantCulture);
+                    long total = 0, done = 0;
+                    for (int i = 0; i < mtkFlashPlanSizes.Count; i++)
+                    {
+                        if (mtkFlashPlanSizes[i] <= 0) continue;
+                        total += mtkFlashPlanSizes[i];
+                        if (i < mtkFlashDoneCount) done += mtkFlashPlanSizes[i];
+                        else if (i == mtkFlashDoneCount) done += (long)(mtkFlashPlanSizes[i] * curPct / 100.0);
+                    }
+                    int overall = total > 0 ? (int)Math.Min(100, done * 100.0 / total) : (int)curPct;
+                    SetProgress(overall, "Writing " + (idx + 1) + "/" + mtkFlashPlanFiles.Count + " " + mtkFlashPlanFiles[idx],
+                        mSpd.Success ? mSpd.Groups[1].Value : "");
+                }
+                return true;
+            }
+            // "Wrote <path> to sector ..." — file name + counter ပဲ log ပြ (path spam မထုတ်)
+            // counter ကို file name နဲ့ plan index ပြောင်းယူ (skip ဖြစ်တဲ့ partition ကြောင့်
+            // အရေအတွက် လွဲမသွားအောင်)
+            Match mWrote = Regex.Match(rawLine, @"^Wrote\s+(.+?)\s+to sector");
+            if (mWrote.Success && mtkFlashPlanFiles.Count > 0)
+            {
+                string wroteName = Path.GetFileName(mWrote.Groups[1].Value);
+                int wIdx = mtkFlashPlanFiles.FindIndex(f =>
+                    string.Equals(f, wroteName, StringComparison.OrdinalIgnoreCase));
+                // FindIndex က first slot ပဲ ပြန်တာမို့ (scp.img ×2 စသည်) occurrence တိုင်း
+                // နောက်ဆုံး slot ကို တိုးပြီး ရေတွက် — (9,9,11,11) duplicate numbering ပျောက်
+                int wOcc = 0;
+                if (mtkFlashFileSeen.TryGetValue(wroteName, out int wPrev)) wOcc = wPrev;
+                mtkFlashFileSeen[wroteName] = wOcc + 1;
+                int wSlot = wIdx >= 0 ? wIdx + wOcc : -1;
+                mtkFlashDoneCount = wSlot >= 0 ? wSlot + 1 : mtkFlashDoneCount + 1;
+                if (wSlot >= 0 && wSlot + 1 > mtkFlashAnnouncedCount) mtkFlashAnnouncedCount = wSlot + 1;
+                Log("[OK] (" + Math.Min(mtkFlashDoneCount, mtkFlashPlanFiles.Count) + "/" + mtkFlashPlanFiles.Count + ") " +
+                    wroteName + " written", Color.LightGreen);
+                return true;
+            }
+
+            // handshake အောင်မြင်ရင် wait-loop state ကို ရပ် — နောက်ပိုင်း hint တွေကို မစောင့်တော့ဘူး
+            if (rawLine.Contains("Device detected :)")) mtkBromWaiting = false;
+
             if (rawLine.StartsWith(".") || rawLine.Contains("For brom mode") || rawLine.Contains("For preloader mode") ||
                 rawLine.Contains("Power off the phone") || rawLine.Contains("AES128 CBC") || rawLine.Contains("Patching da"))
             {
+                MtkWaitHeartbeat();
+                return true;
+            }
+
+            // BROM မဝင်လာရင် mtkclient က handshake/hint line တွေပဲ ထပ်တူပို့တယ် — silence မဖြစ်အောင်
+            // heartbeat ပြပြီး ပိတ်လိုက်တယ် (log မရှုပ်အောင်)။
+            if (mtkBromWaiting && (rawLine.Contains("Handshake failed") || rawLine.Contains("Port - Hint") ||
+                                   rawLine.Contains("Hint:")))
+            {
+                MtkWaitHeartbeat();
                 return true;
             }
 
@@ -2388,6 +2764,12 @@ namespace PMKUnlocker
                 lastMtkBootState = "OK";
                 SetProgress(100, "Booted", "Done");
                 Log("[OK] Phone is now in Android ✓", Color.LightGreen);
+                return true;
+            }
+            if (rawLine.Contains("PMK_FASTBOOT_HOLD"))
+            {
+                lastMtkBootState = "FASTBOOT";
+                Log("[i] Phone is in fastboot mode — phase 2 (fastboot flash) ကို ဆက်လုပ်မယ်...", Color.Cyan);
                 return true;
             }
             if (rawLine.Contains("PMK_BOOT_FASTBOOT"))
@@ -2409,9 +2791,24 @@ namespace PMKUnlocker
                 Log("[i] Android did not start automatically - unplug USB, then hold POWER ~10-15s.", Color.Orange);
                 return true;
             }
+            if (rawLine.Contains("PMK_USB_FAILNODE"))
+            {
+                Log("[!] Phone USB stayed in error 43 after re-enumeration kicks - Windows cannot see it.", Color.Orange);
+                return true;
+            }
+            if (rawLine.Contains("PMK_ERASE_OK"))
+            {
+                // python က erase အောင်မြင်ပြီးမှ partition နံပါတ်နဲ့ ပြန်ပို့တဲ့ marker —
+                // mtkclient ရဲ့ raw "Formatted sector ..." line က UI မှာ မပြဘူး
+                string erasedList = rawLine.Substring(rawLine.IndexOf("PMK_ERASE_OK") + "PMK_ERASE_OK".Length).Trim();
+                Log("[+] Erased : " + (erasedList.Length > 0 ? erasedList : "(OK)") + "  formatted OK", Color.LightGreen);
+                SetProgress(95, "Erase OK");
+                return true;
+            }
             if (rawLine.Contains("PMK_PARTIAL_ERASE"))
             {
-                // (config စတဲ့ partition မရှိတာ) — log မှာ မပြတော့ဘူး
+                // (config စတဲ့ partition မရှိတာ) — operation ကတော့ ပြီးတယ်၊ ကျန်တာတွေ အောင်မြင်
+                Log("[!] Some requested partitions are not on this device - skipped (the rest succeeded).", Color.Orange);
                 return true;
             }
             if (rawLine.Contains("PMK_DA_REBOOT_FAILED"))
@@ -2438,6 +2835,38 @@ namespace PMKUnlocker
                 Log("[i] Transport: USB (libusb/WinUSB)", Color.Cyan);
                 return true;
             }
+            if (rawLine.Contains("PMK_STAGE"))
+            {
+                // UnlockTool-style အဆင့်ပြ header: [1/4] Port → [2/4] Auth → [3/4] Info → [4/4] Op
+                // (pmk_mtk_op.py က တစ်ခါချင်းစီ attempt မှာ တစ်ခါပဲ ထုတ်တယ်)
+                string stageSpec = rawLine.Substring(rawLine.IndexOf("PMK_STAGE") + "PMK_STAGE".Length).Trim();
+                int stageBar = stageSpec.IndexOf('|');
+                if (stageBar > 0)
+                {
+                    string stageNo = stageSpec.Substring(0, stageBar).Trim();
+                    string stageText = stageSpec.Substring(stageBar + 1).Trim();
+                    Color stageColor = Color.Cyan;
+                    if (stageNo == "2") stageColor = Color.Violet;
+                    else if (stageNo == "3") stageColor = Color.DeepSkyBlue;
+                    else if (stageNo == "4") stageColor = Color.Orange;
+                    Log("[" + stageNo + "/4] " + stageText, stageColor);
+                    if (stageNo == "1")
+                    {
+                        // [1/4] က ပြီးသားမို့ အောက်က legacy "Initializing usb.../Waiting for device..."
+                        // တွေ ထပ်မပေါ်အောင် flag တက်ထားတယ်
+                        mtkStage1Shown = true;
+                        SetProgress(20, "Waiting for device");
+                    }
+                    else if (stageNo == "2")
+                    {
+                        mtkStage2Shown = true;   // legacy "[OK] Bypassing authentication" redundant
+                        SetProgress(40, "Auth bypass");
+                    }
+                    else if (stageNo == "3") SetProgress(55, "Hardware info");
+                    else if (stageNo == "4") SetProgress(70, "Operation");
+                }
+                return true;
+            }
             if (rawLine.Contains("PMK_KICK_SENT"))
             {
                 Log("[i] Phone is sitting in BROM - sent BROM JUMP_BL to continue booting.", Color.Cyan);
@@ -2446,15 +2875,16 @@ namespace PMKUnlocker
             if (rawLine.Contains("PMK_BOOT_LIKELY"))
             {
                 lastMtkBootState = "LIKELY";
-                SetProgress(100, "Booted", "Done");
-                Log("[OK] Phone left USB - Android is booting (check the screen).", Color.LightGreen);
+                SetProgress(100, "Written; boot unconfirmed", "Done");
+                Log("[!] Phone left USB — Android boot is not confirmed. Check the phone screen.", Color.Orange);
                 return true;
             }
             if (rawLine.Contains("PMK_MTK_BAD_DRIVER"))
             {
                 lastMtkBootState = "BAD_DRIVER";
-                Log("[!] The phone (BROM) is bound to the MTK serial driver - libusb cannot use it.", Color.OrangeRed);
-                Log("[i] Use Zadig to switch 'MediaTek USB Port' to WinUSB (or libusbK), then retry.", Color.Orange);
+                Log("[!] USB path blocked - driver is 'wdm_usb' (libusb cannot open it).", Color.OrangeRed);
+                Log("[i] This tool switches to the COM/serial path as soon as the MediaTek COM port appears.", Color.Orange);
+                Log("[i] Zadig is only needed if no COM port ever appears for the phone.", Color.Gainsboro);
                 return true;
             }
             if (rawLine.Contains("PMK_DA_CRASH"))
@@ -2464,9 +2894,27 @@ namespace PMKUnlocker
                 Log("[i] Power off the phone (10s), reconnect in BROM mode (hold Vol+ & Vol-), then retry.", Color.Orange);
                 return true;
             }
+            if (rawLine.Contains("PMK_MTK_COM_BUSY"))
+            {
+                // COM port ကို Windows က မဖွင့်ပေးဘူး (error 87/2/5) — device က USB ပေါ်မှာ
+                // ရှိပေမယ့် port node က stuck (reset ပြီး ကျန်ခဲ့) / အခြား tool က ကိုင်ထားတာ။
+                string comBusy = rawLine.Substring(rawLine.IndexOf("PMK_MTK_COM_BUSY") + "PMK_MTK_COM_BUSY".Length).Trim();
+                Log("[!] COM port " + (comBusy.Length > 0 ? comBusy : "(MediaTek)") +
+                    " could not be opened (busy or stuck after reset).", Color.OrangeRed);
+                Log("[i] Close SP Flash Tool / UnlockTool / any program using the port, then replug the phone in BROM mode.", Color.Orange);
+                return true;
+            }
             if (rawLine.Contains("PMK_NEED_REPLUG"))
             {
                 Log("Unplug and replug the phone (fresh BROM mode), then press this button again.", Color.Orange);
+                return true;
+            }
+            if (rawLine.Contains("PMK_PRELOADER_DUMP"))
+            {
+                // ဖုန်းရဲ့ preloader (DRAM/EMI setup) ကို BROM SRAM ကနေ dump ထုတ်လိုက်နိုင်တယ် —
+                // ဒါမပါရင် DA stage 2 တက်ရာမှာ ဖုန်းက USB ပြတ်တတ်တယ် (exit code 20)။
+                string plPath = rawLine.Substring(rawLine.IndexOf("PMK_PRELOADER_DUMP") + "PMK_PRELOADER_DUMP".Length).Trim();
+                Log("[i] Device preloader dumped (DRAM/EMI setup): " + plPath, Color.LimeGreen);
                 return true;
             }
 
@@ -2481,7 +2929,7 @@ namespace PMKUnlocker
                 }
                 else
                 {
-                    Log("[OK] Waiting for device... Connected", Color.LightGreen);
+                    LogOnce("[OK] Waiting for device... Connected", Color.LightGreen);
                 }
                 SetProgress(20, "Connected");
             }
@@ -2490,8 +2938,17 @@ namespace PMKUnlocker
                 if (lastDeviceState != "WAITING_BROM")
                 {
                     lastDeviceState = "WAITING_BROM";
-                    Log("Initializing usb... OK", Color.Cyan);
-                    Log("Waiting for device... (BROM/preloader mode - power off the phone, hold Vol+/Vol- and connect USB)", Color.Orange);
+                    if (!mtkStage1Shown)   // [1/4] က ဒီ info ကို ပြီးသားဆို ထပ်မပြတော့
+                    {
+                        Log("Initializing usb... OK", Color.Cyan);
+                        Log("Waiting for device... (BROM/preloader mode - power off the phone, hold Vol+/Vol- and connect USB)", Color.Orange);
+                    }
+                }
+                if (!mtkBromWaiting)
+                {
+                    mtkBromWaiting = true;
+                    mtkWaitStartUtc = DateTime.UtcNow;
+                    mtkWaitHeartbeatUtc = DateTime.UtcNow;
                 }
             }
             else if (rawLine.Contains("CPU:"))
@@ -2543,19 +3000,27 @@ namespace PMKUnlocker
             }
             else if (rawLine.Contains("Bypassing security") || rawLine.Contains("Done sending payload"))
             {
-                Log("[OK] Bypassing authentication", Color.LightGreen);
+                // [2/4] header က bypass OK ပြပြီးသားဆို ဒီ [OK] line က redundant —
+                // stage-based run တွေမှာ မရေးတော့ဘူး (progress ကတော့ ဆက်တက်)
+                if (!mtkStage2Shown) LogOnce("[OK] Bypassing authentication", Color.LightGreen);
                 SetProgress(45, "Bypass OK");
             }
             else if (rawLine.Contains("Successfully uploaded stage 2") || rawLine.Contains("DA Extensions successfully added"))
             {
-                Log("[OK] Sending Download-Agent... OK", Color.LightGreen);
-                Log("[OK] Syncing with device... OK", Color.LightGreen);
+                LogOnce("[OK] Sending Download-Agent... OK", Color.LightGreen);
+                LogOnce("[OK] Syncing with device... OK", Color.LightGreen);
                 SetProgress(60, "DA Loaded");
             }
             else if (rawLine.Contains("Successfully wrote seccfg"))
             {
                 Log("[+] Security Config : seccfg Written Successfully (OK)", Color.LightGreen);
                 SetProgress(100, "Completed", "0 MB/s");
+            }
+            else if (rawLine.Contains("Formatting addr"))
+            {
+                // erase op တွေ format လုပ်နေစဉ် feedback (partition တစ်ခုချင်းစီ ပို့လို့ တစ်ကြောင်းပဲ)
+                LogOnce("[*] Formatting partition... please wait", Color.Orange);
+                SetProgress(85, "Formatting");
             }
             else if (rawLine.Contains("GPT Table:"))
             {
@@ -2612,8 +3077,13 @@ namespace PMKUnlocker
 
         private async Task<bool> ExecuteCommandCleanAsync(string fileName, string arguments, string taskTitle,
             bool clearPartitions = false, bool showRawOutput = false, bool quiet = false,
-            Func<List<string>, bool> tolerateRaw = null, int timeoutSec = 0, bool timeoutMeansSuccess = false)
+            Func<List<string>, bool> tolerateRaw = null, int timeoutSec = 0, bool timeoutMeansSuccess = false,
+            bool quietFail = false)
         {
+            // MTK op မတိုင်ခင် auth bypass မလုပ်ရသေးရင် တစ်ခါပဲ သတိပေးတယ်
+            // (auto-run မလုပ်တော့ဘူး — user က 'MTK Auth Bypass' ခလုတ်ကို ကိုယ်တိုင်နှိပ်ရမယ်)
+            HintMtkAuthBypassIfNeeded(fileName, arguments);
+
             try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
             catch (Exception ex)
             {
@@ -2622,14 +3092,14 @@ namespace PMKUnlocker
                 Log("[FAIL] " + ex.Message, Color.Red);
                 return false;
             }
-            bool ok = await ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess);
+            bool ok = await ExecuteCommandCoreAsync(fileName, arguments, taskTitle, clearPartitions, showRawOutput, quiet, tolerateRaw, timeoutSec, timeoutMeansSuccess, quietFail);
             if (flashWorkflowContext.Value && !ok) workflowFailed = true;
             return ok;
         }
 
         private async Task<bool> ExecuteCommandCoreAsync(string fileName, string arguments, string taskTitle,
             bool clearPartitions, bool showRawOutput, bool quiet, Func<List<string>, bool> tolerateRaw = null,
-            int timeoutSec = 0, bool timeoutMeansSuccess = false)
+            int timeoutSec = 0, bool timeoutMeansSuccess = false, bool quietFail = false)
         {
             if (isTaskRunning || (flashWorkflowRunning && !flashWorkflowContext.Value))
             {
@@ -2641,6 +3111,12 @@ namespace PMKUnlocker
             isTaskRunning = true;
             if (!flashWorkflowContext.Value) stopRequested = false;
             currentTaskTitle = taskTitle;
+            // ယခင် task က wait-loop ထဲ ကျန်ခဲ့ရင် နောက် task မှာ မှားပြီး heartbeat ထွက်မနေအောင်
+            mtkBromWaiting = false;
+            mtkStage1Shown = false;
+            mtkStage2Shown = false;
+            mtkWaitStartUtc = DateTime.MinValue;
+            mtkWaitHeartbeatUtc = DateTime.MinValue;
             // row တွေ snapshot ယူပြီး clear — command က row အသစ် မပြန်ရင် ပြန်ထိုးပေးတယ်
             // (flash/preflight fail ဖြစ်ရင် ယခင် partition list ပျောက်မသွားစေရ)
             List<PartitionMeta> partitionSnapshot = clearPartitions ? new List<PartitionMeta>(loadedPartitions) : null;
@@ -2711,6 +3187,21 @@ namespace PMKUnlocker
                                 // ========== Commercial Tool Log Style Formatting ==========
                                 bool handled = false;
 
+                                // ၀။ MTK Auth Bypass (tools\mtkbypass) output — python ဘက်က
+                                //     "BYPASS: ..." prefix နဲ့ ပို့လို့ ဒီမှာပဲ ပြ (prefix ဖြုတ်ပြီး)
+                                if (line.StartsWith("BYPASS:", StringComparison.Ordinal))
+                                {
+                                    string bl = line.Substring(7).Trim();
+                                    if (bl.IndexOf("Protection disabled", StringComparison.OrdinalIgnoreCase) >= 0)
+                                        Log("  " + bl, Color.LightGreen);
+                                    else if (bl.IndexOf("FAILED", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                             bl.IndexOf("Timeout", StringComparison.OrdinalIgnoreCase) >= 0)
+                                        Log("  " + bl, Color.OrangeRed);
+                                    else
+                                        Log("  " + bl, Color.FromArgb(120, 200, 255));
+                                    handled = true;
+                                }
+
                                 // ၁။ ဖိုင် ရေးသွင်းနေသည့် log ကို သန့်သန့်လေး ပြောင်းလဲခြင်း
                                 if (line.Contains("In handleProgram('"))
                                 {
@@ -2769,8 +3260,8 @@ namespace PMKUnlocker
                                 {
                                     if (showRawOutput)
                                         Log("    " + line, Color.FromArgb(150, 150, 150));
-                                    else if (line.Contains("ERROR") || line.Contains("FAILED") ||
-                                             line.Contains("Read 0 bytes") || line.Contains("GetFile:"))
+                                    else if (!quietFail && (line.Contains("ERROR") || line.Contains("FAILED") ||
+                                             line.Contains("Read 0 bytes") || line.Contains("GetFile:")))
                                         Log("    " + line, Color.OrangeRed);
                                 }
                             };
@@ -2780,18 +3271,29 @@ namespace PMKUnlocker
 
                             if (stopRequested) return;
                             process.Start();
-                            if (stopRequested) { try { process.Kill(true); } catch (InvalidOperationException) { } }
+                            if (stopRequested && !mtkFirmwareSessionProtected) { try { process.Kill(true); } catch (InvalidOperationException) { } }
                             process.BeginOutputReadLine();
                             process.BeginErrorReadLine();
                             // timeoutSec > 0 ဆို child process ကို စောင့်ပြီး ကြာလွန်းရင် kill —
                             // (edl.py/mtkclient က device reboot ပြီးမှ hang နေတတ်တယ် → UI အမြဲတမ်း lock)
-                            if (timeoutSec > 0)
+                            if (mtkFirmwareSessionProtected)
+                            {
+                                // Backend checks the cancellation file between partitions. Never kill a write.
+                                process.WaitForExit();
+                            }
+                            else if (timeoutSec > 0)
                             {
                                 if (!process.WaitForExit(timeoutSec * 1000))
                                 {
                                     timedOut = true;
                                     try { process.Kill(entireProcessTree: true); } catch { }
                                     try { process.WaitForExit(5000); } catch { }
+                                }
+                                else
+                                {
+                                    // WaitForExit(int) က async output drain မစောင်း — process ထွက်ပြီး
+                                    // pipe ထဲ ကျန်နေတဲ့ tail line တွေ (PMK_OK စသည်) ဆုံးမသွားအောင်
+                                    try { Thread.Sleep(300); } catch { }
                                 }
                             }
                             else
@@ -2803,6 +3305,10 @@ namespace PMKUnlocker
                                     timedOut = true;
                                     try { process.Kill(entireProcessTree: true); } catch { }
                                     try { process.WaitForExit(5000); } catch { }
+                                }
+                                else
+                                {
+                                    try { Thread.Sleep(300); } catch { }
                                 }
                             }
                             exitCode = process.ExitCode;
@@ -2865,6 +3371,8 @@ namespace PMKUnlocker
                 switch (code)
                 {
                     case -1073741819: return " (0xC0000005 = ACCESS_VIOLATION — libusb/USB driver အဆင့်မှာ crash)";
+                    case 24: return " (COM port မဖွင့်နိုင်ဘူး — port busy/stuck)";
+                    case 20: return " (mtkclient error marker — raw log ထဲက error line ကို ကြည့်ပါ)";
                     case -1073740791: return " (0xC0000409 = stack buffer overrun)";
                     case -1073741510: return " (0xC000013A = process ကို ရပ်လိုက်တာ)";
                     case -1073740940: return " (0xC0000374 = heap corruption)";
@@ -2876,9 +3384,12 @@ namespace PMKUnlocker
             {
                 RestorePartitionRows();
                 SetProgress(0, "Failed", "0 MB/s");
-                Log("[✘] " + taskTitle + " could not be started: " + failure, Color.Red);
-                Log("[*] Check that " + fileName + " is installed and reachable.", Color.Orange);
-                if (rawSnapshot.Count > 0) DumpRawOutput("[*] Raw command output (last 30 lines):");
+                if (!quietFail)
+                {
+                    Log("[✘] " + taskTitle + " could not be started: " + failure, Color.Red);
+                    Log("[*] Check that " + fileName + " is installed and reachable.", Color.Orange);
+                    if (rawSnapshot.Count > 0) DumpRawOutput("[*] Raw command output (last 30 lines):");
+                }
                 if (!quiet) Log("========================================================", Color.FromArgb(0, 180, 255));
                 LogHistory(taskTitle + " (could not start)", false, Math.Round(sw.Elapsed.TotalSeconds));
                 return false;
@@ -2936,8 +3447,17 @@ namespace PMKUnlocker
             {
                 RestorePartitionRows();
                 SetProgress(0, "Failed", "0 MB/s");
-                Log("[FAIL] " + taskTitle + " — timed out after " + (timeoutSec > 0 ? timeoutSec + "s" : "6h hard cap") + " (process killed).", Color.OrangeRed);
-                DumpRawOutput("[*] Raw command output (last 30 lines):");
+                if (!quietFail)
+                {
+                    Log("[FAIL] " + taskTitle + " — timed out after " + (timeoutSec > 0 ? timeoutSec + "s" : "6h hard cap") + " (process killed).", Color.OrangeRed);
+                    DumpRawOutput("[*] Raw command output (last 30 lines):");
+                    // wait-loop (BROM device မတွေ့) ကြောင့် ပိတ်သွားတာဆိုရင် နောက်တစ်ခါ
+                    // ဘာလုပ်ရမလဲ ရှင်းရှင်းလင်းလင်း ပြန်ပြတယ် (raw hint တွေကို parser က ဖျက်ထားလို့)။
+                    string timedOutRaw = string.Join("\n", rawSnapshot);
+                    if (timedOutRaw.Contains("PreLoader VCOM") || timedOutRaw.Contains("Handshake failed") ||
+                        timedOutRaw.Contains("BROM") || timedOutRaw.Contains("preloader"))
+                        Log("[i] Recovery: ဖုန်းကို power off (~10s) လုပ်ပြီး Vol+ & Vol- ကို ဆုပ်ထားကာ USB ပြန်တပ်ပါ — BROM mode မှသာ mtkclient ချိတ်နိုင်တယ်။", Color.Cyan);
+                }
                 if (!quiet)
                 {
                     Log("Elapsed time : " + Math.Round(sw.Elapsed.TotalSeconds) + " seconds", Color.Gray);
@@ -2949,14 +3469,17 @@ namespace PMKUnlocker
 
             RestorePartitionRows();
             SetProgress(0, "Failed", "0 MB/s");
-            Log("[FAIL] " + taskTitle + " (exit code " + exitCode + ")" + ExitCodeNote(exitCode), Color.OrangeRed);
-            DumpRawOutput("[*] Raw command output (last 30 lines):");
+            if (!quietFail)
+            {
+                Log("[FAIL] " + taskTitle + " (exit code " + exitCode + ")" + ExitCodeNote(exitCode), Color.OrangeRed);
+                DumpRawOutput("[*] Raw command output (last 30 lines):");
+                LogRecoveryHints(taskTitle, exitCode, rawSnapshot);
+            }
             if (!quiet)
             {
                 Log("Elapsed time : " + Math.Round(sw.Elapsed.TotalSeconds) + " seconds", Color.Gray);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
             }
-            LogRecoveryHints(taskTitle, exitCode, rawSnapshot);
             LogHistory(taskTitle, false, Math.Round(sw.Elapsed.TotalSeconds));
             return false;
         }
@@ -2986,6 +3509,17 @@ namespace PMKUnlocker
         private void LogRecoveryHints(string taskTitle, int exitCode, List<string> rawTail)
         {
             string joined = string.Join("\n", rawTail ?? new List<string>());
+            // The terminal firmware guard error takes precedence over earlier,
+            // recovered loader warnings from the same connection attempt.
+            string firmwareError = (rawTail ?? new List<string>()).LastOrDefault(line =>
+                line.Contains("PMK_ERROR: Firmware preflight blocked:") ||
+                line.Contains("PMK_ERROR: Firmware sparse preparation/write failed:") ||
+                line.Contains("PMK_ERROR: Firmware write failed:"));
+            if (firmwareError != null)
+            {
+                Log("[i] Recovery: " + firmwareError.Trim(), Color.Cyan);
+                return;
+            }
             bool hint = false;
 
             void Hint(string msg)
@@ -2995,8 +3529,19 @@ namespace PMKUnlocker
                 Log("[i] Recovery: " + msg, Color.Cyan);
             }
 
-            if (joined.Contains("ACCESS_VIOLATION") || exitCode == -1073741819)
+            // COM port open failure — အတွင်းဆုံး (specific) အနေနဲ့ အပေါ်ဆုံးမှာ ထားရတယ်
+            // (raw tail ထဲမှာ "not found"/"BROM" စာသားတွေလည်း ပါတတ်လို့)။
+            if (exitCode == 24 || joined.Contains("could not open port") ||
+                joined.Contains("parameter is incorrect"))
+                Hint("COM port ကို Windows မဖွင့်ပေးဘူး (busy/stuck) — SP Flash Tool / UnlockTool စတဲ့ အခြား tool တွေပိတ်ပါ။ မပြောင်းရင် Device Manager မှာ MediaTek USB Port device ကို disable → enable လုပ်ပြီး ဖုန်းကို power-cycle/replug ပြန်စမ်းပါ။");
+            else if (joined.Contains("PMK_NEED_USBDK") || joined.Contains("is UsbDk installed"))
+                Hint("Raw USB access (UsbDk) လိုအပ်နေတယ် — MTK Auth Bypass ကို ထပ်နှိပ်ပါ (UsbDk driver တင်ဖို့ prompt တက်ရင် Yes နှိပ်)၊ ပြီးရင် ဖုန်းကို replug ပြီး retry လုပ်ပါ။");
+            else if (joined.Contains("ACCESS_VIOLATION") || exitCode == -1073741819)
                 Hint("USB driver / libusb crash — USB port ပြောင်း၊ cable တို/မကောင်း စစ်၊ WinUSB filter reinstall စမ်းပါ။");
+            else if (joined.Contains("No preloader given") || joined.Contains("missing dram setup"))
+                Hint("Preloader (DRAM/EMI config) မပါလို့ DA stage 2 တက်ရာမှာ ဖုန်းက USB ပြတ်သွားတယ် — ဒီဖုန်းရဲ့ firmware ထဲက preloader_<board>_*.bin ကို MTK tab ရဲ့ Preloader picker မှာ ရွေးပြီး ပြန်စမ်းပါ။");
+            else if (joined.Contains("Cannot configure port") || joined.Contains("not functioning"))
+                Hint("USB ချိတ်မှာ အလုပ်လုပ်နေစဉ် ပြတ်/ပြောင်းသွားတယ် — cable/hub စစ် (PC USB 2.0 port တိုက်ရိုက်သုံး)၊ဖုန်းကို power-off (~10s) လုပ်ပြီး Vol+ & Vol- နှိပ်ကာ BROM ပြန်သွင်း retry ပါ။");
             else if (joined.Contains("Permission") || joined.Contains("access denied") || exitCode == 5)
                 Hint("Permission denied — tool ကို Run as administrator နဲ့ ဖွင့်ပါ သို့မဟုတ် antivirus က ပိတ်နေလား စစ်ပါ။");
             else if (joined.Contains("No such file") || joined.Contains("not found") || joined.Contains("找不到") || exitCode == 2)
@@ -3711,13 +4256,12 @@ namespace PMKUnlocker
         {
             await RunFlashWorkflowAsync(async () =>
             {
-                string portParam = GetMtkTransportParam();
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("       STORAGE & MEMORY HARDWARE DIAGNOSTIC TEST        ", Color.White);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("[*] Testing DRAM & Flash Storage Controller...", Color.Orange);
 
-                await ExecuteCommandCleanAsync("mtk.exe", portParam + " printgpt", "Storage & Memory Test", clearPartitions: true);
+                await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("printgpt"), "Storage & Memory Test", clearPartitions: true, timeoutSec: 180);
             });
         }
 
@@ -3731,10 +4275,9 @@ namespace PMKUnlocker
                     if (fbd.ShowDialog() == DialogResult.OK)
                     {
                         string saveDir = fbd.SelectedPath;
-                        string portParam = GetMtkTransportParam();
                         Log("[📦] Full Firmware Dump: Saving all partitions to " + saveDir + "...", Color.Cyan);
 
-                        await ExecuteCommandCleanAsync("mtk.exe", portParam + " rl \"" + saveDir + "\"", "Full Firmware Dump");
+                        await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("rl \"" + saveDir + "\""), "Full Firmware Dump", timeoutSec: 0);
 
                         if (TryWriteScatterFile(saveDir, null, out string scatterPath))
                         {
@@ -3753,7 +4296,6 @@ namespace PMKUnlocker
                 if (fbd.ShowDialog() == DialogResult.OK)
                 {
                     string saveDir = fbd.SelectedPath;
-                    string portParam = GetMtkTransportParam();
 
                     string[] essentialParts = new string[] {
                         "boot", "recovery", "vbmeta", "vbmeta_system", "vbmeta_vendor",
@@ -3762,13 +4304,29 @@ namespace PMKUnlocker
 
                     Log("[📁] Normal Firmware Dump: Dumping Essential Flashing Partitions...", Color.Cyan);
 
+                    // UnlockTool-style — USB connection တစ်ခါတည်း (multi) နဲ့ essential
+                    // partition အကုန် ဖတ် (path ထဲ space မပါအောင် short path ပြောင်းသုံး)။
+                    // short path မရရင် အောက်က တစ်ခုချင်း session ပဲ ဆက်သုံးတယ်။
+                    string saveFree;
+                    if (MtkSpaceFree(saveDir, out saveFree))
+                    {
+                        var dumpCmds = new List<string>();
+                        foreach (string part in essentialParts)
+                            dumpCmds.Add("r " + part + " " + Path.Combine(saveFree, part + ".img"));
+                        await RunMtkMultiAsync(string.Join("; ", dumpCmds),
+                            "Normal Firmware Dump (single session)", quiet: true, timeoutSec: 0);
+                    }
+
                     int ok = 0, fail = 0;
                     foreach (string part in essentialParts)
                     {
                         string filePath = Path.Combine(saveDir, part + ".img");
-                        Log("[+] Dumping: " + part + ".img ...", Color.LightSkyBlue);
-                        await ExecuteCommandQuickAsync("mtk.exe", portParam + " r " + part + " \"" + filePath + "\"");
-                        // mtk.exe r ပြီးရင် file တကယ်ရှိ/size>0 ကို စစ် — QuickAsync က output ပဲ return (exit code မပေး)
+                        if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0)
+                        {
+                            Log("[+] Dumping: " + part + ".img ...", Color.LightSkyBlue);
+                            await ExecuteCommandQuickAsync("python", BuildMtkOpArgs("r " + part + " \"" + filePath + "\""));
+                        }
+                        // read ပြီးရင် file တကယ်ရှိ/size>0 ကို စစ် — QuickAsync က output ပဲ return (exit code မပေး)
                         if (File.Exists(filePath) && new FileInfo(filePath).Length > 0) ok++;
                         else { fail++; Log("[!] " + part + " — dump failed or empty file.", Color.Orange); }
                     }
@@ -3839,7 +4397,7 @@ namespace PMKUnlocker
                 return false;
             }
 
-            return await ExecuteCommandCleanAsync("mtk.exe", GetMtkTransportParam() + " " + arg, title);
+            return await ExecuteCommandCleanAsync("python", BuildMtkOpArgs(arg), title, timeoutSec: 0);
         }
 
         // ADB root partition r/w/e — /dev/block/by-name/<name> ကို su + dd နဲ့
@@ -4212,11 +4770,27 @@ namespace PMKUnlocker
         // ================= MTK ACTIONS =================
         private async void BtnMtkReadBrom_Click(object sender, EventArgs e)
         {
-            await RunFlashWorkflowAsync(async () =>
-            {
-                string portParam = GetMtkTransportParam();
-                await ExecuteCommandCleanAsync("mtk.exe", portParam + " printgpt", "MTK Read Info & GPT Map", clearPartitions: true);
-            });
+                await RunFlashWorkflowAsync(async () =>
+                {
+                    // status bar က "COM Port -> COMx" က ဘယ် serial port မဆို ပြတာ (PC ပေါ်က)
+                    // — mtkclient ကတော့ MediaTek device (0e8d) ကိုပဲ ရှာတယ်။ ဘာနဲ့ စောင့်နေလဲ ပြတယ်။
+                    string portParam = GetMtkTransportParam();
+                    if (string.IsNullOrEmpty(portParam))
+                        Log("[i] Transport: USB (libusb) — MediaTek COM port မတွေ့ရသေးဘူး၊ BROM device အတွက် စောင့်နေတယ်", Color.Cyan);
+                    else
+                        Log("[i] Transport: serial/VCOM " + portParam.Trim(), Color.Cyan);
+                    // pmk_mtk_op.py က transport auto-detect + handshake retry လုပ်တယ် —
+                    // mtk.exe က handshake fail ပြီး exit 0 ပြန်တတ်လို့ partition list ကွက်တတ်တယ်
+                    // Auto reboot on ဆိုရင် printgpt + reset ကို session တစ်ခုတည်းမှာ ပို့တယ် —
+                    // ဘေးခွဲ reset process က phone ကို DA mode မှာ ထားပြီး ပြန်မချိတ်နိုင်လို့
+                    // (libusb က 0E8D:2001 wdm_usb ကို ကိုင်မရ) retry spam ဖြစ်တယ်
+                    bool autoReboot = chkMtkAutoReboot != null && chkMtkAutoReboot.Checked;
+                    string mtkReadArgs = autoReboot ? BuildMtkMulti("printgpt; reset") : BuildMtkOpArgs("printgpt");
+                    bool readOk = await ExecuteCommandCleanAsync("python", mtkReadArgs,
+                        autoReboot ? "MTK Read Info & GPT Map + reset (Android reboot)" : "MTK Read Info & GPT Map",
+                        clearPartitions: true, timeoutSec: 180);
+                    if (readOk && autoReboot) mtkRebootedInSession = true;
+                });
         }
 
         private async void BtnMtkUnlockBL_Click(object sender, EventArgs e)
@@ -4229,7 +4803,12 @@ namespace PMKUnlocker
 
         private async void BtnMtkRelockBL_Click(object sender, EventArgs e)
         {
-            if (MessageBox.Show("Relock Bootloader?", "Confirm Relock", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            if (MessageBox.Show(
+                    "Relock Bootloader? (seccfg lock)\n\n" +
+                    "• ဖုန်း stock/firmware မပြင်ထားရင် ပြဿနာမရှိ\n" +
+                    "• system / vbmeta / boot ပြင်ထားတဲ့ဖုန်းဆိုရင် AVB fail ဖြစ်ပြီး " +
+                    "bootloop / screen မပွင့်နိုင်ဘူး — ပြန် Unlock Bootloader လုပ်မှ ဝင်နိုင်မယ်",
+                    "Confirm Relock", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
                 await RunMtkOpThenRebootAsync("da seccfg lock", "MTK Relock Bootloader");
             }
@@ -4275,6 +4854,41 @@ namespace PMKUnlocker
                 // Post-op စာသား အနည်းဆုံး — "Completed Successfully!" + elapsed ပဲ ပြတယ်
                 // (ဖုန်း မတက်ရင် power နှိပ်ဖို့ ညွှန်ကြားချက်ကို marker handler က ပြပြီးသား)။
             }
+        }
+
+        // MTK Auth Bypass — tool ထဲမှာပဲ (tools\mtkbypass) SLA/DAA bypass run လုပ်တယ်။
+        // MTK operation တွေ မလုပ်ခင် ကိုယ်တိုင် အရင်နှိပ်ရမယ့် တစ်ဆင့်ဖြစ်ပြီး
+        // success ရတာနဲ့ USB ကို ဆက်ထားနိုင်တယ် (COM port မလို — raw USB)။
+        private async void BtnMtkAuthBypass_Click(object sender, EventArgs e)
+        {
+            await RunFlashWorkflowAsync(async () =>
+            {
+                string mode = DetectMtkUsbMode();
+                if (mode.Trim().Length == 0)
+                {
+                    RefreshMtkDetection();      // cache အဟောင်း ဖြစ်နိုင်လို့ fresh ပြန်ယူ
+                }
+                await RunMtkAuthBypassAsync();
+            }, autoRebootAfter: false);
+        }
+
+        // Mi Account Bypass (No VPN) — Xiaomi Mi Account / Mi Cloud lock ကို persist erase နဲ့ ဖြတ်။
+        // TTA နည်းလမ်း: Redmi 9A မှာ fastboot erase persist က work ပေမယ့် Xiaomi MTK အများစု fail —
+        // အဲဒီအခါ mtkclient command နဲ့ erase ရတယ် (server / VPN မလို)။ nvram / nvdata မထိဘူးဆိုတော့ IMEI မပျက်။
+        private async void BtnMtkMiAccountBypass_Click(object sender, EventArgs e)
+        {
+            if (MessageBox.Show(
+                    "Mi Account Bypass (No VPN) — persist partition ကို erase လုပ်ပါမယ်။\n\n" +
+                    "• Xiaomi Mi Account / Mi Cloud lock ပျက်သွားမယ် (VPN / server မလို)\n" +
+                    "• IMEI / baseband မပျက်ပါ (nvram / nvdata / nvcfg မထိပါ)\n" +
+                    "• User data မပျက်ပါ — persist ထဲက sensor calib / Widevine / account data ပဲ ပျက်မယ်\n" +
+                    "• Google account lock (FRP) ရှိရင် နောက်ပိုင်း FRP Remove သုံးပါ\n" +
+                    "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ (ခိုးရာပစ္စည်း မဟုတ်ကြောင်း စစ်ပါ)\n\n" +
+                    "ဆက်လုပ်မလား?",
+                    "Confirm Mi Account Bypass", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            await RunMtkOpThenRebootAsync("e persist", "MTK Mi Account Bypass (persist, no VPN)");
         }
 
         // ================= ORANGE STATE / DM FIX (vbmeta) =================
@@ -4400,8 +5014,8 @@ namespace PMKUnlocker
         {
             try
             {
-                if (!await ExecuteCommandCleanAsync("mtk.exe", GetMtkTransportParam() + " printgpt",
-                    "Verify " + part + " size", clearPartitions: true, quiet: true)) return false;
+                if (!await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("printgpt"),
+                    "Verify " + part + " size", clearPartitions: true, quiet: true, timeoutSec: 180)) return false;
                 var matches = loadedPartitions.Where(p => p.Name.Equals(part, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (matches.Count != 1) throw new InvalidDataException("Cannot verify partition size: " + part);
                 long expected = ReviewSafety.ParseSize(matches[0].LengthHex);
@@ -4809,50 +5423,25 @@ namespace PMKUnlocker
 
             Log(" Loading Partition Table... Ok", Color.White);
 
-            // ၃။။ fh_loader.exe က 2GB ကျော် image ကို "Read 0 bytes" error နဲ့ မရေးနိုင်လို့ —
-            // system.img စလိုက် (>2GB) တွေကို chunk ခွဲပြီး program entry အများကြီးထုတ်မယ်။
-            string flashXmlFile = finalXmlFile;
+            // Expand complete sparse containers first, then split the resulting raw ranges.
+            string flashXmlFile = Path.Combine(qcFirmwareFolder,
+                Path.GetFileNameWithoutExtension(finalXmlFile) + "_expanded_pmk.xml");
             try
             {
+                File.Copy(finalXmlFile, flashXmlFile, true);
+                await Task.Run(() => ReviewSafety.ConvertSparseImages(flashXmlFile, qcFirmwareFolder,
+                    msg => Log(msg, Color.Orange)));
                 string splitXmlPath = Path.Combine(qcFirmwareFolder,
                     Path.GetFileNameWithoutExtension(finalXmlFile) + ReviewSafety.SplitXmlSuffix);
-                // GB ပမာណ copy ကို background thread မှာ — UI thread ပေါ်ဆို (Not Responding) ဖြစ်တယ်
-                int added = await Task.Run(() => ReviewSafety.SplitOversizedImages(finalXmlFile, qcFirmwareFolder, splitXmlPath,
-                    msg => Log(msg, Color.Orange)));
-                if (added > 0)
-                {
-                    flashXmlFile = splitXmlPath;
-                    Log($" Large image split applied ({added} program entries)... Ok", Color.LightGreen);
-                }
+                await Task.Run(() => ReviewSafety.SplitOversizedImages(flashXmlFile, qcFirmwareFolder, splitXmlPath,
+                    msg => Log(msg, Color.Orange), (_, _) => !stopRequested));
+                flashXmlFile = splitXmlPath;
+                if (stopRequested) return;
             }
             catch (Exception ex)
             {
                 workflowFailed = true;
-                Log("[FAIL] Large image split failed; flash cancelled: " + ex.Message, Color.Red);
-                return;
-            }
-
-            // Android sparse image (vendor/cust/cache/userdata) — fh_loader 15.06 က expand မလုပ်ဘဲ
-            // container bytes ကို raw အနေရေးလို့ partition ပျက် → logo bootloop ဖြစ်တယ်။
-            // raw အဖြစ် ကြိုတင်ဖြည့် (xxx_pmk_raw.img) ပြီး XML ပြောင်းပေးမယ်။
-            // source XML (rawprogram0.xml) ကို မထိရ — derived copy ပြောင်းသုံးမယ်။
-            if (flashXmlFile == xmlFile)
-            {
-                flashXmlFile = Path.Combine(qcFirmwareFolder,
-                    Path.GetFileNameWithoutExtension(xmlFile) + ReviewSafety.SplitXmlSuffix);
-                File.Copy(xmlFile, flashXmlFile, true);
-            }
-            try
-            {
-                int expandedCount = await Task.Run(() =>
-                    ReviewSafety.ConvertSparseImages(flashXmlFile, qcFirmwareFolder, msg => Log(msg, Color.Orange)));
-                if (expandedCount > 0)
-                    Log($" Sparse images expanded ({expandedCount} file(s))... Ok", Color.LightGreen);
-            }
-            catch (Exception ex)
-            {
-                workflowFailed = true;
-                Log("[FAIL] Sparse image expand failed; flash cancelled: " + ex.Message, Color.Red);
+                Log("[FAIL] Firmware preparation stopped; nothing flashed: " + ex.Message, Color.Red);
                 return;
             }
 
@@ -5754,6 +6343,282 @@ namespace PMKUnlocker
         // ဒါကြောင့် pmk_mtk_op.py က bootmode=2 (fastboot) + leaveusb=1 ပို့ပြီး၊ ဖုန်း
         // fastboot ရောက်လာရင် PC ကနေ `fastboot reboot` ဆက်ပို့တယ် — ပြီးရင် တကယ်
         // တက်/မတက် device ကို စစ်ပြီး marker နဲ့ ပြန်ပေးတယ် (အောက်က switch မှာ ပြတယ်)။
+        // ================= MTK Auth Bypass (tool ထဲမှာပဲ — external MABT မသုံး) =================
+        // PMK Auth Bypass runner — tools\mtkbypass\pmk_mtk_bypass.py (bypass_utility, MIT)
+        private static string BuildMtkBypassArgs()
+        {
+            string script = Path.Combine(Application.StartupPath, "tools", "mtkbypass", "pmk_mtk_bypass.py");
+            return "\"" + script + "\"";
+        }
+
+        // 32-bit app (x86) က 64-bit Windows မှာ "ProgramFiles" env က
+        // "C:\Program Files (x86)" ပဲ ပြတယ် — UsbDk MSI က 64-bit ကို install
+        // လုပ်တာမို့ ProgramW6432 အပါအဝင် root ၃ခုလုံး စစ်ရတယ် (အရင်က false ပြန်ပြီး
+        // "install ပြီးပြီ" ဆိုပေမယ့် driver မတင်ဘဲ fail ဖြစ်ခဲ့တယ်)။
+        private static List<string> UsbDkRoots()
+        {
+            var seen = new List<string>();
+            foreach (string key in new[] { "ProgramW6432", "ProgramFiles", "ProgramFiles(x86)" })
+            {
+                try
+                {
+                    string p = Environment.GetEnvironmentVariable(key);
+                    if (!string.IsNullOrEmpty(p) && !seen.Contains(p)) seen.Add(p);
+                }
+                catch { }
+            }
+            // env တစ်ခုမှ မပေးတဲ့အခြေအနေအတွက် 64-bit default path ကို နောက်ဆုံးအဖြစ် ထည့်
+            if (!seen.Contains(@"C:\Program Files")) seen.Add(@"C:\Program Files");
+            return seen;
+        }
+
+        private bool UsbDkInstalled()
+        {
+            try
+            {
+                // MSI (1.0.22) က "UsbDk Runtime Library" ဆိုတဲ့ folder ထဲမှာ ထည့်တယ်
+                // (အရင်က "UsbDk Runtime" ပဲ စစ်ထားလို့ install ပြီးမှတောင် false ပြန်တယ်)
+                foreach (string root in UsbDkRoots())
+                    foreach (string dir in new[] { "UsbDk Runtime Library", "UsbDk Runtime" })
+                        if (File.Exists(Path.Combine(root, dir, "UsbDk.sys"))) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        // MSI က runtime file တွေပဲ ထည့်ပြီး kernel driver (service) မတင်ရသေးရင် raw USB က
+        // အမြဲ fail ဖြစ်တယ် — driver package က driver store မှာ မရှိဘဲကျန်တတ်တယ်။
+        // (32-bit process က System32 ကို file API နဲ့ စစ်ရင် SysWOW64 ပြောင်းသွားလို့
+        // registry service key ကိုပဲ primary အဖြစ်သုံးတယ် — SYSTEM key က redirect မဖြစ်ဘူး)
+        private bool UsbDkDriverRegistered()
+        {
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\UsbDk"))
+                    if (k != null) return true;
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                foreach (string sub in new[] { @"System32\drivers\UsbDk.sys", @"Sysnative\drivers\UsbDk.sys" })
+                    if (File.Exists(Path.Combine(win, sub))) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        // MSI ရဲ့ InstallDriver custom action ([UsbDk_Directory]\UsbDkInstHelper.exe i) ကို
+        // ကိုယ်တိုင် ထပ်ခေါ်တယ် — silent install (/qn) မှာ driver တင်တဲ့ step က ကျန်ခဲ့တတ်တယ်။
+        private bool InstallUsbDkDriver()
+        {
+            try
+            {
+                string exe = "";
+                foreach (string root in UsbDkRoots())
+                {
+                    foreach (string dir in new[] { "UsbDk Runtime Library", "UsbDk Runtime" })
+                    {
+                        string c = Path.Combine(root, dir, "UsbDkInstHelper.exe");
+                        if (File.Exists(c)) { exe = c; break; }
+                    }
+                    if (!string.IsNullOrEmpty(exe)) break;
+                }
+                if (string.IsNullOrEmpty(exe))
+                {
+                    Log("[!] UsbDkInstHelper.exe not found.", Color.OrangeRed);
+                    return false;
+                }
+                Log("[*] UsbDk kernel driver ကို register လုပ်နေတယ် ...", Color.Cyan);
+                var psi = new ProcessStartInfo(exe, "i")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return false;
+                    if (!p.WaitForExit(90000)) { try { p.Kill(); } catch { } return false; }
+                    if (p.ExitCode != 0) Log("[!] UsbDkInstHelper exit=" + p.ExitCode, Color.Orange);
+                }
+                return UsbDkDriverRegistered();
+            }
+            catch (Exception ex)
+            {
+                Log("[!] UsbDk driver register error: " + ex.Message, Color.Red);
+                return false;
+            }
+        }
+
+        private bool PromptInstallUsbDkDriver()
+        {
+            try
+            {
+                var r = MessageBox.Show(
+                    "UsbDk runtime ဖိုင်တွေ ရှိပေမယ့် kernel driver မတင်ရသေးဘူး (raw USB access အလုပ်မလုပ်)။\r\n" +
+                    "ယခု driver ကို register လုပ်မလား? (bundled UsbDkInstHelper, silent)\r\n\r\n" +
+                    "No ဆိုရင် MTK Auth Bypass က USB access မရဘဲ fail ဖြစ်နေမယ်။",
+                    "PMK Mobile Tool", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                return r == DialogResult.Yes;
+            }
+            catch { return false; }
+        }
+
+        // UsbDk filter driver က ယခု ချိတ်ထားတဲ့ device ပေါ် ချက်ချင်း မကပ်ဘူး —
+        // re-enumerate ဖြစ်ဖို့ (unplug/replug) user ကို တိုက်ရိုက်မေးမြန်းတယ်။
+        private void PromptReplugForUsbDk()
+        {
+            try
+            {
+                MessageBox.Show(
+                    "UsbDk driver တင်ပြီးပါပြီ။\r\n\r\n" +
+                    "1) ဖုန်းကို USB က ဖြုတ်ပါ (power off ~10s)\r\n" +
+                    "2) Vol+ & Vol- ကို ဆုပ်ထားကာ USB ပြန်တပ်ပါ (BROM mode)\r\n" +
+                    "3) ပြီးရင် OK နှိပ်ပါ — bypass က ဆက်လုပ်ပေးမယ်။",
+                    "PMK Mobile Tool", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch { }
+        }
+
+        private bool InstallUsbDk()
+        {
+            try
+            {
+                string msi = Path.Combine(Application.StartupPath, "tools", "mtkbypass", "UsbDk_1.0.22_x64.msi");
+                if (!File.Exists(msi))
+                {
+                    Log("[!] UsbDk installer not found: " + msi, Color.OrangeRed);
+                    return false;
+                }
+                Log("[*] UsbDk driver ကို silent install လုပ်နေတယ် ...", Color.Cyan);
+                var psi = new ProcessStartInfo("msiexec.exe", "/i \"" + msi + "\" /qn /norestart")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return false;
+                    if (!p.WaitForExit(90000)) { try { p.Kill(); } catch { } return false; }
+                    if (p.ExitCode != 0 && p.ExitCode != 3010)
+                    {
+                        Log("[!] UsbDk install exit=" + p.ExitCode, Color.OrangeRed);
+                        return false;
+                    }
+                }
+                Log("[i] UsbDk installed.", Color.Gainsboro);
+                return UsbDkInstalled();
+            }
+            catch (Exception ex)
+            {
+                Log("[!] UsbDk install error: " + ex.Message, Color.Red);
+                return false;
+            }
+        }
+
+        private bool PromptInstallUsbDk()
+        {
+            try
+            {
+                var r = MessageBox.Show(
+                    "ဖုန်းက raw USB (BROM) access အတွက် UsbDk driver လိုတယ်။\r\n" +
+                    "ယခု install လုပ်မလား? (bundled installer, silent install)\r\n\r\n" +
+                    "No ဆိုရင် USB access မရဘဲ bypass မအောင်နိုင်ဘူး။",
+                    "PMK Mobile Tool", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                return r == DialogResult.Yes;
+            }
+            catch { return false; }
+        }
+
+        // MTK Auth Bypass — python tools\mtkbypass\pmk_mtk_bypass.py (exit 0 = success)
+        private async Task<bool> RunMtkAuthBypassAsync()
+        {
+            string script = Path.Combine(Application.StartupPath, "tools", "mtkbypass", "pmk_mtk_bypass.py");
+            if (!File.Exists(script))
+            {
+                Log("[!] Auth bypass script not found: " + script, Color.OrangeRed);
+                return false;
+            }
+
+            Log("[*] MTK Auth Bypass (in-tool, bypass_utility) ...", Color.Cyan);
+            Log("[i] ဖုန်း power off → Vol+ & Vol- ဆုပ်ထားကာ USB ထိုးပါ (BROM)။", Color.Orange);
+            // UnlockTool-style အဆင့်ပြ — auth-only op မို့ [1/4] Port + [2/4] Auth ပဲ
+            Log("[1/4] Initializing usb... OK — Waiting for device... BROM (VID_0E8D)", Color.Cyan);
+            Log("[2/4] Bypassing authentication...", Color.Violet);
+
+            bool ok = await ExecuteCommandCleanAsync("python", BuildMtkBypassArgs(), "MTK Auth Bypass", timeoutSec: 180);
+            if (ok)
+            {
+                authBypassDoneUtc = DateTime.UtcNow;
+                authBypassEverOk = true;
+                Log("[2/4] Bypassing authentication... OK — SLA/DAA disabled!", Color.Violet);
+                return true;
+            }
+
+            string marker = ReadLastPythonLog();
+            if (marker.IndexOf("PMK_NEED_USBDK", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Log("[!] UsbDk driver မရှိ / kernel driver မတင်ရသေးလို့ raw USB open fail ဖြစ်နေတယ် (wdm_usb/winusb)။", Color.Orange);
+                bool canRetry = UsbDkInstalled();
+                if (!canRetry)
+                    canRetry = PromptInstallUsbDk() && InstallUsbDk();
+                bool driverFresh = false;
+                if (canRetry && !UsbDkDriverRegistered())
+                {
+                    canRetry = PromptInstallUsbDkDriver() && InstallUsbDkDriver();
+                    driverFresh = canRetry && UsbDkDriverRegistered();
+                }
+                if (canRetry && UsbDkDriverRegistered())
+                {
+                    // driver အသစ်တင်ရင် filter က ချိတ်ဆက်ပြီးသား device ပေါ် မကပ်ဘူး —
+                    // device ကို re-enumerate ဖြစ်အောင် user က ဖြုတ်/ပြန်တပ်ခိုင်းရမယ်။
+                    if (driverFresh) PromptReplugForUsbDk();
+                    Log("[i] UsbDk driver ready — ဖုန်းကို USB ဖြုတ်ပြီး (~10s) Vol+ & Vol- နဲ့ BROM mode ပြန်တပ်ပါ။", Color.Orange);
+                    ok = await ExecuteCommandCleanAsync("python", BuildMtkBypassArgs(), "MTK Auth Bypass (retry)", timeoutSec: 180);
+                    if (ok)
+                    {
+                        authBypassDoneUtc = DateTime.UtcNow;
+                        authBypassEverOk = true;
+                        Log("[2/4] Bypassing authentication... OK — SLA/DAA disabled!", Color.Violet);
+                        return true;
+                    }
+                }
+                else if (!UsbDkDriverRegistered())
+                {
+                    Log("[!] UsbDk driver မတင်နိုင်ဘူး - raw USB access မရဘဲ bypass fail ဖြစ်မယ်။", Color.OrangeRed);
+                }
+            }
+
+            Log("[!] MTK Auth Bypass မအောင်ဘူး - log ကို ကြည့်ပါ (ဖုန်း BROM mode ဖြစ်ဖို့ စစ်ပါ)။", Color.OrangeRed);
+            return false;
+        }
+
+        private static string ReadLastPythonLog()
+        {
+            try
+            {
+                string p = Path.Combine(Path.GetTempPath(), "pmk_last_python.log");
+                if (File.Exists(p)) return File.ReadAllText(p);
+            }
+            catch { }
+            return "";
+        }
+
+        // MTK op မတိုင်ခင် auth bypass မလုပ်ရသေးဘူးဆို တစ်ခါပဲ သတိပေး (auto-run မလုပ်)
+        private void HintMtkAuthBypassIfNeeded(string fileName, string arguments)
+        {
+            try
+            {
+                bool mtk = fileName.Equals("mtk.exe", StringComparison.OrdinalIgnoreCase) ||
+                    (fileName.Equals("python", StringComparison.OrdinalIgnoreCase) &&
+                     arguments.IndexOf("pmk_mtk_op.py", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!mtk) return;
+                if (mtkFirmwareSessionProtected) return; // This workflow authenticates in its own DA session.
+                if (authBypassHintLogged) return;
+                // bypass အောင်သွားတာ 30 မိနစ်အတွင်းဆို hint မပေးတော့ဘူး
+                if (authBypassEverOk && DateTime.UtcNow - authBypassDoneUtc < TimeSpan.FromMinutes(30)) return;
+                authBypassHintLogged = true;
+                Log("[i] Auth bypass မလုပ်ရသေးဘူး — 'AUTH / MI ACCOUNT' ထဲက 'MTK Auth Bypass' ကို အရင်နှိပ်ပါ။", Color.Gainsboro);
+            }
+            catch { }
+        }
+
         private async Task<bool> RunMtkOpThenRebootAsync(string opArgs, string title)
         {
             // op + reset ကို BROM session တစ်ခုတည်းမှာ ပို့တယ်။ session အသစ် ထပ်မဖွင့်ရ —
@@ -5763,7 +6628,7 @@ namespace PMKUnlocker
             bool autoReboot = chkMtkAutoReboot != null && chkMtkAutoReboot.Checked;
             string cli = autoReboot ? opArgs + ";reset" : opArgs;
             bool ok = await ExecuteCommandCleanAsync("python",
-                BuildMtkOpArgs("multi \"" + cli + "\""),
+                BuildMtkMulti(cli),
                 autoReboot ? title + " + reset (Android reboot)" : title);
 
             if (!ok) return false;
@@ -5773,6 +6638,10 @@ namespace PMKUnlocker
                 Log("[i] Auto reboot is off - reboot the phone manually.", Color.Orange);
                 return true;
             }
+
+            // session အတွင်း reboot ပို့ပြီးသား — workflow ရဲ့ သီးခြား auto reboot
+            // (ဘေးခွဲ reset process) ကို ကျော် (double reboot/60s wait ကာကွယ်)
+            mtkRebootedInSession = true;
 
             // Post-op မှာ စာသား အနည်းဆုံးပဲ ပြတယ် (log မရှုပ်အောင်) — ဖုန်း ရောက်တဲ့ အခြေအနေကို
             // marker handler (ParseCleanLogAndProgress) က တစ်လိုင်းတည်း ပြပြီးသား။
@@ -5805,12 +6674,25 @@ namespace PMKUnlocker
             Log("   MTK DEVICE MODEL (proinfo / persist)", Color.White);
             Log("========================================================", Color.FromArgb(0, 180, 255));
 
+            // UnlockTool-style — USB connection တစ်ခါတည်းမှာ proinfo + persist ကို
+            // multi (r ...; r ...) နဲ့ တစ်ခါတည်း ဖတ် ([1/4] Port → [4/4] Op)။
+            string proFile = Path.Combine(tmpDir, "proinfo.bin");
+            string perFile = Path.Combine(tmpDir, "persist.bin");
+            string proFree, perFree;
+            if (MtkSpaceFree(proFile, out proFree) && MtkSpaceFree(perFile, out perFree))
+                await RunMtkMultiAsync("r proinfo " + proFree + "; r persist " + perFree,
+                    "MTK Device Model (proinfo + persist)", timeoutSec: 300);
+
             foreach (string part in new string[] { "proinfo", "persist" })
             {
                 string file = Path.Combine(tmpDir, part + ".bin");
-                bool got = await ExecuteCommandCleanAsync("mtk.exe",
-                    GetMtkTransportParam() + " r " + part + " \"" + file + "\"", "Read " + part);
-                if (!got || !File.Exists(file)) continue;
+                if (!File.Exists(file))
+                {
+                    // multi session မအောင်ရင် (ဥပမာ ဖိုင် မရ) — တစ်ခုချင်း session နဲ့ ပြန်ဖတ်
+                    bool got = await ExecuteCommandCleanAsync("mtk.exe",
+                        GetMtkTransportParam() + " r " + part + " \"" + file + "\"", "Read " + part);
+                    if (!got || !File.Exists(file)) continue;
+                }
 
                 List<string> found = ExtractProductInfo(file);
                 if (found.Count == 0)
@@ -5890,40 +6772,32 @@ namespace PMKUnlocker
             {
                 ClearPartitionData();
                 mtkFirmwareFolder = Path.GetDirectoryName(scatterPath) ?? "";
+                mtkScatterMap.Clear();
+                mtkFirmwarePkg = MtkFirmware.ScatterParser.Load(scatterPath);
                 SaveSettings();
 
-                string curName = null, curAddr = null, curSize = null;
-                bool curDownload = true;
-                int count = 0, invisible = 0;
-
-                Action flush = () =>
+                var pkg = mtkFirmwarePkg;
+                if (!pkg.FormatSupported)
                 {
-                    if (string.IsNullOrEmpty(curName)) return;
-                    AddPartitionRow(curName,
-                                    string.IsNullOrEmpty(curAddr) ? "-" : curAddr,
-                                    string.IsNullOrEmpty(curSize) ? "0x0" : curSize);
-                    count++;
-                    if (!curDownload) invisible++;
-                };
-
-                foreach (string raw in File.ReadAllLines(scatterPath))
-                {
-                    string line = raw.Trim();
-                    if (line.StartsWith("- partition_index"))
-                    {
-                        flush();
-                        curName = null; curAddr = null; curSize = null; curDownload = true;
-                    }
-                    else if (line.StartsWith("partition_name:"))
-                        curName = line.Substring("partition_name:".Length).Trim();
-                    else if (line.StartsWith("linear_start_addr:"))
-                        curAddr = line.Substring("linear_start_addr:".Length).Trim();
-                    else if (line.StartsWith("partition_size:"))
-                        curSize = line.Substring("partition_size:".Length).Trim();
-                    else if (line.StartsWith("is_download:"))
-                        curDownload = line.Substring("is_download:".Length).Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
+                    foreach (var issue in pkg.Issues) LogScatterIssue(issue);
+                    Log("[x] Scatter format မပံ့ပိုးပါ — flash မလုပ်ရသေးပါ (guess မလုပ်ပါ)။", Color.Red);
+                    txtScatterFolder.Text = mtkFirmwareFolder;
+                    return;
                 }
-                flush();
+
+                int count = 0, invisible = 0;
+                foreach (var entry in pkg.Entries)
+                {
+                    if (string.IsNullOrWhiteSpace(entry.Name)) continue;
+                    AddPartitionRow(entry.Name,
+                                    entry.NumbersValid ? entry.StartHex : "-",
+                                    entry.NumbersValid ? entry.SizeHex : "0x0");
+                    count++;
+                    if (!entry.IsDownload) invisible++;
+                    // flash map = is_download + file + structural check အောင်မြင်
+                    if (entry.Selectable)
+                        mtkScatterMap.Add((entry.Name, entry.FileName, entry.SizeHex, entry.StartHex));
+                }
 
                 txtScatterFolder.Text = mtkFirmwareFolder;
 
@@ -5932,8 +6806,16 @@ namespace PMKUnlocker
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("  • Scatter   : " + Path.GetFileName(scatterPath), Color.Cyan);
                 Log("  • Folder    : " + mtkFirmwareFolder, Color.Cyan);
+                Log("  • Platform  : " + (pkg.Platform ?? "?") + "  |  storage: " + (pkg.Storage ?? "?") +
+                    "  |  config: " + (pkg.ConfigVersion ?? "?"), Color.Cyan);
                 Log("  • Partitions: " + count + " rows" + (invisible > 0 ? " (incl. " + invisible + " with is_download=false)" : ""), Color.White);
-                Log("[*] Pressing START FLASH will write the .img files in the folder to their partitions.", Color.Orange);
+                Log("  • Flash map : " + mtkScatterMap.Count + " download entries (file ↔ partition)", Color.White);
+                foreach (var issue in pkg.Issues) LogScatterIssue(issue);
+                if (pkg.HasBlockingErrors)
+                    Log("[x] Blocking errors above — affected entries excluded; preflight will block flash until resolved.", Color.Red);
+                if (mtkScatterMap.Count == 0)
+                    Log("[x] Flashable partition မရှိပါ — START FLASH မနှိပ်ရသေးပါ။", Color.Red);
+                Log("[*] Pressing START FLASH writes images per the scatter map (scp.img → scp1+scp2 etc).", Color.Orange);
             }
             catch (Exception ex)
             {
@@ -5941,77 +6823,577 @@ namespace PMKUnlocker
             }
         }
 
+        private void LogScatterIssue(MtkFirmware.FirmwareIssue issue)
+        {
+            Color c = issue.Severity == MtkFirmware.IssueSeverity.Error ? Color.Red
+                    : issue.Severity == MtkFirmware.IssueSeverity.Warning ? Color.Orange : Color.Gray;
+            Log(issue.ToString(), c);
+        }
+
         private async void BtnMtkFlashScatter_Click(object sender, EventArgs e)
         {
             await RunFlashWorkflowAsync(BtnMtkFlashScatterAsync);
         }
 
+        // UnlockTool ပုံစံ partition tick table — tick မထားတဲ့ partition ကို flash မလုပ်။
+        // risk default (high-risk = untick), preflight panel + high-risk confirm ပါ။
+        // return: checked partition name set, null = cancel
+        private HashSet<string> ShowMtkFlashPartitionDialog(
+            List<(string Partition, string File, string SizeHex, string StartHex)> daMap,
+            List<(string Partition, string File, string SizeHex, string StartHex)> fbMap,
+            string folder, int missingCount, MtkFirmware.FirmwarePackage pkg)
+        {
+            using (var dlg = new Form())
+            {
+                dlg.Text = "MTK BROM Flash — Select Partitions (" + (pkg.Platform ?? "?") + ")";
+                dlg.Size = new Size(860, 650);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = lightTheme ? Color.FromArgb(222, 228, 240) : Color.FromArgb(18, 20, 24);
+                dlg.ForeColor = lightTheme ? Color.FromArgb(35, 38, 48) : Color.White;
+
+                var lblTop = new Label
+                {
+                    Text = "📁 " + Path.GetFileName(folder) +
+                           "  —  tick မထားတဲ့ partition = skip (flash မလုပ်)" +
+                           (missingCount > 0 ? "   |   missing file: " + missingCount + " ခု" : ""),
+                    Location = new Point(12, 10),
+                    AutoSize = true,
+                    ForeColor = lightTheme ? Color.FromArgb(58, 102, 208) : Color.FromArgb(86, 145, 250),
+                    Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+                };
+
+                var grid = new DataGridView
+                {
+                    Location = new Point(12, 36),
+                    Size = new Size(824, 392),
+                    AllowUserToAddRows = false,
+                    AllowUserToDeleteRows = false,
+                    AllowUserToResizeRows = false,
+                    ReadOnly = false,
+                    RowHeadersVisible = false,
+                    EditMode = DataGridViewEditMode.EditOnEnter,
+                    BackgroundColor = lightTheme ? Color.FromArgb(243, 246, 252) : Color.FromArgb(38, 42, 50),
+                    BorderStyle = BorderStyle.FixedSingle,
+                    EnableHeadersVisualStyles = false,
+                    Font = new Font("Consolas", 9f),
+                    ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                    {
+                        BackColor = lightTheme ? Color.FromArgb(58, 102, 208) : Color.FromArgb(30, 34, 42),
+                        ForeColor = Color.White,
+                        Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                        Alignment = DataGridViewContentAlignment.MiddleCenter
+                    },
+                    DefaultCellStyle = new DataGridViewCellStyle
+                    {
+                        BackColor = lightTheme ? Color.FromArgb(243, 246, 252) : Color.FromArgb(28, 31, 38),
+                        ForeColor = lightTheme ? Color.FromArgb(35, 38, 48) : Color.Gainsboro,
+                        SelectionBackColor = lightTheme ? Color.FromArgb(205, 220, 245) : Color.FromArgb(50, 62, 88),
+                        SelectionForeColor = lightTheme ? Color.FromArgb(35, 38, 48) : Color.White
+                    }
+                };
+                grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "✓", Width = 38 });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Partition", Width = 135, ReadOnly = true });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Phase", Width = 110, ReadOnly = true });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "File", Width = 175, ReadOnly = true });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Size", Width = 95, ReadOnly = true });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Start", Width = 95, ReadOnly = true });
+                grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status", Width = 170, ReadOnly = true });
+
+                bool EntryImageOk(MtkFirmware.ScatterEntry e) =>
+                    e != null && e.ImageExists && e.ImageError == null &&
+                    !(e.EffectiveImageSize is long es && es > e.Size);
+
+                bool EntryWritable(MtkFirmware.ScatterEntry e) =>
+                    e != null && e.Selectable && EntryImageOk(e) &&
+                    e.BromRegionSupported;
+
+                string EntryStatus(MtkFirmware.ScatterEntry e)
+                {
+                    if (e == null) return "unknown";
+                    if (e.LoadError != null) return "blocked: " + e.LoadError;
+                    if (!e.BromRegionSupported)
+                        return "blocked: storage region not supported";
+                    if (!e.Selectable) return "blocked: not downloadable";
+                    if (!e.ImageExists) return "MISSING file";
+                    if (e.ImageError != null) return "unreadable: " + e.ImageError;
+                    if (e.EffectiveImageSize is long es && es > e.Size) return "TOO BIG for partition";
+                    if (MtkFirmware.FlashRisk.Classify(e) == MtkFirmware.RiskLevel.HighRisk)
+                        return "risk: " + (MtkFirmware.FlashRisk.Reason(e) ?? "high-risk");
+                    return "ok";
+                }
+
+                bool DefaultTick(MtkFirmware.ScatterEntry e) =>
+                    EntryWritable(e) &&
+                    MtkFirmware.FlashRisk.Classify(e) == MtkFirmware.RiskLevel.Normal;
+
+                void AddDialogRow((string Partition, string File, string SizeHex, string StartHex) m, string phaseText)
+                {
+                    var e = pkg.Find(m.Partition);
+                    string status = EntryStatus(e);
+                    int idx = grid.Rows.Add(DefaultTick(e), m.Partition, phaseText, m.File,
+                        SafeFormatBytes(m.SizeHex), m.StartHex, status);
+                    bool blocked = !EntryWritable(e);
+                    if (blocked) grid.Rows[idx].Cells[0].ReadOnly = true;
+                    if (status.StartsWith("blocked") || status.StartsWith("MISSING") ||
+                        status.StartsWith("TOO BIG") || status.StartsWith("unreadable"))
+                        grid.Rows[idx].Cells[6].Style.ForeColor = Color.Firebrick;
+                    else if (status.StartsWith("risk"))
+                        grid.Rows[idx].Cells[6].Style.ForeColor = lightTheme ? Color.FromArgb(180, 110, 20) : Color.Orange;
+                    else
+                        grid.Rows[idx].Cells[6].Style.ForeColor = lightTheme ? Color.FromArgb(30, 120, 60) : Color.LightGreen;
+                }
+
+                foreach (var m in daMap) AddDialogRow(m, "BROM / DA");
+
+                var lblHint = new Label
+                {
+                    Text = "STOP = partition ပြီးမှ ရပ်မယ်။",
+                    Location = new Point(540, 474),
+                    AutoSize = true,
+                    ForeColor = lightTheme ? Color.FromArgb(90, 96, 110) : Color.FromArgb(150, 160, 175),
+                    Font = new Font("Segoe UI", 8.5f)
+                };
+
+                var lblPreflight = new Label
+                {
+                    Location = new Point(12, 494),
+                    Size = new Size(824, 140),
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Font = new Font("Consolas", 8.5f),
+                    ForeColor = lightTheme ? Color.FromArgb(60, 66, 80) : Color.FromArgb(160, 170, 185)
+                };
+
+                var btnAll = Create3DButton("✓ Select All", 12, 436, 130, 32, ButtonTheme.Cyan);
+                var btnNone = Create3DButton("✗ None", 150, 436, 110, 32, ButtonTheme.Orange);
+                var btnFlash = Create3DButton("⚡ Flash", 554, 436, 140, 32, ButtonTheme.Green);
+                var btnCancel = Create3DButton("Cancel", 704, 436, 130, 32, ButtonTheme.Red);
+                var chkHighRisk = new CheckBox
+                {
+                    Location = new Point(290, 441),
+                    Size = new Size(255, 24),
+                    Text = "⚠ Risk ပါတာတွေ ရေးရန် သဘောတူသည်",
+                    ForeColor = lightTheme ? Color.Firebrick : Color.Orange,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                    Visible = false
+                };
+                var chkGpt = new CheckBox
+                {
+                    Location = new Point(12, 471), Size = new Size(520, 23),
+                    Text = "GPT နှစ်ခု ပြန်ရေးမည် — လက်ရှိ storage အရွယ်အစား ထိန်းထားမည်",
+                    Checked = mtkRefreshGpt, ForeColor = lblHint.ForeColor,
+                    Font = new Font("Segoe UI", 8.5f)
+                };
+                dlg.Controls.Add(chkGpt);
+
+                var checkedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                void RefreshPreflight()
+                {
+                    checkedNames.Clear();
+                    foreach (DataGridViewRow r in grid.Rows)
+                        if (r.Cells[0].Value is bool b && b && r.Cells[1].Value is string p)
+                            checkedNames.Add(p);
+                    var report = MtkFirmware.FirmwarePreflight.Run(pkg, checkedNames.ToList(), null, MtkRealCaps);
+                    lblPreflight.Text =
+                        string.Join("   ", report.Checks.Select(c => c.Marker + " " + c.Name)) +
+                        Environment.NewLine + report.SummaryNote;
+                    lblPreflight.ForeColor = report.Overall == MtkFirmware.VerifyState.Mismatch
+                        ? Color.Firebrick
+                        : lightTheme ? Color.FromArgb(60, 66, 80) : Color.FromArgb(160, 170, 185);
+                    bool anyRisk = checkedNames.Any(n =>
+                    {
+                        var e = pkg.Find(n);
+                        return e != null && MtkFirmware.FlashRisk.Classify(e) == MtkFirmware.RiskLevel.HighRisk;
+                    });
+                    chkHighRisk.Visible = anyRisk;
+                    if (!anyRisk) chkHighRisk.Checked = false;
+                    btnFlash.Enabled = report.CanFlash;
+                    btnFlash.Text = report.CanFlash ? "⚡ Flash" : "⛔ Preflight blocked";
+                }
+
+                grid.CurrentCellDirtyStateChanged += (s, e) =>
+                {
+                    if (grid.CurrentCell is DataGridViewCheckBoxCell && grid.IsCurrentCellDirty)
+                        grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                };
+                grid.CellValueChanged += (s, e) => { if (e.ColumnIndex == 0) RefreshPreflight(); };
+
+                btnAll.Click += (s, e) =>
+                {
+                    foreach (DataGridViewRow r in grid.Rows)
+                        if (r.Cells[1].Value is string p)
+                            r.Cells[0].Value = EntryWritable(pkg.Find(p));
+                    RefreshPreflight();
+                };
+                btnNone.Click += (s, e) =>
+                {
+                    foreach (DataGridViewRow r in grid.Rows) r.Cells[0].Value = false;
+                    RefreshPreflight();
+                };
+                btnFlash.Click += (s, e) =>
+                {
+                    RefreshPreflight();
+                    if (checkedNames.Count == 0)
+                    {
+                        MessageBox.Show(dlg, "Partition တစ်ခု အနည်းဆုံး tick ပါ။", "Firmware Flash",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    if (!btnFlash.Enabled) return;
+                    if (chkHighRisk.Visible && !chkHighRisk.Checked)
+                    {
+                        MessageBox.Show(dlg,
+                            "High-risk partition ရွေးထားပါတယ် (userdata/txtable/preloader/NV စတာ)။\n\n" +
+                            "မှားရေးရင် data loss / brick ဖြစ်နိုင်တယ် — ဆက်လုပ်မှာ သေချာရင် checkbox ကို ခြစ်ပါ။",
+                            "High-risk confirm", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    dlg.DialogResult = DialogResult.OK;
+                    mtkRefreshGpt = chkGpt.Checked;
+                    dlg.Close();
+                };
+                btnCancel.Click += (s, e) => { dlg.DialogResult = DialogResult.Cancel; dlg.Close(); };
+                dlg.AcceptButton = btnFlash;
+                dlg.CancelButton = btnCancel;
+
+                dlg.Controls.AddRange(new Control[] { lblTop, grid, lblHint, lblPreflight, btnAll, btnNone, btnFlash, btnCancel, chkHighRisk });
+                RefreshPreflight();
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+
+                var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (DataGridViewRow r in grid.Rows)
+                    if (r.Cells[0].Value is bool b && b && r.Cells[1].Value is string p)
+                        result.Add(p);
+                return result;
+            }
+        }
+
+        private string SafeFormatBytes(string hexLength)
+        {
+            try { return FormatBytes(hexLength); } catch { return hexLength; }
+        }
+
         private async Task BtnMtkFlashScatterAsync()
         {
-            string firmwareFolder = mtkFirmwareFolder;
-            string transport = GetMtkTransportParam();
             bool backupFirst = chkMtkBackupNvFirst.Checked, skipUserdata = chkMtkSkipUserdata.Checked;
-            bool resetAfter = chkMtkResetFrpAfter.Checked;
 
-            if (string.IsNullOrEmpty(firmwareFolder) || !Directory.Exists(firmwareFolder))
+            if (mtkScatterMap.Count == 0)
             {
-                MessageBox.Show("Firmware folder မရွေးရသေးပါ — 📂 Scatter ခလုတ်နဲ့ scatter ဖိုင်ကို အရင် ရွေးပါ။",
+                MessageBox.Show("Scatter ဖိုင် မရွေးရသေးပါ — 📂 Scatter ခလုတ်နဲ့ scatter ဖိုင်ကို အရင် ရွေးပါ။",
                     "Firmware", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            int imgCount = 0;
-            try
+            if (mtkFirmwarePkg == null)
             {
-                imgCount = Directory.GetFiles(firmwareFolder, "*.img").Length
-                         + Directory.GetFiles(firmwareFolder, "*.bin").Length;
-            }
-            catch { }
-
-            if (imgCount == 0)
-            {
-                MessageBox.Show("Folder ထဲမှာ .img / .bin ဖိုင် မတွေ့ပါ။\n\n" + firmwareFolder,
+                MessageBox.Show("Scatter parse result မရှိပါ — 📂 Scatter ကို ပြန်ရွေးပါ။",
                     "Firmware", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (MessageBox.Show(
-                    "MTK Firmware Flash\n\n" +
-                    "• Folder : " + Path.GetFileName(firmwareFolder) + "\n" +
-                    "• ဖိုင်   : " + imgCount + " ခု (.img/.bin)\n\n" +
-                    "• ဖိုင်နာမည်နဲ့ ကိုက်တဲ့ partition တွေဆီ ရေးပါမယ်\n" +
-                    "• userdata ဖျက်ခံရနိုင်တယ် — ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ\n\n" +
-                    "ဆက်လုပ်မလား?",
-                    "Confirm Firmware Flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            var map = new List<(string Partition, string File, string SizeHex, string StartHex)>();
+            var missing = new List<string>();
+            foreach (var e in mtkScatterMap)
+            {
+                if (skipUserdata && e.Partition.Equals("userdata", StringComparison.OrdinalIgnoreCase)) continue;
+                string path = Path.Combine(mtkFirmwareFolder, e.File);
+                if (!File.Exists(path)) missing.Add(e.Partition + " <- " + e.File);
+                map.Add(e);
+            }
+            if (map.Count == 0)
+            {
+                MessageBox.Show("Scatter map ထဲက image ဖိုင်တွေ firmware folder မှာ မတွေ့ပါ။\n\n" + mtkFirmwareFolder,
+                    "Firmware", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+            }
+            foreach (string m in missing)
+                Log("[!] Missing image (dialog မှာ MISSING ပြမယ် — tick မရ): " + m, Color.Orange);
 
-            if (!await CheckMtkFirmwareAsync(firmwareFolder, transport, skipUserdata)) return;
+            // All selected images are written through the same BROM/DA backend.
+            // Address and size limits come from the live device, not a fixed 4GB cutoff.
+            var daMap = map.ToList();
+            var fbMap = new List<(string Partition, string File, string SizeHex, string StartHex)>();
 
-            // [Option] flash မလုပ်ခင် NVRAM/NVDATA (EFS) backup
+            // UnlockTool ပုံစံ tick table — untick = skip; cancel = ရပ်; preflight block ရင် flash မလုပ်
+            HashSet<string> selected = ShowMtkFlashPartitionDialog(daMap, fbMap, mtkFirmwareFolder,
+                missing.Count, mtkFirmwarePkg);
+            if (selected == null) return;
+            if (selected.Count == 0)
+            {
+                MessageBox.Show("Partition တစ်ခု အနည်းဆုံး tick ပါ။", "Firmware Flash",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            daMap.RemoveAll(m => !selected.Contains(m.Partition));
+            // Keep the preloader until all selected user-area images have completed.
+            daMap = daMap.OrderBy(m => m.Partition.Equals("preloader", StringComparison.OrdinalIgnoreCase) ? 1 : 0).ToList();
+            fbMap.RemoveAll(m => !selected.Contains(m.Partition));
+            if (!string.Equals(mtkFirmwarePkg.Storage, "EMMC", StringComparison.OrdinalIgnoreCase) ||
+                daMap.Any(m => mtkFirmwarePkg.Find(m.Partition)?.BromRegionSupported != true))
+            {
+                workflowFailed = true;
+                Log("[FAIL] Supported targets: eMMC USER and preloader in eMMC BOOT1/BOOT2. Nothing written.", Color.Red);
+                return;
+            }
+
+            // defense-in-depth — dialog preflight ကို plan ရောက်မှ ကျော်မရအောင် ထပ်စစ်
+            var dropped = new List<string>();
+            List<(string Partition, string File, string SizeHex, string StartHex)> StripBad(
+                List<(string Partition, string File, string SizeHex, string StartHex)> src)
+            {
+                var keep = new List<(string Partition, string File, string SizeHex, string StartHex)>();
+                foreach (var m in src)
+                {
+                    string path = Path.Combine(mtkFirmwareFolder, m.File);
+                    try
+                    {
+                        if (!File.Exists(path)) { dropped.Add(m.Partition + " (file missing)"); continue; }
+                        long cap = 0;
+                        try { cap = ReviewSafety.ParseSize(m.SizeHex); } catch { cap = 0; }
+                        long eff = ShopServices.ExpandedImageSize(path);
+                        if (cap > 0 && eff > cap) { dropped.Add(m.Partition + " (image > partition)"); continue; }
+                    }
+                    catch (Exception ex) { dropped.Add(m.Partition + " (" + ex.Message + ")"); continue; }
+                    keep.Add(m);
+                }
+                return keep;
+            }
+            daMap = StripBad(daMap);
+            fbMap = StripBad(fbMap);
+            foreach (string d in dropped)
+                Log("[x] Dropped from plan: " + d, Color.Red);
+            if (dropped.Count > 0)
+            {
+                workflowFailed = true;
+                Log("[FAIL] Firmware changed or became unreadable. Reload it and review the complete plan; nothing written.", Color.Red);
+                return;
+            }
+            if (daMap.Count == 0 && fbMap.Count == 0)
+            {
+                Log("[x] Flash plan အလွတ် — ဘာမှ မရေးပါ။", Color.Red);
+                return;
+            }
+            Log("[i] BROM flash plan: " + daMap.Count + " partitions selected.", Color.Cyan);
+
+            // [Option] flash မလုပ်ခင် NVRAM/NVDATA (EFS) backup — သီးသန့် session (BROM plug အသစ် လိုနိုင်)
             if (backupFirst)
             {
-                string nvDir = Path.Combine(firmwareFolder, "nv_backup_" + Guid.NewGuid().ToString("N"));
-                if (!await BackupNvAsync(nvDir, transport)) return;
+                Log("[i] NV Backup = သီးသန့် session — flash အတွက် ဖုန်းကို BROM ပြန်ချိတ်ရမယ်။", Color.Cyan);
+                string nvDir = Path.Combine(mtkFirmwareFolder, "nv_backup_" + Guid.NewGuid().ToString("N"));
+                using (MtkForceUsbTransport())
+                {
+                    if (!await BackupNvAsync(nvDir, MtkGlobalFileArgs())) return;
+                }
             }
 
-            string wlArgs = transport + " wl \"" + firmwareFolder + "\"";
-            if (skipUserdata) wlArgs += " --skip userdata";
-
-            bool ok = await ExecuteCommandCleanAsync("mtk.exe", wlArgs,
-                "MTK Firmware Flash (" + imgCount + " images" + (skipUserdata ? ", skip userdata" : "") + ")");
-
-            if (!ok) return;
-
-            Log("[OK] Firmware flash completed.", Color.LightGreen);
-
-            // [Option] flash ပြီးရင် FRP reset
-            if (resetAfter)
+            // One BROM/DA write session; no Fastboot handoff.
+            string flashFolder = mtkFirmwareFolder;
+            if (flashFolder.IndexOf(' ') >= 0)
             {
-                Log("[*] [Option] Erasing FRP partition (frp + config) after flash...", Color.Orange);
-                if (!await ExecuteCommandCleanAsync("mtk.exe", transport + " e frp,config", "Reset FRP (post-flash)")) return;
+                if (MtkSpaceFree(mtkFirmwareFolder, out string flashFree)) flashFolder = flashFree;
+                else
+                {
+                    workflowFailed = true;
+                    Log("[FAIL] Backend cannot safely parse this firmware path. Use a folder without spaces; nothing written.", Color.Red);
+                    return;
+                }
             }
 
-            // Auto reboot — RunFlashWorkflowAsync က workflow ပြီးမှ တစ်ခါတည်း ပြန်ပို့တယ်။
+            if (mtkFlashState != MtkFirmware.FlashOperationState.Idle)
+            {
+                Log("[!] flash state was " + mtkFlashState + " — resetting to Idle", Color.Orange);
+                mtkFlashState = MtkFirmware.FlashOperationState.Idle;
+            }
+
+            var plan = new MtkFirmware.FlashPlan { Package = mtkFirmwarePkg };
+            void AddPlanItems(List<(string Partition, string File, string SizeHex, string StartHex)> items, string phase)
+            {
+                foreach (var m in items)
+                {
+                    long st = 0, sz = 0;
+                    try { st = ReviewSafety.ParseSize(m.StartHex); } catch { st = 0; }
+                    try { sz = ReviewSafety.ParseSize(m.SizeHex); } catch { sz = 0; }
+                    var pkgE = mtkFirmwarePkg?.Find(m.Partition);
+                    plan.Items.Add(new MtkFirmware.FlashPlanItem
+                    {
+                        Partition = m.Partition,
+                        Phase = phase,
+                        ImagePath = Path.Combine(flashFolder, m.File),
+                        SizeBytes = sz,
+                        LinearStart = st,
+                        Risk = pkgE != null ? MtkFirmware.FlashRisk.Classify(pkgE) : MtkFirmware.RiskLevel.Normal
+                    });
+                }
+            }
+            AddPlanItems(daMap, "BROM");
+
+            async Task<MtkFirmware.PhaseOutcome> BromPhaseAsync(
+                MtkFirmware.FlashPlan fp, IProgress<MtkFirmware.FlashProgress> progress, CancellationToken ct)
+            {
+                AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Writing);
+                var outcome = new MtkFirmware.PhaseOutcome();
+                if (stopRequested || IsDisposed) throw new OperationCanceledException();
+
+                string cmds;
+                if (daMap.Count > 0)
+                {
+                    string partsArg = string.Join(",", daMap.Select(m => m.Partition));
+                    string filesArg = string.Join(",", daMap.Select(m => Path.Combine(flashFolder, m.File)));
+                    cmds = "printgpt; w \"" + partsArg + "\" \"" + filesArg + "\"";
+                    // Firmware flashing must only perform writes shown in the reviewed plan.
+                }
+                else cmds = "printgpt";
+                cmds += "; reset";
+                string wTitle = "MTK BROM Firmware Flash (" + daMap.Count + " partitions → reboot)";
+
+                mtkFlashPlanFiles = daMap.Select(m => m.File).ToList();
+                mtkFlashPlanSizes = daMap.Select(m => ReviewSafety.ParseSize(m.SizeHex)).ToList();
+                mtkFlashDoneCount = 0;
+                mtkFlashAnnouncedCount = 0;
+                mtkFlashFileSeen.Clear();
+
+                bool ok;
+                string cancelPath = Path.Combine(Path.GetTempPath(), "pmk-flash-cancel-" + Guid.NewGuid().ToString("N"));
+                var guardPlan = new
+                {
+                    platform = mtkFirmwarePkg.Platform,
+                    storage = mtkFirmwarePkg.Storage,
+                    refresh_gpt = mtkRefreshGpt,
+                    cancel = cancelPath,
+                    backup = Path.Combine(ShopServices.DataDirectory, "Backups", "preloader-" + Guid.NewGuid().ToString("N")),
+                    items = daMap.Select(m => new
+                    {
+                        name = m.Partition,
+                        path = Path.Combine(flashFolder, m.File),
+                        start = mtkFirmwarePkg.Find(m.Partition).PhysicalStart,
+                        size = mtkFirmwarePkg.Find(m.Partition).Size,
+                        region = mtkFirmwarePkg.Find(m.Partition).RegionRaw,
+                        hash = ShopServices.Hash(Path.Combine(flashFolder, m.File))
+                    }).ToArray()
+                };
+                if (guardPlan.items.Any(i => !Regex.IsMatch(i.name, @"^[A-Za-z0-9_\-]+$") ||
+                    i.path.IndexOfAny(new[] { ',', ';', '"', '\r', '\n' }) >= 0))
+                    throw new InvalidDataException("Firmware names contain unsupported backend command separators.");
+                mtkFirmwareCancelPath = cancelPath;
+                mtkWrittenEvidence.Clear();
+                mtkFirmwareSessionProtected = true;
+                lastMtkBootState = "";
+                try
+                {
+                    using (MtkForceUsbTransport())
+                    using (MtkBootmodeNormal())
+                    using (new MtkEnvScope("PMK_FLASH_PLAN", System.Text.Json.JsonSerializer.Serialize(guardPlan)))
+                    using (new MtkEnvScope("PMK_MTK_CRASH_RETRIES", "0"))
+                    using (new MtkEnvScope("PMK_MTK_CONNECT_RETRIES", "1"))
+                    {
+                        ok = await RunMtkMultiAsync(cmds, wTitle, timeoutSec: 0);
+                    }
+                }
+                finally
+                {
+                    mtkFirmwareSessionProtected = false;
+                    mtkFirmwareCancelPath = null;
+                    if (File.Exists(cancelPath)) File.Delete(cancelPath);
+                    mtkFlashPlanFiles = new();
+                    mtkFlashPlanSizes = new();
+                }
+
+                if (stopRequested || IsDisposed) throw new OperationCanceledException();
+                if (!ok)
+                {
+                    outcome.Failed.Add(("(BROM phase)", MtkFirmware.ErrorCategory.Write,
+                        "mtkclient session failed — see log"));
+                    outcome.StopFurtherPhases = true;
+                    outcome.AbortCategory = MtkFirmware.ErrorCategory.Connection;
+                    AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Failed);
+                    return outcome;
+                }
+
+                foreach (var m in daMap) outcome.Written.Add(m.Partition);
+                Log("[OK] BROM write session done (" + daMap.Count + " partitions).", Color.LightGreen);
+                AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Completed);
+                return outcome;
+            }
+
+            // real backend = interface ကတစ်ဆင့် — phases ကို delegate အဖြစ် inject
+            var adapter = new MtkFirmware.MtkBackendAdapter(BromPhaseAsync,
+                (fp, progress, ct) => throw new InvalidOperationException("Fastboot handoff is disabled for BROM firmware flashing."));
+            AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Connecting);
+            mtkWrittenEvidence.Clear();
+            MtkFirmware.FlashResult result = await adapter.FlashAsync(plan,
+                new Progress<MtkFirmware.FlashProgress>(p =>
+                {
+                    if (!string.IsNullOrEmpty(p.Message)) Log("[i] " + p.Message, Color.Gray);
+                }),
+                CancellationToken.None);
+
+            // Preserve completed writes even when the phase throws or returns failure.
+            result.Written.Clear();
+            result.Written.AddRange(plan.Items.Where(i => mtkWrittenEvidence.ContainsKey(i.Partition)).Select(i => i.Partition));
+            foreach (var item in plan.Items.Where(i => !mtkWrittenEvidence.ContainsKey(i.Partition)))
+                result.Skipped.Add((item.Partition, "completion not confirmed; may be partially written"));
+            if (result.Written.Count != plan.Items.Count) result.Success = false;
+
+            if (result.Cancelled)
+            {
+                AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Interrupted,
+                    MtkFirmware.FlashOperationState.Idle);
+                Log("[!] Flash cancelled — written " + result.Written.Count +
+                    ", skipped " + result.Skipped.Count + ".", Color.Orange);
+                Log(result.BuildHonestSummary(), Color.Orange);
+                return;
+            }
+            result.BackendNote = "Backend: mtkclient BROM/DA. No post-write readback performed.";
+            if (result.Success && daMap.Any(m => m.Partition.Equals("preloader", StringComparison.OrdinalIgnoreCase)))
+            {
+                result.Verification = MtkFirmware.VerificationState.PreloaderReadback;
+                result.BackendNote = "Backend: mtkclient BROM/DA. Preloader boot-region readback verified; backups saved under Backups. USER partitions have no post-write readback.";
+            }
+            if (result.Success)
+            {
+                if (mtkRefreshGpt)
+                {
+                    bool preloaderWritten = daMap.Any(m => m.Partition.Equals("preloader", StringComparison.OrdinalIgnoreCase));
+                    result.Verification = preloaderWritten ? MtkFirmware.VerificationState.GptAndPreloaderReadback : MtkFirmware.VerificationState.GptReadback;
+                    result.BackendNote = "Backend: mtkclient BROM/DA. GPT copies refreshed and readback verified; partition capacity preserved. " +
+                        (preloaderWritten ? "Preloader readback verified. " : "") + "Firmware USER partitions have no readback. Backups saved under Backups.";
+                }
+                result.DeviceBootState = lastMtkBootState switch
+                {
+                    "OK" => "Android USB/ADB detected; check Home screen on the phone",
+                    "ATTACHED" => "device remains in download mode; Android boot unconfirmed",
+                    "MANUAL" => "automatic boot not confirmed; check phone and USB connection",
+                    "LIKELY" => "USB disconnected after reset; Android boot unconfirmed",
+                    _ => "device reset issued; Android boot unconfirmed"
+                };
+            }
+            Log(result.BuildHonestSummary(), result.Success ? Color.LightGreen : Color.Red);
+            AdvanceMtkFlashState(MtkFirmware.FlashOperationState.Idle);
+            if (!result.Success)
+            {
+                workflowFailed = true;
+                return;
+            }
+
+            mtkRebootedInSession = true;
+            _ = WaitAndroidAfterRebootAsync();
+        }
+
+        private void AdvanceMtkFlashState(params MtkFirmware.FlashOperationState[] steps)
+        {
+            foreach (var to in steps)
+            {
+                if (MtkFirmware.FlashStateMachine.TryTransition(ref mtkFlashState, to))
+                    Log("[i] flash state → " + to, Color.Gray);
+                else
+                {
+                    Log("[!] flash state refused " + mtkFlashState + " → " + to, Color.Orange);
+                    return;
+                }
+            }
         }
 
         private async void BtnMtkNvBackup_Click(object sender, EventArgs e)
@@ -6039,10 +7421,10 @@ namespace PMKUnlocker
 
             await RunFlashWorkflowAsync(async () =>
             {
-                string transport = GetMtkTransportParam();
                 // mtkclient `e` က comma-sep multi-erase support — တစ်ခါတည်း format
-                bool ok = await ExecuteCommandCleanAsync("mtk.exe", transport + " e nvram,nvdata",
-                    "NV Erase (nvram + nvdata)", quiet: true);
+                // (python path = [1/4]..[4/4] stages + transport auto-detect)
+                bool ok = await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("e nvram,nvdata"),
+                    "NV Erase (nvram + nvdata)", quiet: true, timeoutSec: 300);
                 if (ok)
                     Log("[OK] Erased: nvram, nvdata", Color.LightGreen);
             });
@@ -6113,7 +7495,7 @@ namespace PMKUnlocker
             await RunFlashWorkflowAsync(async () =>
             {
                 string transport = GetMtkTransportParam();
-                if (!await ExecuteCommandCleanAsync("mtk.exe", transport + " printgpt", "Verify restore device GPT", clearPartitions: true)) return;
+                if (!await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("printgpt"), "Verify restore device GPT", clearPartitions: true, timeoutSec: 300)) return;
                 var layout = CurrentLayout();
                 var manifest = await Task.Run(() => ShopServices.VerifyBackup(dir, layout));
                 foreach (var entry in found)
@@ -6124,8 +7506,49 @@ namespace PMKUnlocker
                     "Restore device identity", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 { workflowFailed = true; return; }
 
-                // path ထဲ comma ပါရင် sequential ပို safe — sequential call သုံးတယ်
+                // UnlockTool-style — USB connection တစ်ခါတည်းမှာ backup file အကုန်
+                // ပြန်ရေး (multi)။ path ထဲ space မပါအောင် temp staging (short path) ကို
+                // ကူးပြီးမှ ရေးတယ် — multi မအောင်ရင် အောက်က per-file session နဲ့ ပြန်ကြိုးစား။
                 int okCount = 0;
+                bool multiDone = false;
+                string rsStage = Path.Combine(Path.GetTempPath(), "pmk_rs_stage");
+                string rsStageFree;
+                try { Directory.CreateDirectory(rsStage); } catch { }
+                if (Directory.Exists(rsStage) && MtkSpaceFree(rsStage, out rsStageFree))
+                {
+                    var rsCmds = new List<string>();
+                    foreach (var (name, path) in found)
+                    {
+                        try
+                        {
+                            string stageFile = Path.Combine(rsStage, name + ".bin");
+                            File.Copy(path, stageFile, true);
+                            rsCmds.Add("w " + name + " " + Path.Combine(rsStageFree, name + ".bin"));
+                        }
+                        catch (Exception ex) { Log("[!] NV Restore stage " + name + ": " + ex.Message, Color.Orange); }
+                    }
+                    if (rsCmds.Count > 0)
+                    {
+                        using (MtkTolerateMissing())
+                            multiDone = await ExecuteCommandCleanAsync("python", BuildMtkMulti(string.Join("; ", rsCmds)),
+                                "NV Restore (single session)", quiet: true, timeoutSec: 900);
+                    }
+                    if (multiDone)
+                    {
+                        okCount = found.Count;
+                        foreach (var (name, path) in found)
+                        {
+                            long len = 0;
+                            try { len = new FileInfo(path).Length; } catch { }
+                            Log("[OK] " + name + " — " + FormatMb(len), Color.LightGreen);
+                        }
+                    }
+                    CleanupMtkStage(rsStage);
+                }
+
+                if (!multiDone)
+                {
+                // path ထဲ comma ပါရင် sequential ပို safe — sequential call သုံးတယ်
                 foreach (var (name, path) in found)
                 {
                     if (stopRequested) break;
@@ -6138,6 +7561,7 @@ namespace PMKUnlocker
                         try { len = new FileInfo(path).Length; } catch { }
                         Log("[OK] " + name + " — " + FormatMb(len), Color.LightGreen);
                     }
+                }
                 }
                 if (okCount == found.Count)
                     Log("[OK] NV Restore complete: " + okCount + "/" + found.Count + " file(s).", Color.LightGreen);
@@ -6182,7 +7606,8 @@ namespace PMKUnlocker
         private async Task<bool> BackupSafeBundleAsyncCore(string directory, string transport)
         {
             // GPT ကန် size အတည်ပြု — မရှိတဲ့ partition ကို skip, ရှိတာမှ verify
-            if (!await ExecuteCommandCleanAsync("mtk.exe", transport + " printgpt", "Read GPT for Safe Bundle", clearPartitions: true))
+            if (!await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("printgpt"), "Read GPT for Safe Bundle",
+                clearPartitions: true, timeoutSec: 300))
                 return false;
 
             string[] names =
@@ -6215,12 +7640,39 @@ namespace PMKUnlocker
             }
 
             Log("[🛡] Safe Bundle: dumping " + present.Count + " critical partition(s)...", Color.Cyan);
+
+            // USB connection တစ်ခါတည်း (multi) နဲ့ အကုန် ဖတ် — temp staging (space-free)
+            // ကတစ်ဆင့် ဖတ်ပြီးမှ user folder ကို ကူးတယ်။
+            string sbStage = Path.Combine(Path.GetTempPath(), "pmk_sb_stage");
+            try { Directory.CreateDirectory(sbStage); } catch { }
+            string sbStageFree;
+            if (Directory.Exists(sbStage) && MtkSpaceFree(sbStage, out sbStageFree))
+            {
+                var sbCmds = new List<string>();
+                foreach (string name in present)
+                    sbCmds.Add("r " + name + " " + Path.Combine(sbStageFree, name + ".bin"));
+                await RunMtkMultiAsync(string.Join("; ", sbCmds), "Safe Bundle (single session)",
+                    quiet: true, timeoutSec: 900);
+                foreach (string name in present)
+                {
+                    string src = Path.Combine(sbStage, name + ".bin");
+                    if (!File.Exists(src)) continue;
+                    try { File.Copy(src, Path.Combine(directory, name + ".bin"), true); }
+                    catch (Exception ex) { Log("[!] Safe Bundle copy " + name + ": " + ex.Message, Color.Orange); }
+                }
+                CleanupMtkStage(sbStage);
+            }
+
             int done = await ReviewSafety.RunSequenceAsync(present.Count, () => stopRequested, async i =>
             {
                 string name = present[i];
                 string path = Path.Combine(directory, name + ".bin");
-                bool ok = await ExecuteCommandCleanAsync("mtk.exe", transport + " r " + name + " \"" + path + "\"", "Safe Bundle " + name);
-                if (!ok) return false;
+                if (!ReviewSafety.HasBackup(path, sizes[name]))
+                {
+                    // staging မမီ/မပြည့်တာ — တစ်ခုချင်း session နဲ့ ပြန်ဖတ်
+                    bool ok = await ExecuteCommandCleanAsync("mtk.exe", transport + " r " + name + " \"" + path + "\"", "Safe Bundle " + name);
+                    if (!ok) return false;
+                }
                 if (ReviewSafety.HasBackup(path, sizes[name])) return true;
                 Log("[FAIL] Safe Bundle size mismatch: " + name + "; expected " + sizes[name] + " bytes.", Color.Red);
                 return false;
@@ -6278,8 +7730,8 @@ namespace PMKUnlocker
         private async Task<bool> BackupNvAsyncCore(string directory, string transport)
         {
             // Read the attached device's GPT; do not trust a previous device or firmware's sizes.
-            if (!await ExecuteCommandCleanAsync("mtk.exe", transport + " printgpt", "Read NV partition sizes",
-                    clearPartitions: true, quiet: true)) return false;
+            if (!await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("printgpt"), "Read NV partition sizes",
+                    clearPartitions: true, quiet: true, timeoutSec: 300)) return false;
 
             // Safe Bundle လို pattern — GPT ထဲ မရှိတဲ့ partition ကို skip (throw မလုပ်)
             var present = new List<string>();
@@ -6306,13 +7758,41 @@ namespace PMKUnlocker
 
             Directory.CreateDirectory(directory);
             Log("[💾] NV Backup — " + present.Count + " file(s): " + string.Join(", ", present), Color.Cyan);
+
+            // UnlockTool-style — USB connection တစ်ခါတည်းမှာ partition အကုန် ဖတ် (multi)။
+            // path ထဲ space မပါအောင် temp staging ကို short path နဲ့သုံးပြီး ဖတ်၊ ပြီးမှ user
+            // folder ကို ကူးတယ် (short path မရရင် အောက်က per-partition session ပဲ ဆက်သုံး)။
+            string nvStage = Path.Combine(Path.GetTempPath(), "pmk_nv_stage");
+            try { Directory.CreateDirectory(nvStage); } catch { }
+            string nvStageFree;
+            if (Directory.Exists(nvStage) && MtkSpaceFree(nvStage, out nvStageFree))
+            {
+                var nvCmds = new List<string>();
+                foreach (string name in present)
+                    nvCmds.Add("r " + name + " " + Path.Combine(nvStageFree, name + ".bin"));
+                await RunMtkMultiAsync(string.Join("; ", nvCmds), "NV Backup (single session)",
+                    quiet: true, timeoutSec: 900);
+                foreach (string name in present)
+                {
+                    string src = Path.Combine(nvStage, name + ".bin");
+                    if (!File.Exists(src)) continue;
+                    try { File.Copy(src, Path.Combine(directory, name + ".bin"), true); }
+                    catch (Exception ex) { Log("[!] NV Backup copy " + name + ": " + ex.Message, Color.Orange); }
+                }
+                CleanupMtkStage(nvStage);
+            }
+
             int done = await ReviewSafety.RunSequenceAsync(present.Count, () => stopRequested, async i =>
             {
                 string name = present[i];
                 string path = Path.Combine(directory, name + ".bin");
-                bool ok = await ExecuteCommandCleanAsync("mtk.exe",
-                    transport + " r " + name + " \"" + path + "\"", "Backup " + name, quiet: true);
-                if (!ok) return false;
+                if (!ReviewSafety.HasBackup(path, sizes[name]))
+                {
+                    // staging မမီ/မပြည့်တာ — တစ်ခုချင်း session နဲ့ ပြန်ဖတ်
+                    bool ok = await ExecuteCommandCleanAsync("mtk.exe",
+                        transport + " r " + name + " \"" + path + "\"", "Backup " + name, quiet: true);
+                    if (!ok) return false;
+                }
                 if (!ReviewSafety.HasBackup(path, sizes[name]))
                 {
                     Log("[FAIL] " + name + " size mismatch: expected " + FormatMb(sizes[name]) +
@@ -6340,6 +7820,15 @@ namespace PMKUnlocker
             string auto = DetectMtkComPort();
             string s = string.IsNullOrEmpty(auto) ? "" : " --serialport " + auto;
             // MTK picker ရွေးထားတဲ့ DA / Auth / Preloader — mtkclient global options (subcommand မတိုင်ခင် ထည့်ရ)
+            return s + MtkGlobalFileArgs();
+        }
+
+        // MTK picker (DA / Auth / Preloader) ကနေရတဲ့ mtkclient global options။
+        // python ops (pmk_mtk_op.py) ကိုလည်း ဒါတွေပဲ ပို့ရတယ် — preloader မပို့ရင်
+        // DRAM/EMI setup မရှိဘဲ DA stage 2 တက်ရာမှာ ဖုန်းက USB ပြတ်ပြီး exit 20 ဖြစ်တယ်။
+        private string MtkGlobalFileArgs()
+        {
+            string s = "";
             if (File.Exists(mtkDaPath)) s += " --loader \"" + mtkDaPath + "\"";
             if (File.Exists(mtkAuthPath)) s += " --auth \"" + mtkAuthPath + "\"";
             if (File.Exists(mtkPreloaderPath)) s += " --preloader \"" + mtkPreloaderPath + "\"";
@@ -6360,7 +7849,107 @@ namespace PMKUnlocker
         private string BuildMtkOpArgs(string cliArgs)
         {
             string script = Path.Combine(Application.StartupPath, "pmk_mtk_op.py");
-            return "\"" + script + "\" " + cliArgs;
+            foreach (string helper in new[] { "pmk_mtk_op.py", "pmk_flash_guard.py", "pmk_sparse.py", "pmk_gpt.py" })
+                ToolIntegrity.Verify(Path.Combine(Application.StartupPath, helper));
+            // DA / Auth / Preloader globals က subcommand (multi/printgpt) မတိုင်ခင် ပါရမယ်
+            // (mtkclient argparse global options — subcommand နောက်ထားရင် မသိဘူး)
+            // -u: stdout unbuffered — process exit အချိန်မှာ flush စောင့်နေတဲ့ tail lines
+            // (PMK_OK/kick log) ကို WaitForExit(int) race မှာ မဆုံးရှုံးအောင်
+            return "-u \"" + script + "\"" + MtkGlobalFileArgs() + " " + cliArgs;
+        }
+
+        // ================= SINGLE-PLUG MULTI SESSION (UNLOCKTOOL ပုံစံ) =================
+        // mtkclient `multi` က USB connection တစ်ခါတည်းမှာ command တွေကို စီတန်း လုပ်တယ်
+        // (mtk_main.py multi → connect တစ်ခါ + handle_da_cmds loop)။ ဒါပေမယ် inner
+        // command တွေကို space နဲ့ split လုပ်လို့ path ထဲမှာ space မပါရ — 8.3 short path
+        // ပြောင်းပေးတယ် (မရရင် false → caller က တစ်ခုချင်း session နဲ့ ပြန်ဆက်တယ်)။
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetShortPathName(string lpszLongPath, StringBuilder lpszShortPath, int cchBuffer);
+
+        private static bool MtkSpaceFree(string path, out string free)
+        {
+            free = path;
+            if (string.IsNullOrEmpty(path)) return false;
+            if (path.IndexOf(' ') < 0) return true;
+            try
+            {
+                var sb = new StringBuilder(600);
+                int n = GetShortPathName(path, sb, sb.Capacity);
+                if (n > 0 && n <= sb.Capacity)
+                {
+                    string s = sb.ToString();
+                    if (s.Length > 0 && s.IndexOf(' ') < 0) { free = s; return true; }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // multi session မှာ ဒီ device မရှိတဲ့ partition ကို skip ခွင့်ပြု — မရှိတာ တစ်ခုကြောင့်
+        // session တစ်ခုလုံးကို fail မလုပ်စေ (single op တွေမှာ မသုံး — partial erase ကို မဖုံးဖျက်)။
+        private sealed class MtkEnvScope : IDisposable
+        {
+            private readonly string key;
+            private readonly string prev;
+            public MtkEnvScope(string k, string v)
+            {
+                key = k;
+                prev = Environment.GetEnvironmentVariable(k);
+                Environment.SetEnvironmentVariable(k, v);
+            }
+            public void Dispose() { Environment.SetEnvironmentVariable(key, prev); }
+        }
+        private static IDisposable MtkTolerateMissing()
+        {
+            return new MtkEnvScope("PMK_MTK_TOLERATE_MISSING", "1");
+        }
+        // preflight session က ကျန်ခဲ့တဲ့ stale COM port ကြောင့် serial/VCOM auto-pick မဖြစ်အောင်
+        // USB (libusb) transport ကို အတင်းသုံး — BROM path က ဒီ device မှာ အလုပ်လုပ်တဲ့ လမ်း
+        private static IDisposable MtkForceUsbTransport()
+        {
+            return new MtkEnvScope("PMK_MTK_SERIAL", "off");
+        }
+
+        private static IDisposable MtkBootmodeNormal()
+        {
+            // phase1-only flash (fbMap မရှိ) ပြီးရင် Android ပြန်တက်အောင် (MST လို) —
+            // env က file override (%TEMP%\pmk_bootmode.txt) ကို ကျော်နိုင်အောင်
+            // python ဘက်မှာ env ကို ပိုအားကိုး
+            return new MtkEnvScope("PMK_MTK_BOOTMODE", "1");
+        }
+
+        private static IDisposable MtkBootmodeFastboot()
+        {
+            // hybrid flash phase1 → phase2 handoff: reset bootmode=2 (fastboot) နဲ့
+            // LK fastboot ၀င်လာအောင် — phase2 (super/vbmeta/cache/userdata) ကို
+            // fastboot flash နဲ့ဆက်ရေးပြီးမှ fastboot reboot → Android
+            return new MtkEnvScope("PMK_MTK_BOOTMODE", "2");
+        }
+
+        // USB connection တစ်ခါတည်းနဲ့ command sequence တစ်ခုလုံး ဆောင်ရွက်
+        private async Task<bool> RunMtkMultiAsync(string cmds, string title,
+            bool quiet = false, int timeoutSec = 900, bool clearPartitions = false)
+        {
+            using (MtkTolerateMissing())
+                return await ExecuteCommandCleanAsync("python", BuildMtkMulti(cmds), title,
+                    clearPartitions: clearPartitions, quiet: quiet, timeoutSec: timeoutSec);
+        }
+
+        private string BuildMtkMulti(string cmds)
+        {
+            // mtkclient `multi` က ';' နဲ့ခွဲပြီး sub-cmd ကို split(" ") နဲ့ parse တယ် —
+            // "; reset" လို space ပါရင် ပထမ token က '' ဖြစ်ပြီး argparse error
+            // (invalid choice: '') ထွက်တယ်။ ';' နောက်က space တွေ ဖယ်တယ်။
+            // (python ဘက်မှာလည်း normalize လုပ်ထားတယ် — double safety)
+            cmds = Regex.Replace(cmds, @";\s+", ";").Trim();
+            return BuildMtkOpArgs("multi \"" + cmds + "\"");
+        }
+
+        // multi session အတွက် temp staging ထဲ ကူးထားတဲ့ NV/backup ဖိုင်တွေကို
+        // ပြီးရင် ဖျက် (backup data ကို temp မှာ ကျန်မနေစေ)။
+        private static void CleanupMtkStage(string dir)
+        {
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
         }
 
         private void TabControl_DrawItem(object sender, DrawItemEventArgs e)
@@ -6392,26 +7981,26 @@ namespace PMKUnlocker
 
 
         // ================= TAB UI GRID =================
-        // Tab တိုင်းရဲ့ ခလုတ်တွေ တစ်ပုံစံတည်း နေရာကျအောင် — button 160x36၊
-        // column step 165 (x = 15, 180, 345, 510, 675, 840)၊ row step 43 (y = 15, 58, 101, 144, 187)
-        private const int UiBtnW = 160;
-        private const int UiBtnH = 36;
+        // Tab တိုင်းရဲ့ ခလုတ်တွေ တစ်ပုံစံတည်း နေရာကျအောင် — button 150x32 (MST density)၊
+        // column step 155 (x = 15, 170, 325, 480, 635, 790)၊ row step 40 (y = 15, 55, 95, 135, 175)
+        private const int UiBtnW = 150;
+        private const int UiBtnH = 32;
         private const int UiColX0 = 15;
-        private const int UiColStep = 165;
+        private const int UiColStep = 155;
         private const int UiRowY0 = 15;
-        private const int UiRowStep = 43;
+        private const int UiRowStep = 40;
         private static int UiX(int col) { return UiColX0 + col * UiColStep; }
         private static int UiY(int row) { return UiRowY0 + row * UiRowStep; }
 
         public enum ButtonTheme { Cyan, Green, Orange, Red, Purple }
 
         // ================= GROUP PANEL (unlock tool ပုံစံ အုပ်စုဘောင်) =================
-        // ခလုတ်တွေကို ခေါင်းစဉ်ပါတဲ့ ဘောင်တစ်ခုစီ ခွဲထည့်တယ် — auto grid (160x36၊ col step 165၊ row step 43)
+        // ခလုတ်တွေကို ခေါင်းစဉ်ပါတဲ့ ဘောင်တစ်ခုစီ ခွဲထည့်တယ် — auto grid (150x32၊ col step 155၊ row step 40)
         private Panel CreateGroupPanel(string title, int x, int y, int cols, params Control[] children)
         {
             int rows = (children.Length + cols - 1) / cols;
-            int w = cols * 165 + 15;
-            int h = 72 + (rows - 1) * 43;
+            int w = cols * UiColStep + 15;
+            int h = 64 + (rows - 1) * UiRowStep;
 
             Panel p = new Panel
             {
@@ -6436,7 +8025,7 @@ namespace PMKUnlocker
             {
                 Control c = children[i];
                 p.Controls.Add(c);
-                c.Location = new Point(10 + (i % cols) * 165, 26 + (i / cols) * 43);
+                c.Location = new Point(10 + (i % cols) * UiColStep, 26 + (i / cols) * UiRowStep);
             }
             return p;
         }
@@ -6601,6 +8190,29 @@ namespace PMKUnlocker
             catch (InvalidOperationException) { }
         }
 
+        // စာကြောင်းတူကို ခဏအတွင်း ထပ်မရေး — mtkclient က DA/bypass marker ၂ကြိမ်
+        // ပို့လို့ "[OK] Bypassing authentication" / "Sending Download-Agent... OK" လိုမျိုး
+        // ၂ခါ မထွက်အောင် (false = ဒီစာကြောင်းကို ကျော်လိုက်တယ်)။ ကြားက စာကြောင်း
+        // ပါ/မပါ မသက်ဆိုင် — message တူ window အတွင်းဆို ကျော်တယ်
+        private bool LogOnce(string message, Color? color = null, double windowSec = 20)
+        {
+            long now = DateTime.UtcNow.Ticks;
+            if (lastLogUtc.Count > 64)   // အဟောင်းတွေ prune (dictionary မကြီးအောင်)
+            {
+                List<string> stale = null;
+                foreach (var kv in lastLogUtc)
+                    if (now - kv.Value.Ticks > TimeSpan.TicksPerMinute * 2)
+                        (stale ?? (stale = new List<string>())).Add(kv.Key);
+                if (stale != null) foreach (string k in stale) lastLogUtc.Remove(k);
+            }
+            DateTime prev;
+            if (lastLogUtc.TryGetValue(message, out prev) &&
+                now - prev.Ticks < (long)(windowSec * TimeSpan.TicksPerSecond)) return false;
+            lastLogUtc[message] = DateTime.UtcNow;
+            Log(message, color);
+            return true;
+        }
+
         private string FormatBytes(string hexLength)
         {
             try
@@ -6658,6 +8270,9 @@ namespace PMKUnlocker
         // background thread မှာ ဖတ်ပြီး ရလဒ်ကို cache ထားတယ်။ ဒါမှ tool ဖွင့်ချင်း/click ချင်း မဟန်းမှာ။
         private volatile string cachedMtkModeText = "";
         private volatile string cachedMtkComPort = "";
+        // Windows က device descriptor ဖတ်မရတဲ့ node တွေ (VID/PID မရ → MediaTek VCOM driver
+        // မတွဲနိုင် → COM port မပေါ်) — present ဖြစ်နေရင် instance id တွေ သိမ်းထားတယ်
+        private volatile string cachedUsbFailedIds = "";
         private int mtkDetectBusy = 0;
 
         private void RefreshMtkDetection()
@@ -6671,7 +8286,7 @@ namespace PMKUnlocker
                     {
                         FileName = "powershell",
                         Arguments = "-NoProfile -NonInteractive -Command \"Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | " +
-                                    "Where-Object { $_.InstanceId -like '*VID_0E8D*' } | ForEach-Object { " +
+                                    "Where-Object { $_.InstanceId -like '*VID_0E8D*' -or $_.FriendlyName -like '*Device Descriptor Request Failed*' } | ForEach-Object { " +
                                     "$s = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data; " +
                                     "$_.InstanceId + '|' + $s + '|' + $_.FriendlyName }\"",
                         RedirectStandardOutput = true,
@@ -6705,10 +8320,18 @@ namespace PMKUnlocker
                     List<string> pidOrder = new List<string>();
                     Dictionary<string, List<string>> pidSvcs = new Dictionary<string, List<string>>();
                     string comPort = "";
+                    List<string> usbFailed = new List<string>();
 
                     foreach (string line in outText.Split('\n'))
                     {
                         string up = line.ToUpperInvariant();
+                        // descriptor ဖတ်မရတဲ့ node — VID/PID မရလို့ driver မတွဲနိုင်ဘဲ ကျန်ခဲ့တာ
+                        if (up.Contains("DEVICE DESCRIPTOR REQUEST FAILED"))
+                        {
+                            string fid = line.Split('|')[0].Trim();
+                            if (fid.Length > 0) usbFailed.Add(fid);
+                            continue;
+                        }
                         if (!up.Contains("VID_0E8D")) continue;
 
                         Match mp = Regex.Match(up, @"PID_([0-9A-F]{4})");
@@ -6744,6 +8367,7 @@ namespace PMKUnlocker
                         modes.Add(label);
                     }
 
+                    cachedUsbFailedIds = string.Join("\n", usbFailed);
                     cachedMtkModeText = string.Join(", ", modes);
                     cachedMtkComPort = comPort;
                 }
@@ -6751,6 +8375,7 @@ namespace PMKUnlocker
                 {
                     cachedMtkModeText = "";
                     cachedMtkComPort = "";
+                    cachedUsbFailedIds = "";
                 }
                 finally
                 {
@@ -6770,6 +8395,207 @@ namespace PMKUnlocker
                     catch { }
                 }
             });
+        }
+
+        // ============ USB DESCRIPTOR RECOVERY (COM port ပြန်ပေါ်အောင်) ============
+        // op ပြီးတဲ့အခါ phone က USB ကနေ ထွက်တဲ့အခါ Windows က device descriptor ဖတ်မရတတ် —
+        // ဒါဆို VID/PID မရ → MediaTek VCOM driver မတွဲနိုင် → "Unknown USB Device" ပဲ ကျန်ပြီး
+        // COM port မပေါ်တော့ဘူး (user မြင်ရတဲ့ "No Port")။ App က admin ဖြစ်လို့ ဒီ failed node ကို
+        // disable/enable ပြီး Windows ကို ပြန် enumerate ခိုင်းတယ် — phone ချိတ်ထားရင် COMx ပြန်ပေါ်မယ်။
+        private DateTime usbRecoveryUtc = DateTime.MinValue;     // နောက်ဆုံး kick (throttle)
+        private DateTime usbRecoveryBurstUtc = DateTime.MinValue; // လက်ရှိ error တစ်ကြောင်း စချိန်
+        private string usbRecoveryTriedId = "";
+        private bool usbRecoveryHintShown = false;
+        private int usbRecoveryKickBusy = 0;
+        private int usbRecoveryCleanStreak = 0;
+
+        // op ပြီးတဲ့အခါ (seccfg reset) Windows က ပထမ enumeration မှာ race ဖြစ်တတ် —
+        // descriptor fail ဖြစ်ရင် Windows က ထပ်မကြိုးစားတော့ဘဲ "Unknown USB Device (43)" ပဲ ကျန်
+        // ပြီး MediaTek VCOM မတွဲနိုင် → "No Port" ဖြစ်တယ်။ idle အချိန်မှာ disable/enable နဲ့ ထပ်
+        // enumerate ခိုင်း (op အတွင်း port မထိ) — phone ပြန် enumerate ဖြစ်ရင် success line တစ်ကြောင်းပဲ။
+        private void TryUsbDescriptorRecovery()
+        {
+            try
+            {
+                if (isTaskRunning || flashWorkflowRunning || stopRequested) return;
+                string ids = cachedUsbFailedIds;
+                if (string.IsNullOrWhiteSpace(ids))
+                {
+                    // error node ပျောက်သွားပြီ (enumerate ဖြစ်/ကြိုးဖြုတ်ပြီး) — burst ပြီးတာ တစ်ကြောင်းပဲ
+                    if (usbRecoveryTriedId.Length > 0)
+                    {
+                        // kick ရဲ့ disable window မှာ node ယာယီပျောက်တတ် — false "cleared"
+                        // မပြောရအောင် ဆက်တိုက် clean poll ၃ခုမှ အတည်ပြု
+                        usbRecoveryCleanStreak++;
+                        if (usbRecoveryCleanStreak < 3) return;
+                        string p = cachedMtkComPort;
+                        Log("[+] USB error (43) cleared — " +
+                            (p.Length > 0 ? p + " အဆင်သင့်" : "port ပြန် enumerate ဖြစ်/ကြိုးဖြုတ်ပြီး"),
+                            Color.LightGreen);
+                        usbRecoveryTriedId = "";
+                        usbRecoveryHintShown = false;
+                        usbRecoveryUtc = DateTime.MinValue;
+                        usbRecoveryBurstUtc = DateTime.MinValue;
+                    }
+                    usbRecoveryCleanStreak = 0;
+                    return;
+                }
+                usbRecoveryCleanStreak = 0;
+                if (!string.IsNullOrWhiteSpace(cachedMtkComPort)) return;   // MTK COM ရှိပြီဆို ပြီးပြီ
+                string id = ids.Split('\n')[0].Trim();
+                if (id.Length == 0) return;
+
+                if (!string.Equals(id, usbRecoveryTriedId, StringComparison.Ordinal))
+                {
+                    // error အသစ် (node id ပြောင်း) — တစ်ကြောင်းအသစ် စချိန်
+                    usbRecoveryTriedId = id;
+                    usbRecoveryBurstUtc = DateTime.UtcNow;
+                    usbRecoveryHintShown = false;
+                    usbRecoveryUtc = DateTime.MinValue;
+                    Log("[!] USB descriptor read failed (error 43) — MediaTek COM မပေါ်နိုင် — port re-enumerate လုပ်နေတယ်...",
+                        Color.Orange);
+                }
+
+                DateTime now = DateTime.UtcNow;
+                if (!usbRecoveryHintShown && (now - usbRecoveryBurstUtc).TotalSeconds > 75)
+                {
+                    // 75 စက္ကန့်ကျော်လည်း 43 ကျန်နေရင် ကြိုးဖြုတ်/ပြန်ချိတ်ခိုင်း (တစ်ကြောင်းပဲ)
+                    usbRecoveryHintShown = true;
+                    Log("[!] USB port error (43) ဆက်ရှိနေတယ် — ဖုန်းကို USB ဖြုတ်ပြီး ပြန်ချိတ်ပါ (BROM: Vol+ & Vol− ဆုပ်ထား)။",
+                        Color.OrangeRed);
+                }
+                double gap = usbRecoveryHintShown ? 30 : 15;
+                if ((now - usbRecoveryUtc).TotalSeconds < gap) return;
+                usbRecoveryUtc = now;
+                // kick က PS spawn (~1-2s) — UI thread မကျောက်အောင် background မှာပဲ (တစ်ချိန်တည်း တစ်ခု)
+                if (Interlocked.CompareExchange(ref usbRecoveryKickBusy, 1, 0) != 0) return;
+                _ = Task.Run(() =>
+                {
+                    try { RunHiddenBounded("powershell.exe", PnpKickArgs(id), 8000); }
+                    catch { }
+                    finally { Interlocked.Exchange(ref usbRecoveryKickBusy, 0); }
+                });
+            }
+            catch { }
+        }
+
+        // failed USB node ကို disable → enable (Windows ကို ပြန် enumerate ခိုင်း) — PowerShell args
+        private static string PnpKickArgs(string instanceId)
+        {
+            string id = instanceId.Replace("'", "''");
+            string ps = "$id = '" + id + "'; " +
+                        "Disable-PnpDevice -InstanceId $id -Confirm:$false -ErrorAction SilentlyContinue; " +
+                        "Start-Sleep -Milliseconds 500; " +
+                        "Enable-PnpDevice -InstanceId $id -Confirm:$false -ErrorAction SilentlyContinue";
+            return "-NoProfile -NonInteractive -Command \"" + ps.Replace("\"", "\\\"") + "\"";
+        }
+
+        // fastboot handoff စောင့်ချိန် PnP scan — fastboot node OK ဆို true,
+        // error43/descriptor-fail node (fastboot driver error ပါ) ဆို kick အတွက် id ပြန်,
+        // BROM (0E8D:0003) ပြန်ပေါ်ရင် re-arm reset အတွက် flag ပြန်
+        private (bool fbOk, string kickId, bool sawBrom) ScanFastbootHandoffPnp()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -NonInteractive -Command \"Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | " +
+                                "Where-Object { $_.InstanceId -like 'USB\\VID_*' } | ForEach-Object { " +
+                                "$up = $_.InstanceId.ToUpper(); " +
+                                "if ($up -like '*VID_18D1&PID_D00D*') { if ($_.Status -eq 'OK') { 'FBOK' } else { 'KICK|' + $_.InstanceId } } " +
+                                "elseif ($up -like '*VID_0E8D&PID_0003*') { 'BROM' } " +
+                                "elseif ($up -like '*VID_0000&PID_0002*' -or $_.FriendlyName -like '*Descriptor Request Failed*') { 'KICK|' + $_.InstanceId } }\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    if (p == null) return (false, null, false);
+                    if (!p.WaitForExit(8000))
+                    {
+                        try { p.Kill(entireProcessTree: true); } catch { }
+                        return (false, null, false);
+                    }
+                    string o = p.StandardOutput.ReadToEnd();
+                    bool fbOk = false, sawBrom = false;
+                    string kick = null;
+                    foreach (string raw in o.Split('\n'))
+                    {
+                        string t = raw.Trim();
+                        if (t == "FBOK") fbOk = true;
+                        else if (t == "BROM") sawBrom = true;
+                        else if (t.StartsWith("KICK|", StringComparison.Ordinal) && kick == null)
+                            kick = t.Substring(5).Trim();
+                    }
+                    return (fbOk, kick, sawBrom);
+                }
+            }
+            catch { return (false, null, false); }
+        }
+
+        // phone node ရဲ့ parent (USB hub/root hub) instance id — hub restart အတွက်
+        private string GetPnpParentInstanceId(string instanceId)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -NonInteractive -Command \"$p = (Get-PnpDeviceProperty -InstanceId '" +
+                                instanceId.Replace("'", "''") +
+                                "' -KeyName 'DEVPKEY_Device_Parent' -ErrorAction SilentlyContinue).Data; if ($p) { $p }\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    if (p == null) return null;
+                    if (!p.WaitForExit(8000))
+                    {
+                        try { p.Kill(entireProcessTree: true); } catch { }
+                        return null;
+                    }
+                    string o = p.StandardOutput.ReadToEnd().Trim();
+                    return o.Length > 0 ? o.Split('\n')[0].Trim() : null;
+                }
+            }
+            catch { return null; }
+        }
+
+        // hidden process ကို bounded wait နဲ့ run — exit code ပြန် (timeout/exception = -1)။
+        // ReadToEnd မသုံးဘဲ BeginOutputReadLine drain — pipe block မဖြစ်အောင်
+        private int RunHiddenBounded(string exe, string args, int timeoutMs)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    if (p == null) return -1;
+                    p.BeginOutputReadLine();
+                    p.BeginErrorReadLine();
+                    if (!p.WaitForExit(timeoutMs))
+                    {
+                        try { p.Kill(entireProcessTree: true); } catch { }
+                        return -1;
+                    }
+                    return p.ExitCode;
+                }
+            }
+            catch { return -1; }
         }
 
         // UI/log အတွက် — cache ထဲက တန်ဖိုးပဲ ပြန်ပေးတယ် (PowerShell မခေါ်ဘူး → ချက်ချင်း ပြန်)
@@ -6963,7 +8789,7 @@ namespace PMKUnlocker
             if (topLayout == null || tabControl == null || panelPartition == null) return;
 
             TabPage page = tabControl.SelectedTab;
-            // tabHisi မှာ partition grid မသုံးလို့ မပြ — ကျန်တဲ့ tab အားလုံး ပြ
+            // tabHisi — partition grid မလို (user request); ကျန် tab အားလုံး ပြ
             bool show = (page == tabMtk || page == tabQc || page == tabSamsung ||
                          page == tabSpd || page == tabAdb);
             panelPartition.Visible = show;
@@ -7073,6 +8899,10 @@ namespace PMKUnlocker
             // "[mtp mode]" က reset-to-factory နောက်မှ — "Reset to factory [mtp mode]" မှာ Factory Reset ကို ဦးစားပေး
             new[] { "[mtp mode]", "MTP FRP" },
             new[] { "factory reset", "Factory Reset" },
+            // op စာသားက "FRP / account lock: Xiaomi account bypass (no need vpn)" — "frp" rule ရှေ့မှာ ထားမှ
+            // မဟုတ်ရင် frp rule က အရင် match ဖြစ်ပြီး Mi Account button ရောက်မသွားဘူး
+            new[] { "account bypass", "Mi Account Bypass" },
+            new[] { "account remove", "Mi Account Bypass" },
             new[] { "frp", "FRP Reset", "FRP Remove", "MTP FRP" },
             new[] { "bootloader relock", "Relock Bootloader" },
             new[] { "bootloader unlock", "Unlock Bootloader", "START UNLOCK" },
@@ -7313,7 +9143,18 @@ namespace PMKUnlocker
                 tip = "pmk_mtk_op.py reset — BROM session ကနေ ဖုန်းကို power off";
                 run = async () =>
                 {
-                    await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("reset"), "Exit BROM (power off)");
+                    // default bootmode က home screen (1) — ဒီ command က power off (0)
+                    // လိုချင်တာမို့ သီးသန့် env ပေး (1 ဖြစ်သွားရင် ဖုန်း boot ပြန်ဝင်မယ်)
+                    string prevBootMode = Environment.GetEnvironmentVariable("PMK_MTK_BOOTMODE");
+                    Environment.SetEnvironmentVariable("PMK_MTK_BOOTMODE", "0");
+                    try
+                    {
+                        await ExecuteCommandCleanAsync("python", BuildMtkOpArgs("reset"), "Exit BROM (power off)");
+                    }
+                    finally
+                    {
+                        Environment.SetEnvironmentVariable("PMK_MTK_BOOTMODE", prevBootMode);
+                    }
                 };
                 return true;
             }
@@ -7540,7 +9381,8 @@ namespace PMKUnlocker
                 {
                     btDetect = Create3DButton("🔍 Detect", 0, 0, 96, 26, ButtonTheme.Cyan);
                     btDetect.Name = "pmkDetectBtn";
-                    btDetect.Location = new Point(817, y - 1);
+                    // x = width-relative — file row ရဲ့ ညာဘက်အဆုံးနဲ့ ညီ (fixed 817 က window ချုံ့ရင် cut)
+                    btDetect.Location = new Point(Math.Max(500, page.ClientSize.Width - 111), y - 1);
                 }
 
                 // ===== Ops strip — model ရွေးရင် (button ထဲ မပါတဲ့) ops တွေကို chip အဖြစ် ဒီမှာပြ =====
@@ -7938,11 +9780,14 @@ namespace PMKUnlocker
                     grpQcLoaderPicker.Parent?.Controls.Remove(grpQcLoaderPicker);
                     tabQc.Controls.Add(grpQcLoaderPicker);
                     grpQcLoaderPicker.Location = new Point(15, 11);
+                    // tab အကျယ်အလိုက် width — construction-time 930 hardcode က window ချုံ့ရင် cut ခံရမယ်
+                    int qw = Math.Max(600, tabQc.ClientSize.Width - 30);
+                    grpQcLoaderPicker.Size = new Size(qw, 76);
                     grpQcLoaderPicker.BringToFront();
                     // row2 — ပုံတူ Loader file row (LoadEdlPaths ပြီးမှ ဆိုလို့ saved loader ပါ ပြ)
                     if (qcFileRow == null)
                     {
-                        qcFileRow = BuildFilePickerRow(grpQcLoaderPicker, 9, 46, 912, "Loader",
+                        qcFileRow = BuildFilePickerRow(grpQcLoaderPicker, 9, 46, qw - 18, "Loader",
                             "Double click or Drag Firehose Loader Files",
                             "Firehose loader (*.mbn;*.elf;*.bin;*.melf)|*.mbn;*.elf;*.bin;*.melf",
                             () => edlLoaderPath, ApplyQcLoader);
@@ -9042,6 +10887,283 @@ namespace PMKUnlocker
             var m = System.Text.RegularExpressions.Regex.Match(raw ?? "",
                 @"current-slot:?\s*_?([ab])\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return m.Success ? m.Groups[1].Value.ToLowerInvariant() : v;
+        }
+
+        // ===== MI FLASH · XIAOMI FASTBOOT FLASHING (MST style, flash_all.bat) =====
+
+        private bool SetMiFlashOps(List<MiFlashOp> ops)
+        {
+            if (ops.Count == 0) return false;
+            miFlashOps = ops;
+            dgvMiParts.Rows.Clear();
+            foreach (MiFlashOp op in ops)
+            {
+                string partCol = "", fileCol = "", offsetCol = "", lengthCol = "", sizeCol = "";
+                if (op.Kind == "flash")
+                {
+                    partCol = op.Partition;
+                    fileCol = Path.GetFileName(op.File);
+                    long bytes = 0;
+                    try { bytes = new FileInfo(op.File).Length; } catch { }
+                    offsetCol = "0000000000";
+                    lengthCol = bytes > 0 ? bytes.ToString("X10") : "0000000000";
+                    sizeCol = FormatMiSize(bytes);
+                }
+                else if (op.Kind == "erase")
+                {
+                    partCol = op.Partition;
+                    fileCol = "erase";
+                }
+                else if (op.Kind == "set_active")
+                {
+                    string r = op.Raw.StartsWith("set_active", StringComparison.OrdinalIgnoreCase)
+                        ? op.Raw.Substring("set_active".Length).Trim() : op.Raw;
+                    partCol = r;
+                    fileCol = "set_active";
+                }
+                else if (op.Kind == "reboot")
+                {
+                    partCol = "reboot";
+                }
+                else
+                {
+                    int sp = op.Raw.IndexOf(' ');
+                    partCol = sp > 0 ? op.Raw.Substring(0, sp) : op.Raw;
+                    fileCol = sp > 0 ? op.Raw.Substring(sp + 1) : "";
+                }
+                dgvMiParts.Rows.Add(true, partCol, fileCol, offsetCol, lengthCol, sizeCol, op.Kind);
+            }
+            return true;
+        }
+
+        private static string FormatMiSize(long bytes)
+        {
+            if (bytes >= 1048576) return (bytes / 1048576.0).ToString("0.00", CultureInfo.InvariantCulture) + " MB";
+            if (bytes >= 1024) return (bytes / 1024.0).ToString("0.00", CultureInfo.InvariantCulture) + " KB";
+            return bytes + " B";
+        }
+
+        private void BtnMiRomFolder_Click(object sender, EventArgs e)
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Title = "flash_all.bat ရွေးပါ",
+                Filter = "MIUI flash script (flash_all*.bat)|flash_all*.bat|Batch files (*.bat)|*.bat"
+            };
+            if (lblMiRomPath.Tag is string last && File.Exists(last))
+            {
+                ofd.FileName = last;
+                ofd.InitialDirectory = Path.GetDirectoryName(last);
+            }
+            else if (lblMiRomPath.Tag is string lastDir && Directory.Exists(lastDir))
+                ofd.InitialDirectory = lastDir;
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+
+            string bat = ofd.FileName;
+            List<MiFlashOp> ops;
+            try { ops = MiFlash.ParseBat(bat); }
+            catch (Exception ex) { Log("[!] " + Path.GetFileName(bat) + " parse failed: " + ex.Message, Color.OrangeRed); return; }
+            if (!SetMiFlashOps(ops))
+            {
+                Log("[!] " + Path.GetFileName(bat) + " — fastboot command 0 ခုပဲ — flash_all.bat မဟုတ်ဘူး", Color.Orange);
+                MessageBox.Show(this,
+                    "ဒီ .bat ထဲမှာ fastboot command မပါဘူး။\n\nMIUI Fastboot ROM ရဲ့ flash_all.bat\n(သို့) flash_all_lock.bat ကို ရွေးပါ။",
+                    "Mi Flash", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            lblMiRomPath.Text = bat;
+            lblMiRomPath.Tag = bat;
+            Log(" Checking firmware type... ( FASTBOOT ( BAT ) )", Color.FromArgb(210, 210, 210));
+            Log("[+] Mi Flash loaded — " + ops.Count(o => o.Kind == "flash") + " file(s), " +
+                ops.Count + " op(s) — " + Path.GetFileName(bat), Color.LightGreen);
+        }
+
+        private async void BtnMiFlash_Click(object sender, EventArgs e)
+        {
+            await RunFlashWorkflowAsync(BtnMiFlashAsync, autoRebootAfter: false);
+        }
+
+        private async Task BtnMiFlashAsync()
+        {
+            if (isTaskRunning)
+            {
+                Log("[!] Another operation is running — wait for it to finish or press STOP.", Color.OrangeRed);
+                return;
+            }
+            if (miFlashOps.Count == 0 || dgvMiParts.Rows.Count == 0)
+            {
+                Log("[!] No ROM loaded — '📄 flash_all.bat' ကို ရွေးပါ", Color.Orange);
+                return;
+            }
+
+            var selected = new List<MiFlashOp>();
+            for (int i = 0; i < dgvMiParts.Rows.Count && i < miFlashOps.Count; i++)
+                if (dgvMiParts.Rows[i].Cells[0].Value is bool cb && cb)
+                    selected.Add(miFlashOps[i]);
+            if (selected.Count == 0)
+            {
+                Log("[!] op 1 ခုမှ မရွေးထား — checkbox 1 ခုအနည်းဆုံး ရွေးပါ", Color.Orange);
+                return;
+            }
+
+            int flashCount = selected.Count(o => o.Kind == "flash");
+            DialogResult ask = MessageBox.Show(this,
+                "MI Fastboot Flashing — " + flashCount + " file(s), " + selected.Count + " op(s)" +
+                (chkMiEraseFirst.Checked ? " (+ " + MiFlash.EraseFirst.Length + " erase first)" : "") + "\n\n" +
+                "Erase first: " + (chkMiEraseFirst.Checked ? "ON" : "OFF") +
+                "    Auto Reboot: " + (chkMiAutoReboot.Checked ? "ON" : "OFF"),
+                "MI Fastboot Flashing", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (ask != DialogResult.Yes) return;
+
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+            Log(" Operation : XIAOMI FASTBOOT FLASHING", Color.White);
+            Log("========================================================", Color.FromArgb(0, 180, 255));
+
+            if (!await FastbootReadyAsync("Mi Fastboot Flashing"))
+            {
+                Log(" Waiting fastboot device... Failed", Color.OrangeRed);
+                return;
+            }
+            Log(" Waiting fastboot device... Ok", Color.LightGreen);
+
+            string all = await ExecuteCommandQuickAsync("fastboot.exe", "getvar all");
+            if (string.IsNullOrWhiteSpace(all))
+            {
+                Log(" Connecting to device...Failed", Color.OrangeRed);
+                return;
+            }
+            Log(" Connecting to device...Ok", Color.LightGreen);
+            // MST style DEVICE INFORMATION — key vars အနည်းငယ်သာ (partition-type/size dump ကို မပြ)
+            var infoKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "product", "serialno", "version-bootloader", "unlocked", "secure",
+                "current-slot", "slot-count", "anti", "crc", "max-download-size", "is-userspace"
+            };
+            foreach (string line in all.Split('\n'))
+            {
+                string t = line.Replace("(bootloader)", "").Trim();
+                if (t.Length == 0 || t.StartsWith("Finished", StringComparison.OrdinalIgnoreCase) ||
+                    t.StartsWith("OKAY", StringComparison.OrdinalIgnoreCase) ||
+                    t.StartsWith("Waiting for device", StringComparison.OrdinalIgnoreCase)) continue;
+                int ci = t.IndexOf(':');
+                if (ci <= 0) continue;
+                string key = t.Substring(0, ci).Trim();
+                if (!infoKeep.Contains(key)) continue;
+                Log("  * " + key.PadRight(24) + "... " + t.Substring(ci + 1).Trim(),
+                    Color.FromArgb(200, 210, 225));
+            }
+
+            stopRequested = false;
+            var swMi = System.Diagnostics.Stopwatch.StartNew();
+            long bytesDone = 0;
+            // bat ထဲက guard (getvar partition-type / crc) — device မပြရင် မလုပ် (bat အတိုင်း)
+            var guardSkipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (selected.Any(o => o.Cond.Length > 0))
+            {
+                selected.RemoveAll(o =>
+                {
+                    if (o.Cond.Length == 0) return false;
+                    bool run = MiFlash.GuardMatches(o.Cond, all);
+                    if (!run) guardSkipped.Add(o.Partition);
+                    return !run;
+                });
+                if (guardSkipped.Count > 0)
+                    Log(" Skipping (bat guard — partition not present): " + string.Join(", ", guardSkipped),
+                        Color.FromArgb(210, 210, 210));
+            }
+
+            MiFlash.ValidateDevice(miFlashOps, all);
+            if (selected.Count == 0) throw new InvalidDataException("No operations remain after device guards.");
+            using var imageLease = await Task.Run(() => new MiFlash.ImageLease(selected));
+            if (stopRequested) return;
+            int failCount = 0, done = 0, total = selected.Count;
+
+            if (chkMiEraseFirst.Checked)
+            {
+                // bat ထဲမှာ ပြီးတော့ erase လုပ်မယ့် partition တွေကို မထပ်ဖျက်နဲ့ —
+                // guard ကြောင့် ကျော်ခံထားရတဲ့ partition (ဥပမာ opcust) လည်း မထပ်ကြိုးစားနဲ့
+                var batErase = new HashSet<string>(
+                    selected.Where(o => o.Kind == "erase").Select(o => o.Partition),
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (string p in MiFlash.EraseFirst)
+                {
+                    if (batErase.Contains(p) || guardSkipped.Contains(p)) continue;
+                    if (stopRequested) break;
+                    bool okE = await ExecuteCommandCleanAsync("fastboot.exe", "erase " + p, "Erase [" + p + "]", quiet: true, quietFail: true);
+                    Log(" Erasing [ erase ] -> [ " + p + " ]... " + (okE ? "Ok" : "Failed"), okE ? Color.LightGreen : Color.OrangeRed);
+                    if (!okE) { workflowFailed = true; return; }
+                }
+            }
+
+            foreach (MiFlashOp op in selected)
+            {
+                if (stopRequested) { Log("[!] Stopped by user.", Color.Orange); break; }
+                done++;
+                if (op.Kind == "reboot")
+                {
+                    // Auto Reboot က အဆုံးမှာ တစ်ခါထဲ — reboot row ကို ဒီမှာ ကျော်
+                    SetProgress(done * 100 / Math.Max(1, total), "Mi Flash (" + done + "/" + total + ")");
+                    continue;
+                }
+
+                if (op.Kind == "flash")
+                {
+                    if (!File.Exists(op.File))
+                    {
+                        Log(" Flashing [ " + Path.GetFileName(op.File) + " ] -> [ " + op.Partition + " ]... Failed (file not found)",
+                            Color.OrangeRed);
+                        failCount++;
+                    }
+                    else
+                    {
+                        long len = 0;
+                        try { len = new FileInfo(op.File).Length; } catch { }
+                        bool okF = await ExecuteCommandCleanAsync("fastboot.exe",
+                            op.Options + " flash " + op.Partition + " \"" + op.File + "\"", "Mi Flash [" + op.Partition + "]", quiet: true, quietFail: true);
+                        Log(" Flashing [ " + Path.GetFileName(op.File) + " ] -> [ " + op.Partition + " ]... " + (okF ? "Ok" : "Failed"),
+                            okF ? Color.LightGreen : Color.OrangeRed);
+                        if (okF) bytesDone += len; else failCount++;
+                    }
+                }
+                else if (op.Kind == "erase")
+                {
+                    bool okE2 = await ExecuteCommandCleanAsync("fastboot.exe", op.Options + " erase " + op.Partition, "Mi Erase [" + op.Partition + "]", quiet: true, quietFail: true);
+                    Log(" Erasing [ erase ] -> [ " + op.Partition + " ]... " + (okE2 ? "Ok" : "Failed"), okE2 ? Color.LightGreen : Color.OrangeRed);
+                    if (!okE2) failCount++;
+                }
+                else
+                {
+                    bool okR = await ExecuteCommandCleanAsync("fastboot.exe", op.Raw, "Mi [" + op.Label + "]", quiet: true, quietFail: true);
+                    Log(" fastboot " + op.Raw + "... " + (okR ? "Ok" : "Failed"), okR ? Color.LightGreen : Color.OrangeRed);
+                    if (!okR) failCount++;
+                }
+
+                if (failCount > 0) { workflowFailed = true; break; }
+                if (swMi.Elapsed.TotalSeconds >= 0.5 && bytesDone > 0)
+                    UpdateFlashSpeed(bytesDone / 1048576.0 / swMi.Elapsed.TotalSeconds);
+                SetProgress(done * 100 / Math.Max(1, total), "Mi Flash (" + done + "/" + total + ")");
+            }
+
+            // Auto Reboot — MST style တစ်ခါထဲ (flash fail ရင် မ reboot — half state ကနေ မစ)
+            if (!stopRequested && chkMiAutoReboot.Checked)
+            {
+                if (failCount == 0)
+                {
+                    bool rb = await ExecuteCommandCleanAsync("fastboot.exe", "reboot", "Mi Reboot", quiet: true, quietFail: true);
+                    Log(" Rebooting device... " + (rb ? "Ok" : "Failed"), rb ? Color.LightGreen : Color.OrangeRed);
+                }
+                else
+                    Log("[!] Flash failed " + failCount + " op — Auto Reboot skipped.", Color.Orange);
+            }
+
+            TimeSpan e2 = swMi.Elapsed;
+            string elapsed = e2.TotalMinutes >= 1
+                ? (int)e2.TotalMinutes + " minutes " + e2.Seconds + " seconds"
+                : e2.Seconds + " seconds";
+            Log(" Elapsed Time... " + elapsed, Color.Yellow);
+            Log(" Finished at local time: [" + DateTime.Now.ToString("dd.MM.yy HH:mm:ss") + "]", Color.Yellow);
+            if (failCount > 0) Log("[!] " + failCount + " op(s) FAILED — log ကို စစ်ပါ", Color.OrangeRed);
+            ResetProgress();
         }
 
         private async void BtnFbInfo_Click(object sender, EventArgs e)

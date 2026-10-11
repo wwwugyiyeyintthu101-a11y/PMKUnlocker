@@ -2,8 +2,22 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using PMKLicenseServer;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 16 * 1024);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("api", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+});
 var app = builder.Build();
 
 // Admin key: config မှာ ပေးထားမှ သုံးမယ် — မပေး/known-default ဆို random 256-bit ထုတ်ပြီး
@@ -25,12 +39,32 @@ if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
     if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
     {
         adminKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        try { File.WriteAllText(keyFile, adminKey); } catch { }
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
+        File.WriteAllText(keyFile, adminKey);
         Console.WriteLine("=== Admin key generated (stored in " + keyFile + ") ===");
-        Console.WriteLine(adminKey);
     }
 }
 string dataFile = Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json");
+Directory.CreateDirectory(Path.GetDirectoryName(dataFile)!);
+// Exactly one server process may own this JSON store. A second instance fails
+// startup rather than racing a separate in-memory lock against the same file.
+using var databaseLease = new FileStream(dataFile + ".lock", FileMode.OpenOrCreate,
+    FileAccess.ReadWrite, FileShare.None);
+using var transactions = new SemaphoreSlim(1, 1);
+app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api")) { await next(context); return; }
+    await transactions.WaitAsync(context.RequestAborted);
+    try { await next(context); }
+    catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+    {
+        app.Logger.LogError(ex, "License storage unavailable; request rejected without resetting accounts.");
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        await context.Response.WriteAsJsonAsync(new { ok = false, message = "License storage unavailable. Contact the administrator." });
+    }
+    finally { transactions.Release(); }
+});
 var jsonOpts = new JsonSerializerOptions
 {
     WriteIndented = true,
@@ -64,7 +98,7 @@ bool FixedHexEq(string a, string b)
     if (stored.StartsWith("P2$", StringComparison.Ordinal))
     {
         string[] parts = stored.Split('$');
-        if (parts.Length != 3 || !int.TryParse(parts[1], out int iter) || iter <= 0)
+        if (parts.Length != 3 || !int.TryParse(parts[1], out int iter) || iter <= 0 || iter > 1_000_000)
             return (false, false);
         byte[] dk = Rfc2898DeriveBytes.Pbkdf2(
             password, Encoding.UTF8.GetBytes(salt + ":"), iter, HashAlgorithmName.SHA256, 32);
@@ -79,9 +113,10 @@ bool FixedHexEq(string a, string b)
 
 bool IsValidEmail(string email)
 {
-    if (string.IsNullOrWhiteSpace(email)) return false;
-    int at = email.IndexOf('@');
-    return at > 0 && at < email.Length - 1 && email.IndexOf('.', at) > at + 1;
+    if (string.IsNullOrWhiteSpace(email) || email.Length > 254 ||
+        email.Any(c => char.IsWhiteSpace(c) || char.IsControl(c) || "<>\"'".Contains(c))) return false;
+    return System.Net.Mail.MailAddress.TryCreate(email, out var parsed) &&
+        parsed.Address == email && parsed.Host.Contains('.');
 }
 
 LicenseDb LoadDb()
@@ -89,11 +124,16 @@ LicenseDb LoadDb()
     lock (lockObj)
     {
         if (!File.Exists(dataFile)) return new LicenseDb();
-        try
-        {
-            return JsonSerializer.Deserialize<LicenseDb>(File.ReadAllText(dataFile)) ?? new LicenseDb();
-        }
-        catch { return new LicenseDb(); }
+        using var document = JsonDocument.Parse(File.ReadAllText(dataFile));
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("Accounts", out var accounts) || accounts.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("License database has no Accounts array.");
+        var db = document.RootElement.Deserialize<LicenseDb>();
+        if (db?.Accounts == null || db.Accounts.Any(a => a == null || string.IsNullOrEmpty(a.Email) ||
+            a.Salt == null || a.PassHash == null) ||
+            db.Accounts.Select(a => a.Email).Distinct(StringComparer.OrdinalIgnoreCase).Count() != db.Accounts.Count)
+            throw new InvalidDataException("Invalid license database; restore a verified backup.");
+        return db;
     }
 }
 
@@ -103,7 +143,18 @@ void SaveDb(LicenseDb db)
     {
         string dir = Path.GetDirectoryName(dataFile)!;
         Directory.CreateDirectory(dir);
-        File.WriteAllText(dataFile, JsonSerializer.Serialize(db, jsonOpts));
+        string temp = dataFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, db, jsonOpts);
+                stream.Flush(flushToDisk: true);
+            }
+            if (File.Exists(dataFile)) File.Replace(temp, dataFile, dataFile + ".bak");
+            else File.Move(temp, dataFile);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }
 
@@ -149,8 +200,8 @@ app.MapPost("/api/register", (RegisterReq req) =>
     string password = req.Password ?? "";
     if (!IsValidEmail(email))
         return J(new { ok = false, message = "Email မှားနေသည် (user@gmail.com)" });
-    if (password.Length < 4)
-        return J(new { ok = false, message = "Password အနည်းဆုံး 4 လုံး" });
+    if (password.Length < 8 || password.Length > 256)
+        return J(new { ok = false, message = "Password 8–256 လုံး" });
 
     var db = LoadDb();
     var existing = db.Accounts.FirstOrDefault(a =>
@@ -177,13 +228,15 @@ app.MapPost("/api/register", (RegisterReq req) =>
         ok = true,
         message = "Registered — Admin approval စောင့်ဆိုင်းပါ"
     });
-});
+}).RequireRateLimiting("api");
 
 // ---- customer login (client tool) ----
 app.MapPost("/api/login", (LoginReq req) =>
 {
     string email = (req.Email ?? "").Trim();
     string password = req.Password ?? "";
+    if (password.Length > 256 || (req.Token?.Length ?? 0) > 128)
+        return J(new LoginRes { Ok = false, Message = "Invalid credentials." });
     bool viaTokenLogin = !string.IsNullOrEmpty(req.Token);
     // token login = password မလို; password login = password လို
     if (!IsValidEmail(email) || (!viaTokenLogin && string.IsNullOrEmpty(password)))
@@ -204,7 +257,9 @@ app.MapPost("/api/login", (LoginReq req) =>
     if (viaToken)
     {
         // remember-me token login — password မလို
-        if (string.IsNullOrEmpty(acc.AutoToken) || !FixedHexEq(req.Token!, acc.AutoToken))
+        if (string.IsNullOrEmpty(acc.AutoToken) || !FixedHexEq(req.Token!, acc.AutoToken) ||
+            !DateTimeOffset.TryParse(acc.AutoTokenAt, out var issued) ||
+            issued > DateTimeOffset.UtcNow || issued.AddDays(30) <= DateTimeOffset.UtcNow)
             return J(new LoginRes { Ok = false, Message = "Session သက်တမ်းကုန်ပြီ — password ဖြင့် ပြန်ဝင်ပါ" });
     }
     else
@@ -230,7 +285,8 @@ app.MapPost("/api/login", (LoginReq req) =>
     if (string.IsNullOrEmpty(acc.ExpiresAt))
         return J(new LoginRes { Ok = false, Message = "Expiry မသတ်မှတ်ရသေးပါ — admin approve လုပ်ပါ" });
 
-    var expires = DateTime.Parse(acc.ExpiresAt, null, System.Globalization.DateTimeStyles.RoundtripKind);
+    if (!DateTime.TryParse(acc.ExpiresAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var expires))
+        return J(new LoginRes { Ok = false, Message = "Invalid subscription expiry. Contact the administrator." });
     if (expires.ToUniversalTime() <= DateTime.UtcNow)
         return J(new LoginRes
         {
@@ -250,7 +306,7 @@ app.MapPost("/api/login", (LoginReq req) =>
         DaysLeft = daysLeft,
         AutoToken = newToken
     });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin: list ----
 app.MapGet("/api/admin/list", (HttpContext ctx) =>
@@ -273,11 +329,11 @@ app.MapGet("/api/admin/list", (HttpContext ctx) =>
                 Pending = a.Pending,
                 Note = a.Note,
                 Expired = expired,
-                DaysLeft = expired ? 0 : (int)Math.Ceiling((exp.ToUniversalTime() - DateTime.UtcNow).TotalDays)
+                DaysLeft = a.Pending || expired ? 0 : (int)Math.Ceiling((exp.ToUniversalTime() - DateTime.UtcNow).TotalDays)
             };
         });
     return J(rows);
-});
+}).RequireRateLimiting("api");
 // ---- admin: create / update password / set plan ----
 app.MapPost("/api/admin/upsert", (HttpContext ctx, UpsertReq req) =>
 {
@@ -293,7 +349,7 @@ app.MapPost("/api/admin/upsert", (HttpContext ctx, UpsertReq req) =>
     if (acc == null)
     {
         string password = req.Password ?? "";
-        if (password.Length < 4)
+        if (password.Length < 8 || password.Length > 256)
             return J(new { ok = false, message = "New account: password အနည်းဆုံး 4 လုံး" });
         string salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         var exp = ExpiryFrom(DateTime.UtcNow, plan);
@@ -319,8 +375,8 @@ app.MapPost("/api/admin/upsert", (HttpContext ctx, UpsertReq req) =>
 
     if (!string.IsNullOrEmpty(req.Password))
     {
-        if (req.Password.Length < 4)
-            return J(new { ok = false, message = "Password အနည်းဆုံး 4 လုံး" });
+        if (req.Password.Length < 8 || req.Password.Length > 256)
+            return J(new { ok = false, message = "Password 8–256 လုံး" });
         acc.Salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         acc.PassHash = HashPassword(req.Password, acc.Salt);
         acc.AutoToken = ""; // password ပြောင်း → remember-me session အဟောင်း ဖျက်
@@ -332,7 +388,7 @@ app.MapPost("/api/admin/upsert", (HttpContext ctx, UpsertReq req) =>
         acc.Note = req.Note!;
     SaveDb(db);
     return J(new { ok = true, message = $"Updated {email}" });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin: approve pending registration (set plan + start expiry) ----
 app.MapPost("/api/admin/approve", (HttpContext ctx, ApproveReq req) =>
@@ -356,7 +412,7 @@ app.MapPost("/api/admin/approve", (HttpContext ctx, ApproveReq req) =>
         message = $"Approved {email} ({plan}) expires {exp:yyyy-MM-dd}",
         expiresAt = acc.ExpiresAt
     });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin: renew (+N months from max(now, expires)) ----
 app.MapPost("/api/admin/renew", (HttpContext ctx, RenewReq req) =>
@@ -368,9 +424,11 @@ app.MapPost("/api/admin/renew", (HttpContext ctx, RenewReq req) =>
         string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
     if (acc == null) return J(new { ok = false, message = "Email မတွေ့ပါ" });
 
-    var exp = DateTime.Parse(acc.ExpiresAt, null, System.Globalization.DateTimeStyles.RoundtripKind);
+    if (!DateTime.TryParse(acc.ExpiresAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var exp))
+        return J(new { ok = false, message = "Set a valid expiry by approving the account first." });
     var baseDate = exp.ToUniversalTime() > DateTime.UtcNow ? exp.ToUniversalTime() : DateTime.UtcNow;
     int months = req.Months <= 0 ? MonthsForPlan(acc.Plan) : req.Months;
+    if (months > 120) return J(new { ok = false, message = "Renewal must be at most 120 months." });
     var next = baseDate.AddMonths(months);
     acc.ExpiresAt = next.ToString("o");
     SaveDb(db);
@@ -380,7 +438,7 @@ app.MapPost("/api/admin/renew", (HttpContext ctx, RenewReq req) =>
         message = $"Renewed {email} +{months}m → {next:yyyy-MM-dd}",
         expiresAt = acc.ExpiresAt
     });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin: block / unblock ----
 app.MapPost("/api/admin/block", (HttpContext ctx, BlockReq req) =>
@@ -399,7 +457,7 @@ app.MapPost("/api/admin/block", (HttpContext ctx, BlockReq req) =>
         ok = true,
         message = req.Blocked ? $"Blocked {email}" : $"Unblocked {email}"
     });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin: delete ----
 app.MapPost("/api/admin/delete", (HttpContext ctx, BlockReq req) =>
@@ -412,7 +470,7 @@ app.MapPost("/api/admin/delete", (HttpContext ctx, BlockReq req) =>
     if (n == 0) return J(new { ok = false, message = "Email မတွေ့ပါ" });
     SaveDb(db);
     return J(new { ok = true, message = $"Deleted {email}" });
-});
+}).RequireRateLimiting("api");
 
 // ---- admin UI ----
 app.MapGet("/ui", () => Results.Text(AdminHtml.Fallback, "text/html; charset=utf-8"));

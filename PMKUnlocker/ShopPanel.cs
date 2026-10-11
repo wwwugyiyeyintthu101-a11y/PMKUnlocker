@@ -50,8 +50,7 @@ public partial class Form1
         string command = arguments.Trim();
         // server-level adb/fb commands က device serial မလို — binding ကျော်
         if (command == "devices" || command == "devices -l" || command == "version" || command == "--version" ||
-            command == "kill-server" || command == "start-server" || command == "wait-for-device" ||
-            command == "reconnect" || command == "reconnect device" || command == "usb")
+            command == "kill-server" || command == "start-server")
             return arguments;
         bool adb = tool == "adb.exe";
         string output = await ReviewSafety.RunQuickAsync(ResolveToolPath(fileName), "devices");
@@ -123,23 +122,6 @@ public partial class Form1
         File.WriteAllText(index, JsonSerializer.Serialize(paths));
     }
 
-    private async Task<bool> CheckMtkFirmwareAsync(string directory, string transport, bool skipUserdata)
-    {
-        if (!await ExecuteCommandCleanAsync("mtk.exe", transport + " printgpt", "Firmware preflight: read device GPT", clearPartitions: true)) return false;
-        var layout = CurrentLayout();
-        var problems = await Task.Run(() => ShopServices.CheckImages(directory, layout, skipUserdata));
-        if (problems.Count > 0)
-        {
-            workflowFailed = true;
-            Log("[FAIL] Firmware preflight:\n" + string.Join("\n", problems), Color.Red);
-            return false;
-        }
-        // Matching sizes do not establish model or boot-chain compatibility.
-        bool approved = MessageBox.Show("Partition names and image sizes match the device GPT.\n\nModel / firmware compatibility is not verified. Confirm the firmware is for this device before continuing.",
-            "Firmware preflight", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
-        if (!approved) workflowFailed = true;
-        return approved;
-    }
 
     private void BuildShopPanel()
     {
@@ -171,13 +153,14 @@ public partial class Form1
         };
         adbList.SelectedIndexChanged += (_, _) =>
         {
+            if (isTaskRunning || flashWorkflowRunning) return;
             if (adbList.SelectedItem is string serial && !string.Equals(serial, selectedAdbSerial, StringComparison.Ordinal))
             {
                 selectedAdbSerial = serial;
                 InvalidateAdbDeviceCache();
             }
         };
-        fastbootList.SelectedIndexChanged += (_, _) => { if (fastbootList.SelectedItem is string serial) selectedFastbootSerial = serial; };
+        fastbootList.SelectedIndexChanged += (_, _) => { if (!isTaskRunning && !flashWorkflowRunning && fastbootList.SelectedItem is string serial) selectedFastbootSerial = serial; };
         deviceLayout.Controls.AddRange(new Control[] { new Label { AutoSize = true, Text = "ADB (USB debugging authorized)" }, adbList,
             new Label { AutoSize = true, Text = "Fastboot" }, fastbootList, scanDevices,
             new Label { AutoSize = true, MaximumSize = new Size(650, 0), Text = "Commands are pinned to the selected serial. A missing selected device stops the command instead of switching to another phone. MTK/EDL operations use their own transport; this selector applies to ADB/fastboot commands." } });
