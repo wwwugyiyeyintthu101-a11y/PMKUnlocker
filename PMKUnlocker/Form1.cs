@@ -7565,14 +7565,14 @@ namespace PMKUnlocker
         {
             switch (cmbAdbReboot.SelectedIndex)
             {
-                case 0: Log("Rebooting System..."); await ExecuteCommandQuickAsync("adb.exe", "reboot"); break;
-                case 1: Log("Rebooting Recovery..."); await ExecuteCommandQuickAsync("adb.exe", "reboot recovery"); break;
-                case 2: Log("Rebooting Bootloader..."); await ExecuteCommandQuickAsync("adb.exe", "reboot bootloader"); break;
-                case 3: Log("Rebooting EDL..."); await ExecuteCommandQuickAsync("adb.exe", "reboot edl"); break;
-                case 4: Log("Rebooting Safe Mode..."); await ExecuteCommandQuickAsync("adb.exe", "reboot safe_mode"); break;
-                case 5: Log("Powering Off..."); await ExecuteCommandQuickAsync("adb.exe", "shell reboot -p"); break;
+                case 0: Log("Rebooting System...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "reboot"); break;
+                case 1: Log("Rebooting Recovery...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "reboot recovery"); break;
+                case 2: Log("Rebooting Bootloader...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "reboot bootloader"); break;
+                case 3: Log("Rebooting EDL...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "reboot edl"); break;
+                case 4: Log("Rebooting Safe Mode...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "reboot safe_mode"); break;
+                case 5: Log("Powering Off...", Color.Cyan); await ExecuteCommandQuickAsync("adb.exe", "shell reboot -p"); break;
             }
-            Log("Done.");
+            Log("Done.", Color.LightGreen);
         }
 
         // --- Fastboot Handlers ---
