@@ -314,7 +314,7 @@ namespace PMKUnlocker
                     }
                     if (!string.IsNullOrEmpty(adbRes) && adbRes.Contains("\tunauthorized"))
                     {
-                        Log("[OK] Device back online: ADB unauthorized — ဖုန်း screen မှာ USB debugging ခွင့်ပြုပါ။", Color.Yellow);
+                        Log("[OK] Device back online: ADB unauthorized — allow USB debugging on the phone screen.", Color.Yellow);
                         _ = CheckAllDevicesAsync(false);
                         return;
                     }
@@ -327,7 +327,7 @@ namespace PMKUnlocker
                         continue;
                     }
                 }
-                Log("[!] Device not back after 300s — screen ပေါ်ကြည့်ပါ / USB ပြန်ဆွဲပါ။", Color.Orange);
+                Log("[!] Device not back after 300s — check the screen / replug USB.", Color.Orange);
             }
             catch { }
         }
@@ -2367,7 +2367,7 @@ namespace PMKUnlocker
                 if (partitionSnapshot == null || partitionSnapshot.Count == 0 || loadedPartitions.Count > 0) return;
                 foreach (PartitionMeta pm in partitionSnapshot) AddPartitionRow(pm.Name, pm.Offset, pm.LengthHex);
                 partitionSnapshot = null;
-                Log("[i] GPT/size ကနေ row မရလို့ ယခင် partition list ကို ပြန်ပြတယ်.", Color.Gray);
+                Log("[i] No row from GPT/size — showing previous partition list.", Color.Gray);
             }
             if (flashWorkflowContext.Value) workflowDidOp = true;
 
@@ -2680,7 +2680,7 @@ namespace PMKUnlocker
                     string timedOutRaw = string.Join("\n", rawSnapshot);
                     if (timedOutRaw.Contains("PreLoader VCOM") || timedOutRaw.Contains("Handshake failed") ||
                         timedOutRaw.Contains("BROM") || timedOutRaw.Contains("preloader"))
-                        Log("[i] Recovery: ဖုန်းကို power off (~10s) လုပ်ပြီး Vol+ & Vol- ကို ဆုပ်ထားကာ USB ပြန်တပ်ပါ — BROM mode မှသာ mtkclient ချိတ်နိုင်တယ်။", Color.Cyan);
+                        Log("[i] Recovery: power off the phone (~10s), hold Vol+ & Vol- and replug USB — mtkclient only connects in BROM mode.", Color.Cyan);
                 }
                 if (!quiet)
                 {
@@ -2779,7 +2779,7 @@ namespace PMKUnlocker
             else if (joined.Contains("userdata") || joined.Contains("encrypt") || joined.Contains("FRP"))
                 Hint("Data/FRP lock — FRP Remove သို့ Userlock Reset ကို owner consent နဲ့ စမ်းပါ။");
             else if (exitCode != 0)
-                Hint("Command fail — raw log (pmk_last_command.log) ကို ဖတ်ပြီး error line ကို ရှာပါ၊ မရရင် STOP → Scan Port → retry။");
+                Hint("Command failed — read raw log (pmk_last_command.log) and find the error line; if not, STOP → Scan Port → retry.");
         }
 
         // ================= PARTITION SIZE WARNING =================
@@ -3426,7 +3426,7 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
-                Log("[!] " + title + ": root (su) မရပါ — Xiaomi Temp Root / Magisk / KernelSU စမ်းပါ", Color.OrangeRed);
+                Log("[!] " + title + ": no root (su) — try Xiaomi Temp Root / Magisk / KernelSU", Color.OrangeRed);
                 MessageBox.Show("Root (su) မရပါ။\n\nADB partition r/w/e အတွက် root လိုအပ်ပါတယ်。",
                     title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
@@ -4673,8 +4673,8 @@ namespace PMKUnlocker
                         {
                             matchedDir = dirs[0];
                             if (!string.IsNullOrEmpty(selModel))
-                                Log("[!] FDL loader မရှိတဲ့ chipset: " + selModel +
-                                    " — အရန်အဖြင့် " + Path.GetFileName(matchedDir) + " သုံးမှာ မှားနိုင်", Color.Orange);
+                                Log("[!] Chipset without FDL loader: " + selModel +
+                                    " — fallback " + Path.GetFileName(matchedDir) + " may be wrong", Color.Orange);
                         }
                     }
 
@@ -4993,7 +4993,7 @@ namespace PMKUnlocker
             if (ok)
             {
                 Log("[OK] FRP Reset job finished!", Color.LightGreen);
-                Log("[i] Phone reboot ပြီးရင် setup wizard မှာ FRP ပျက်/မပျက် စစ်ပါ (log ထဲ 'part not exist' ပါရင် အဲ့ partition မရှိတာ)", Color.Gray);
+                Log("[i] After phone reboot, check in setup wizard whether FRP is gone (if log says 'part not exist', that partition is missing)", Color.Gray);
             }
         }
 
@@ -5023,7 +5023,7 @@ namespace PMKUnlocker
             if (ok)
             {
                 Log("[OK] Userlock + FRP Reset job finished!", Color.LightGreen);
-                Log("[i] First boot 1-3 မိနစ်ကြာနိုင်တယ် — setup wizard မှာ lock/migration ပျက်သွားတာ စစ်ပါ", Color.Gray);
+                Log("[i] First boot can take 1-3 minutes — check in setup wizard that lock/migration is gone", Color.Gray);
             }
         }
 
@@ -5258,6 +5258,42 @@ namespace PMKUnlocker
                 rtbLog.SelectionColor = color ?? Color.FromArgb(0, 255, 128);
 
                 rtbLog.AppendText(message + "\r\n");
+                rtbLog.SelectionColor = rtbLog.ForeColor;
+                rtbLog.ScrollToCaret();
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        }
+
+        private void LogPair(string label, string value, Color labelColor, Color valueColor, bool boldValue = true)
+        {
+            if (rtbLog == null || rtbLog.IsDisposed || !rtbLog.IsHandleCreated) return;
+            try
+            {
+                if (rtbLog.InvokeRequired)
+                {
+                    rtbLog.Invoke(new Action(() => LogPair(label, value, labelColor, valueColor, boldValue)));
+                    return;
+                }
+
+                rtbLog.SelectionStart = rtbLog.TextLength;
+                rtbLog.SelectionLength = 0;
+                rtbLog.SelectionColor = labelColor;
+                rtbLog.AppendText(label);
+                rtbLog.SelectionColor = valueColor;
+                if (boldValue)
+                {
+                    using (Font bold = new Font(rtbLog.Font, FontStyle.Bold))
+                    {
+                        rtbLog.SelectionFont = bold;
+                        rtbLog.AppendText(value + "\r\n");
+                        rtbLog.SelectionFont = rtbLog.Font;
+                    }
+                }
+                else
+                {
+                    rtbLog.AppendText(value + "\r\n");
+                }
                 rtbLog.SelectionColor = rtbLog.ForeColor;
                 rtbLog.ScrollToCaret();
             }
@@ -5934,7 +5970,7 @@ namespace PMKUnlocker
                     slot = slot.Trim().ToLowerInvariant();
                     if (slot != "a" && slot != "b")
                     {
-                        Log("[!] Boot slot set: slot သည် a / b ဖြစ်ရမယ် — '" + slot + "' (cancelled)", Color.Orange);
+                        Log("[!] Boot slot set: slot must be a or b — '" + slot + "' (cancelled)", Color.Orange);
                         return;
                     }
                     if (!await FastbootReadyAsync("set_active")) return;
@@ -5954,7 +5990,7 @@ namespace PMKUnlocker
                     string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
                     if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
                     {
-                        Log("[!] ADB device not found — USB debugging ဖွင့်ပြီး cable ချိတ်ပါ.", Color.Orange);
+                        Log("[!] ADB device not found — enable USB debugging and connect the cable.", Color.Orange);
                         return;
                     }
                     await ExecuteCommandCleanAsync("adb.exe", "shell locksettings set-disabled " + (disabling ? "true" : "false"),
@@ -5974,7 +6010,7 @@ namespace PMKUnlocker
                     string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
                     if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
                     {
-                        Log("[!] ADB device not found — USB debugging ဖွင့်ပြီး cable ချိတ်ပါ.", Color.Orange);
+                        Log("[!] ADB device not found — enable USB debugging and connect the cable.", Color.Orange);
                         return;
                     }
                     await ExecuteCommandCleanAsync("adb.exe", "shell dumpsys lock_settings", "Read user locks", false, true);
@@ -5994,7 +6030,7 @@ namespace PMKUnlocker
                     {
                         if (ofd.ShowDialog(this) != DialogResult.OK)
                         {
-                            Log("[i] Font install: APK မရွေးဘဲ ပစ်လိုက်တယ် (cancel).", Color.Gray);
+                            Log("[i] Font install: skipped without picking an APK (cancel).", Color.Gray);
                             return;
                         }
                         await ExecuteCommandCleanAsync("adb.exe", "install -r \"" + ofd.FileName + "\"",
@@ -6013,7 +6049,7 @@ namespace PMKUnlocker
                     string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
                     if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
                     {
-                        Log("[!] ADB device not found — USB debugging ဖွင့်ပြီး cable ချိတ်ပါ.", Color.Orange);
+                        Log("[!] ADB device not found — enable USB debugging and connect the cable.", Color.Orange);
                         return;
                     }
                     string st = (await ExecuteCommandQuickAsync("adb.exe", "shell settings get secure xiaomi_find_device_status")).Trim();
@@ -6032,7 +6068,7 @@ namespace PMKUnlocker
                         }
                     }
                     if (!any)
-                        Log("[i] find_device prop မတွေ့ — MIUI/HyperOS မှာ prop အမည် ကွာနိုင်တယ် (read-only, ပြောင်းလဲမှု မရှိ)", Color.Gray);
+                        Log("[i] find_device prop not found — prop name may differ on MIUI/HyperOS (read-only, no change made)", Color.Gray);
                 };
                 return true;
             }
@@ -6967,7 +7003,7 @@ namespace PMKUnlocker
         // --- ADB Handlers ---
         private async void BtnAdbInfo_Click(object sender, EventArgs e)
         {
-            Log("Reading Device Details...", Color.Cyan);
+            Log("📱 Reading Device Details...", Color.FromArgb(0, 230, 255));
             string devices = await ExecuteCommandQuickAsync("adb.exe", "devices");
 
             if (devices.Contains("\tdevice"))
@@ -7042,29 +7078,42 @@ namespace PMKUnlocker
 
                 string modelDisplay = !string.IsNullOrWhiteSpace(marketName) ? model + " (" + marketName + ")" : model;
 
-                Log("======================================", Color.FromArgb(0, 180, 255));
-                Log("Brand            : " + brand, Color.White);
-                Log("Model            : " + modelDisplay, Color.White);
-                if (!string.IsNullOrWhiteSpace(deviceName)) Log("Device Name      : " + deviceName, Color.White);
-                Log("Codename / Board : " + codename + " / " + board, Color.White);
-                Log("Android Ver      : Android " + android + (string.IsNullOrWhiteSpace(sdk) ? "" : " (SDK " + sdk + ")") +
-                    (string.IsNullOrWhiteSpace(patch) ? "" : ", patch " + patch), Color.White);
+                Color lbl = Color.FromArgb(130, 145, 170);
+                Color idCol = Color.FromArgb(95, 255, 175);
+                Color sysCol = Color.FromArgb(85, 205, 255);
+                Color hwCol = Color.FromArgb(255, 205, 90);
+                Color uniCol = Color.FromArgb(215, 155, 255);
+                Color okCol = Color.FromArgb(95, 255, 175);
+                Color badCol = Color.OrangeRed;
+                Color warnCol = Color.FromArgb(255, 180, 70);
+
+                string selinuxText = string.IsNullOrWhiteSpace(enforce) ? (string.IsNullOrWhiteSpace(selinux) ? "?" : selinux) : enforce;
+                string selinuxFull = selinuxText +
+                    "  (secure=" + (string.IsNullOrWhiteSpace(secureVal) ? "?" : secureVal) + ", debuggable=" + (string.IsNullOrWhiteSpace(debuggable) ? "?" : debuggable) + ")";
+                string rootText = string.IsNullOrWhiteSpace(suOut) ? "not detected (no su)" : "su found: " + suOut;
+                bool bootBad = bootState.Contains("UNLOCKED") || bootState.Contains("verifiedboot=orange") || bootState.Contains("verifiedboot=red");
+
+                Log("======================================", Color.FromArgb(0, 110, 170));
+                LogPair("Brand            : ", brand, lbl, idCol);
+                LogPair("Model            : ", modelDisplay, lbl, idCol);
+                if (!string.IsNullOrWhiteSpace(deviceName)) LogPair("Device Name      : ", deviceName, lbl, idCol);
+                LogPair("Codename / Board : ", codename + " / " + board, lbl, idCol);
+                LogPair("Android Ver      : ", "Android " + android + (string.IsNullOrWhiteSpace(sdk) ? "" : " (SDK " + sdk + ")") +
+                    (string.IsNullOrWhiteSpace(patch) ? "" : ", patch " + patch), lbl, sysCol);
                 if (!string.IsNullOrWhiteSpace(miuiVer) || !string.IsNullOrWhiteSpace(incremental))
-                    Log("MIUI / Build     : " + (string.IsNullOrWhiteSpace(miuiVer) ? "-" : miuiVer) + "  " + incremental, Color.White);
-                Log("Build ID / Type  : " + buildId + " (" + buildType + ")", Color.White);
-                Log("SoC / CPU Arch   : " + soc + " / " + cpuAbi, Color.White);
-                Log("Region / Locale  : " + (string.IsNullOrWhiteSpace(region) ? "-" : region) + " / " + (string.IsNullOrWhiteSpace(locale) ? "-" : locale), Color.White);
-                Log("RAM              : " + (string.IsNullOrWhiteSpace(ram) ? "-" : ram), Color.White);
-                Log("Storage /data    : " + (string.IsNullOrWhiteSpace(storage) ? "-" : storage), Color.White);
-                Log("Screen / Density : " + displaySize + (string.IsNullOrWhiteSpace(density) ? "" : " @ " + density + "dpi"), Color.White);
-                Log("Serial Number    : " + serial, Color.White);
-                if (!string.IsNullOrWhiteSpace(slotSuffix)) Log("A/B / Slots      : " + slotSuffix, Color.White);
-                if (bootState.Length > 0) Log("Bootloader State : " + bootState, Color.White);
-                Log("SELinux          : " + (string.IsNullOrWhiteSpace(enforce) ? (string.IsNullOrWhiteSpace(selinux) ? "?" : selinux) : enforce) +
-                    "  (secure=" + (string.IsNullOrWhiteSpace(secureVal) ? "?" : secureVal) + ", debuggable=" + (string.IsNullOrWhiteSpace(debuggable) ? "?" : debuggable) + ")",
-                    Color.White);
-                Log("Root             : " + (string.IsNullOrWhiteSpace(suOut) ? "not detected (no su)" : "su found: " + suOut), Color.White);
-                Log("======================================", Color.FromArgb(0, 180, 255));
+                    LogPair("MIUI / Build     : ", (string.IsNullOrWhiteSpace(miuiVer) ? "-" : miuiVer) + "  " + incremental, lbl, sysCol);
+                LogPair("Build ID / Type  : ", buildId + " (" + buildType + ")", lbl, sysCol);
+                LogPair("SoC / CPU Arch   : ", soc + " / " + cpuAbi, lbl, sysCol);
+                LogPair("Region / Locale  : ", (string.IsNullOrWhiteSpace(region) ? "-" : region) + " / " + (string.IsNullOrWhiteSpace(locale) ? "-" : locale), lbl, sysCol);
+                LogPair("RAM              : ", string.IsNullOrWhiteSpace(ram) ? "-" : ram, lbl, hwCol);
+                LogPair("Storage /data    : ", string.IsNullOrWhiteSpace(storage) ? "-" : storage, lbl, hwCol);
+                LogPair("Screen / Density : ", displaySize + (string.IsNullOrWhiteSpace(density) ? "" : " @ " + density + "dpi"), lbl, hwCol);
+                LogPair("Serial Number    : ", serial, lbl, uniCol);
+                if (!string.IsNullOrWhiteSpace(slotSuffix)) LogPair("A/B / Slots      : ", slotSuffix, lbl, uniCol);
+                if (bootState.Length > 0) LogPair("Bootloader State : ", bootState, lbl, bootBad ? badCol : okCol);
+                LogPair("SELinux          : ", selinuxFull, lbl, selinuxText == "?" ? Color.Gray : (selinuxText.Contains("Permissive") ? badCol : okCol));
+                LogPair("Root             : ", rootText, lbl, string.IsNullOrWhiteSpace(suOut) ? warnCol : okCol);
+                Log("======================================", Color.FromArgb(0, 110, 170));
             }
             else
             {
@@ -7172,7 +7221,7 @@ namespace PMKUnlocker
             string check = await ExecuteCommandQuickAsync("adb.exe", "shell locksettings get-disabled");
             Log("[i] locksettings get-disabled: " + (string.IsNullOrWhiteSpace(check) ? "(empty)" : check.Trim()), Color.Gray);
             Log("[!] Non-root remove is not reliable on Android 11+.", Color.Orange);
-            Log("[i] Fallback: 🗑 Factory Reset (ADB) သို့ MTK tab → 🔑 Userlock Reset သုံးပါ (data ပျက်မယ်).", Color.Orange);
+            Log("[i] Fallback: use 🗑 Factory Reset (ADB) or MTK tab → 🔑 Userlock Reset (wipes data).", Color.Orange);
         }
 
         // ROOT partition list + RW remount — root ရှိရင် by-name list ပြ၊ ရွေးတဲ့ partition ကို mount -o remount,rw
@@ -7405,7 +7454,7 @@ namespace PMKUnlocker
             }
             SyncPartitionPanel(false);   // ADB ROOT grid ပြည့်ပြီ — partition row အလိုအလျောက် ချိန်
             Log("[OK] " + dgvPartitions.RowCount + " partition(s) in grid — right-click → Mount RW", Color.LightGreen);
-            Log("[i] Mounted rows (system/vendor…) ကို right-click → 🔓 Mount RW", Color.Gray);
+            Log("[i] Right-click mounted rows (system/vendor…) → 🔓 Mount RW", Color.Gray);
         }
 
         // Factory Reset — ADB ကန် recovery wipe / MASTER_CLEAR ကြိုးစား။ မရရင် recovery ပို့ပြီး လက်နှိပ်ရန် ညွှန်။
@@ -7699,8 +7748,8 @@ namespace PMKUnlocker
             string before = SlotFromGetvar(rawCur);
             if (before != "a" && before != "b")
             {
-                Log("[!] Current slot ဖတ်လို့ မရ — " + (string.IsNullOrWhiteSpace(rawCur) ? "(no output)" : rawCur.Trim()), Color.Orange);
-                Log("[i] (A/B slot မရှိတဲ့ device/variant ဖြစ်နိုင် — 🔍 Read Fastboot နဲ့ current-slot စစ်ကြည့်ပါ)", Color.Gray);
+                Log("[!] Cannot read current slot — " + (string.IsNullOrWhiteSpace(rawCur) ? "(no output)" : rawCur.Trim()), Color.Orange);
+                Log("[i] (May be a non-A/B device/variant — check current-slot with 🔍 Read Fastboot)", Color.Gray);
                 return;
             }
 
@@ -7710,12 +7759,12 @@ namespace PMKUnlocker
                 (cnt.Length == 0 && sfx.Length > 0 && !(sfx.Contains('a') && sfx.Contains('b')));
             if (singleSlot)
             {
-                Log($"[!] ဒီဖုန်းက single-slot (A-only) device — A⇄B toggle မရနိုင်ဘူး (slot-count={cnt}, suffixes={(GetvarValue(rawSfx, "slot-suffixes") == "" ? "(empty)" : GetvarValue(rawSfx, "slot-suffixes"))})", Color.OrangeRed);
+                Log($"[!] This phone is single-slot (A-only) — A⇄B toggle not possible (slot-count={cnt}, suffixes={(GetvarValue(rawSfx, "slot-suffixes") == "" ? "(empty)" : GetvarValue(rawSfx, "slot-suffixes"))})", Color.OrangeRed);
                 return;
             }
 
             if (GetvarValue(rawUsr, "is-userspace").StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                Log("[i] fastbootd (userspace) mode — slot ပြောင်းမှုက reboot ပြီးမှ effective ဖြစ်နိုင်တယ်", Color.Cyan);
+                Log("[i] fastbootd (userspace) mode — slot switch may only take effect after reboot", Color.Cyan);
 
             string next = before == "a" ? "b" : "a";
             string rawUnb = await ExecuteCommandQuickAsync("fastboot.exe", "getvar slot-unbootable:" + next);
@@ -7730,7 +7779,7 @@ namespace PMKUnlocker
                         Log("   " + t, Color.Gray);
                 }
             if (GetvarValue(rawUnb, "slot-unbootable:" + next).StartsWith("y", StringComparison.OrdinalIgnoreCase))
-                Log($"[!] Slot {next.ToUpperInvariant()} is unbootable — bootloader က ငြင်းနိုင်တယ် (boot image မရှိ/မအောင်မြင်)", Color.Orange);
+                Log($"[!] Slot {next.ToUpperInvariant()} is unbootable — bootloader may reject it (boot image missing/failed)", Color.Orange);
 
             Log($"[*] Current slot: {before.ToUpperInvariant()} → switching to {next.ToUpperInvariant()}...", Color.Orange);
             bool ok = await ExecuteCommandCleanAsync("fastboot.exe", "set_active " + next,
@@ -7754,12 +7803,12 @@ namespace PMKUnlocker
 
             if (after != "a" && after != "b")
             {
-                Log("[i] set_active OK — verify မှာ current-slot output မရ (reboot ဖြစ်သွားလို့ ဖြစ်နိုင်)", Color.Gray);
+                Log("[i] set_active OK — no current-slot output when verifying (device may have rebooted)", Color.Gray);
                 return;
             }
 
-            Log($"[!] set_active OKAY ပေမဲ့ current-slot = {after.ToUpperInvariant()} အတိုင်းကျန်နေသေးတယ်", Color.Orange);
-            Log("[i] တစ်ချို့ bootloader များ switch ကို reboot ပြီးမှ apply လုပ်တယ် — bootloader ပြန်ဝင်စစ်နိုင်တယ်", Color.Gray);
+            Log($"[!] set_active OKAY but current-slot = {after.ToUpperInvariant()} still unchanged", Color.Orange);
+            Log("[i] Some bootloaders apply the switch only after reboot — you can re-check in bootloader", Color.Gray);
 
             var ask = MessageBox.Show(
                 "set_active က device က OKAY ပြန်ပေမဲ့ current-slot က " + after.ToUpperInvariant() + " အတိုင်းပါ။\n\n" +
@@ -7771,7 +7820,7 @@ namespace PMKUnlocker
             Log("[*] Rebooting to bootloader...", Color.Orange);
             if (!await ExecuteCommandCleanAsync("fastboot.exe", "reboot-bootloader", "Reboot Bootloader", showRawOutput: true))
             {
-                Log("[!] reboot-bootloader မအောင် — ကိုယ်တိုင် reboot bootloader ပြန်ဝင်ပြီး Switch Slot ထပ်စမ်းပါ", Color.Orange);
+                Log("[!] reboot-bootloader failed — reboot to bootloader manually and retry Switch Slot", Color.Orange);
                 return;
             }
 
@@ -7784,11 +7833,11 @@ namespace PMKUnlocker
             }
 
             if (after2 == next)
-                Log($"[+] Slot switched — current slot is now {next.ToUpperInvariant()} (reboot ပြီးမှ apply ဖြစ်တာ).", Color.LightGreen);
+                Log($"[+] Slot switched — current slot is now {next.ToUpperInvariant()} (applies after reboot).", Color.LightGreen);
             else if (after2 == before)
-                Log($"[!] Reboot ပြီးသားပါပေမဲ့ current-slot = {after2.ToUpperInvariant()} — bootloader က switch လက်မခံဘူး (locked? / slot state ကို အပေါ် block ကြည့်ပါ)", Color.OrangeRed);
+                Log($"[!] Already rebooted but current-slot = {after2.ToUpperInvariant()} — bootloader did not accept the switch (locked? / check the slot state block above)", Color.OrangeRed);
             else
-                Log("[!] Reboot ပြီး device ပြန် fastboot မဝင်လာ — ခဏစောင့်ပြီး Switch Slot ထပ်စမ်းပါ", Color.Orange);
+                Log("[!] Device did not come back to fastboot after reboot — wait a moment and retry Switch Slot", Color.Orange);
         }
 
         // fastboot getvar output ထဲက value တန်ဖိုး (variant format အမျိုးမျိုးကို ကာကွယ်)
@@ -7887,7 +7936,7 @@ namespace PMKUnlocker
             catch (Exception ex) { Log("[!] " + Path.GetFileName(bat) + " parse failed: " + ex.Message, Color.OrangeRed); return; }
             if (!SetMiFlashOps(ops))
             {
-                Log("[!] " + Path.GetFileName(bat) + " — fastboot command 0 ခုပဲ — flash_all.bat မဟုတ်ဘူး", Color.Orange);
+                Log("[!] " + Path.GetFileName(bat) + " — 0 fastboot commands — not a flash_all.bat", Color.Orange);
                 MessageBox.Show(this,
                     "ဒီ .bat ထဲမှာ fastboot command မပါဘူး။\n\nMIUI Fastboot ROM ရဲ့ flash_all.bat\n(သို့) flash_all_lock.bat ကို ရွေးပါ။",
                     "Mi Flash", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -7914,7 +7963,7 @@ namespace PMKUnlocker
             }
             if (miFlashOps.Count == 0 || dgvMiParts.Rows.Count == 0)
             {
-                Log("[!] No ROM loaded — '📄 flash_all.bat' ကို ရွေးပါ", Color.Orange);
+                Log("[!] No ROM loaded — pick '📄 flash_all.bat'", Color.Orange);
                 return;
             }
 
@@ -7924,7 +7973,7 @@ namespace PMKUnlocker
                     selected.Add(miFlashOps[i]);
             if (selected.Count == 0)
             {
-                Log("[!] op 1 ခုမှ မရွေးထား — checkbox 1 ခုအနည်းဆုံး ရွေးပါ", Color.Orange);
+                Log("[!] No op selected — tick at least one checkbox", Color.Orange);
                 return;
             }
 
@@ -8084,7 +8133,7 @@ namespace PMKUnlocker
                 : e2.Seconds + " seconds";
             Log(" Elapsed Time... " + elapsed, Color.Yellow);
             Log(" Finished at local time: [" + DateTime.Now.ToString("dd.MM.yy HH:mm:ss") + "]", Color.Yellow);
-            if (failCount > 0) Log("[!] " + failCount + " op(s) FAILED — log ကို စစ်ပါ", Color.OrangeRed);
+            if (failCount > 0) Log("[!] " + failCount + " op(s) FAILED — check the log", Color.OrangeRed);
             ResetProgress();
         }
 
@@ -10588,12 +10637,12 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
             string adbRes = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (adbRes.Contains("\tdevice"))
-                Log("[i] ADB device found too — Read Info (ADB) button က ပိုသေချာတယ်။", Color.Orange);
+                Log("[i] ADB device found too — the Read Info (ADB) button is more reliable.", Color.Orange);
 
             var devs = await FindSamsungUsbDevicesAsync();
             if (devs.Count == 0)
             {
-                Log("[!] Samsung USB device မတွေ့ပါ — cable ချိတ်ပြီး File Transfer mode ရွေးပြီး Scan ပြန်နှိပ်ပါ။", Color.OrangeRed);
+                Log("[!] Samsung USB device not found — connect cable, select File Transfer mode and press Scan again.", Color.OrangeRed);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
@@ -10616,7 +10665,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
             if (ports.Count == 0)
             {
-                Log("[!] Samsung Modem COM port မတွေ့ပါ — Device Manager မှာ (COMx) ရှိ/မရှိ စစ်ပါ။", Color.Orange);
+                Log("[!] Samsung Modem COM port not found — check Device Manager for (COMx).", Color.Orange);
             }
             else
             {
@@ -10901,7 +10950,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                                 if (!string.IsNullOrWhiteSpace(androidVer)) LogField("Android version", androidVer);
                                 if (!string.IsNullOrWhiteSpace(frp)) LogField("FRP status", frp);
                                 if (!gotAny)
-                                    Log("[i] AT payload မရ — DEVCONINFO ERROR/BUSY? ဖုန်း unlock + File Transfer mode စစ်ပါ။", Color.Gray);
+                                    Log("[i] No AT payload — DEVCONINFO ERROR/BUSY? Check phone unlock + File Transfer mode.", Color.Gray);
                             }
                             return;
                         }
@@ -10912,7 +10961,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     }
                 }
             }
-            Log("[!] Modem AT info မရ (port busy / no AT).", Color.Orange);
+            Log("[!] No modem AT info (port busy / no AT).", Color.Orange);
         }
 
         private void LogField(string name, string value)
@@ -11114,7 +11163,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 .Where(d => d.IsMtpLike || d.Role == "MTP" || d.Role == "Connectivity").ToList();
             if (mtpDevs.Count == 0)
             {
-                Log("[!] Samsung MTP device မတွေ့ပါ — USB ချိတ်ပြီး File Transfer mode ရွေးပါ။", Color.OrangeRed);
+                Log("[!] Samsung MTP device not found — connect USB and select File Transfer mode.", Color.OrangeRed);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
@@ -11134,7 +11183,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             string adbNow = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (adbNow.Contains("\tdevice"))
             {
-                Log("[i] ADB device ရှိပြီ — ADB FRP ကို တိုက်ရိုက်ဆက်တယ်။", Color.Orange);
+                Log("[i] ADB device present — continuing straight to ADB FRP.", Color.Orange);
                 await RunAdbFrpResetAsync("Samsung (via MTP)", true);
                 return;
             }
@@ -11155,7 +11204,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     Environment.NewLine + Environment.NewLine + "Test mode ဝင်ပြီးပြီလား?",
                     "Samsung Test Mode", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
             {
-                Log("[i] Cancelled — ADB enable မလုပ်တော့ပါ။", Color.Orange);
+                Log("[i] Cancelled — ADB enable skipped.", Color.Orange);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
@@ -11166,9 +11215,9 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             if (ports.Count > 0)
                 atEnabled = await TrySamsungAtEnableAdbAsync(ports);
             else
-                Log("[i] Modem COM port မတွေ့ — AT enable ကျော်ပြီး wait loop ဆက်တယ်။", Color.Orange);
+                Log("[i] Modem COM port not found — skipping AT enable and continuing the wait loop.", Color.Orange);
             if (!atEnabled)
-                Log("[i] AT ADB enable မအောင်မြင် — *#0*# / *#0808# (USB Settings → MTP+ADB) ကို ဖုန်းပေါ် စမ်းပါ။", Color.Orange);
+                Log("[i] AT ADB enable failed — try *#0*# / *#0808# (USB Settings → MTP+ADB) on the phone.", Color.Orange);
 
             var baselineUsb = await FindSamsungUsbDevicesAsync();
             string baselineSig = SamsungUsbSignature(baselineUsb);
@@ -11192,12 +11241,12 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 string res = await ExecuteCommandQuickAsync("adb.exe", "devices");
                 if (res.Contains("\tunauthorized"))
                 {
-                    Log("[!] ADB unauthorized — ဖုန်းပေါ် 'Allow USB debugging?' Allow နှိပ်ပါ။", Color.Yellow);
+                    Log("[!] ADB unauthorized — tap Allow on the phone's 'Allow USB debugging?' prompt.", Color.Yellow);
                     continue;
                 }
                 if (res.Contains("\tdevice"))
                 {
-                    Log("[OK] ADB device ပေါ်လာပြီ — Removing FRP...", Color.LightGreen);
+                    Log("[OK] ADB device online — Removing FRP...", Color.LightGreen);
                     await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
                     Log("========================================================", Color.FromArgb(0, 180, 255));
                     return;
@@ -11211,7 +11260,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     usbChangedEver = true;
                     if (!usbChangedLogged)
                     {
-                        Log("[i] Samsung USB interface ပြောင်းလဲ — ADB/Diag ပေါ်/မပေါ် ပြန်စစ်...", Color.Cyan);
+                        Log("[i] Samsung USB interface changed — re-checking ADB/Diag...", Color.Cyan);
                         foreach (var d in usbNow)
                             Log("    " + (string.IsNullOrWhiteSpace(d.Pid) ? "?" : "04E8:" + d.Pid) +
                                 "  " + (string.IsNullOrWhiteSpace(d.FriendlyName) ? d.Service : d.FriendlyName), Color.Gray);
@@ -11224,7 +11273,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     res = await ExecuteCommandQuickAsync("adb.exe", "devices");
                     if (res.Contains("\tdevice"))
                     {
-                        Log("[OK] ADB (after USB change) ပေါ်လာပြီ — Removing FRP...", Color.LightGreen);
+                        Log("[OK] ADB online (after USB change) — Removing FRP...", Color.LightGreen);
                         await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
                         Log("========================================================", Color.FromArgb(0, 180, 255));
                         return;
@@ -11270,13 +11319,13 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
             if (adbFinal.Contains("\tdevice"))
             {
-                Log("[OK] ADB ပေါ်လာပြီ — Removing FRP...", Color.LightGreen);
+                Log("[OK] ADB online — Removing FRP...", Color.LightGreen);
                 await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
 
-            Log("[FAIL] ADB wait ကုန် (90s) — test mode မဝင်ရ/AT enable block/USB mode မမှန်/patch မြင့်နိုင်။", Color.Red);
+            Log("[FAIL] ADB wait timed out (90s) — test mode not entered / AT enable blocked / wrong USB mode / high patch level possible.", Color.Red);
             Log("[i] adb devices: " + FirstLine(adbFinal), Color.Gray);
             if (usbEnd.Count > 0)
             {
@@ -11290,14 +11339,14 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             // ADB interface ဘယ်တော့မှ မပေါ် + PID 6860 အတိုင်း → *#0*# method မဆောင်း (A3 2016 စသည်)
             if (!adbIfNow && !usbChangedEver && !pidChanged)
             {
-                Log("[!] *#0*# က ADB interface မဖွင့်ပါ (PID 6860 MTP အတိုင်း) — ဒီ firmware အတွက် test-mode ADB မသင့်။", Color.OrangeRed);
-                Log("[i] Galaxy A3 (2016) / Android 5–6 ဆိုရင် SideSync / OTG / Download mode နည်း သုံးပါ။", Color.Orange);
+                Log("[!] *#0*# did not open ADB interface (still PID 6860 MTP) — test-mode ADB not suitable for this firmware.", Color.OrangeRed);
+                Log("[i] For Galaxy A3 (2016) / Android 5–6 use SideSync / OTG / Download mode methods.", Color.Orange);
                 ShowSamsungLegacyFrpGuide(samName);
             }
             else
             {
-                Log("[i] *#0*# ပြီးရင် File Transfer ပြန်ရွေး → USB ပြန်ချိတ် → ထပ်စမ်းပါ။", Color.Orange);
-                Log("[i] ADB မရရင့် — Download mode + heimdall / Recovery wipe / modem COM AT လမ်းကြောင်း စဉ်းစားပါ။", Color.Orange);
+                Log("[i] After *#0*# select File Transfer again → replug USB → retry.", Color.Orange);
+                Log("[i] If ADB fails — consider Download mode + heimdall / Recovery wipe / modem COM AT paths.", Color.Orange);
             }
             Log("========================================================", Color.FromArgb(0, 180, 255));
         }
@@ -11361,10 +11410,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                             }
                             if (anyOk)
                             {
-                                Log("[OK] AT ADB enable sequence ပို့ပြီး — USB re-enumerate စောင့်ပါ။", Color.LightGreen);
+                                Log("[OK] AT ADB enable sequence sent — waiting for USB re-enumerate.", Color.LightGreen);
                                 return true;
                             }
-                            Log("[i] " + comName + "@" + baud + " AT ကို reply မပြန်/block — baud ပြောင်းစမ်း...", Color.Orange);
+                            Log("[i] " + comName + "@" + baud + " AT no reply/blocked — trying different baud...", Color.Orange);
                         }
                         finally
                         {
@@ -11373,7 +11422,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     }
                 }
             }
-            Log("[!] AT ADB enable: port အားလုံး fail — *#0808# (USB Settings → MTP+ADB) ဖုန်းပေါ်ကနေ စမ်းပါ။", Color.Orange);
+            Log("[!] AT ADB enable: all ports failed — try *#0808# (USB Settings → MTP+ADB) on the phone.", Color.Orange);
             return false;
         }
 
@@ -11413,7 +11462,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     }
                 }
             }
-            Log("[i] Quick info: modem COM AT ကနေ မဖတ်နိုင် — MTP device အတိုင်း ဆက်မယ်။", Color.Gray);
+            Log("[i] Quick info: cannot read via modem COM AT — continuing as MTP device.", Color.Gray);
         }
 
         // Samsung PnP devices ကို disable/enable → *#0*# ပြီးမှ USB stack ပြန် attach
@@ -11433,7 +11482,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                         "-NoProfile -NonInteractive -Command \"" + ps.Replace("\"", "\\\"") + "\"");
                 }
                 await Task.Delay(1500);
-                Log("[i] USB kick done — *#0*# ရှိရင် အခု ADB ပေါ်နိုင်။", Color.Cyan);
+                Log("[i] USB kick done — with *#0*# done, ADB may appear now.", Color.Cyan);
             }
             catch (Exception ex)
             {
@@ -11446,13 +11495,13 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
         {
             Log("[i] ===== LEGACY SAMSUNG FRP (no *#0*# ADB) =====", Color.FromArgb(0, 200, 255));
             Log("[i] Device: " + (string.IsNullOrWhiteSpace(deviceName) ? "Samsung" : deviceName), Color.White);
-            Log("[i] 1) SideSync (Android 5–6 အတွက် အများဆုံး):", Color.White);
-            Log("[i]    PC မှာ Samsung SideSync install → open → USB ချိတ်", Color.White);
-            Log("[i]    ဖုန်းပေါ် popup ပေါ်ရင် install/allow → browser/settings ဝင်", Color.White);
-            Log("[i]    → Google account manager / FRP APK သွင်းနည်း ဆက်", Color.White);
-            Log("[i] 2) OTG: USB-OTG + flash drive (file manager APK) — setup wizard ထဲ ဝင်", Color.White);
+            Log("[i] 1) SideSync (most common for Android 5–6):", Color.White);
+            Log("[i]    Install Samsung SideSync on PC → open → connect USB", Color.White);
+            Log("[i]    If a phone popup appears, install/allow → enter browser/settings", Color.White);
+            Log("[i]    → continue with Google account manager / FRP APK method", Color.White);
+            Log("[i] 2) OTG: USB-OTG + flash drive (file manager APK) — enter setup wizard", Color.White);
             Log("[i] 3) Download mode (Vol- + Home + Power) → heimdall flash combination/firmware", Color.White);
-            Log("[i] 4) Recovery wipe — data ဖျက်ပေမယ့် FRP မပျက် (Android 5.1+)", Color.White);
+            Log("[i] 4) Recovery wipe — wipes data but NOT FRP (Android 5.1+)", Color.White);
             Log("[i] ================================================", Color.FromArgb(0, 200, 255));
 
             bool sideSync = FindSideSyncPath(out string ssPath);
@@ -11472,7 +11521,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                         FileName = ssPath,
                         UseShellExecute = true
                     });
-                    Log("[*] SideSync ဖွင့်ပြီ — USB ချိတ်ထားပြီး ဖုန်း popup စောင့်ပါ။", Color.Orange);
+                    Log("[*] SideSync opened — keep USB connected and wait for the phone popup.", Color.Orange);
                 }
                 catch (Exception ex)
                 {
@@ -11536,7 +11585,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 .Where(d => d.IsMtpLike || d.Role == "MTP" || d.Role == "Connectivity").ToList();
             if (mtpDevs.Count == 0)
             {
-                Log("[!] Samsung MTP device မတွေ့ပါ — USB ချိတ်ပြီး File Transfer mode ရွေးပါ။", Color.OrangeRed);
+                Log("[!] Samsung MTP device not found — connect USB and select File Transfer mode.", Color.OrangeRed);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
@@ -11546,7 +11595,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             string adbNow = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (adbNow.Contains("\tdevice"))
             {
-                Log("[i] ADB device ရှိပြီ — Factory reset ချက်ချင်း စတယ်။", Color.Orange);
+                Log("[i] ADB device present — starting Factory reset immediately.", Color.Orange);
                 await RunAdbFactoryResetCoreAsync();
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
@@ -11562,7 +11611,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             }
 
             // 3) ADB မရှိ / AT မရ — Recovery mode guide (ADB လုံးဝမလို)
-            Log("[i] ADB / modem AT မရှ် — Recovery mode button နဲ့ wipe လုပ်မယ် (ADB မလို)။", Color.Orange);
+            Log("[i] No ADB / modem AT — will wipe via Recovery mode button (no ADB needed).", Color.Orange);
             ShowSamsungRecoveryFactoryResetGuide();
             Log("========================================================", Color.FromArgb(0, 180, 255));
         }
@@ -11578,7 +11627,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 if (candidates.Count == 0)
                 {
                     string[] ports = SerialPort.GetPortNames();
-                    Log("[i] Samsung modem COM မတွေ့ — " + ports.Length + " COM port စမ်းမယ်။", Color.Gray);
+                    Log("[i] Samsung modem COM not found — will try " + ports.Length + " COM port(s).", Color.Gray);
                     foreach (string p in ports)
                         candidates.Add((p, "fallback " + p));
                 }
@@ -11591,7 +11640,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     if (ok)
                     {
                         Log("[OK] AT commands sent — phone may reboot / wipe if supported.", Color.LightGreen);
-                        Log("[i] မဝင်ရင် Recovery mode guide ကို ကြည့်ပါ (အောက်မှာ)။", Color.Orange);
+                        Log("[i] If it doesn't enter, see the Recovery mode guide (below).", Color.Orange);
                         ShowSamsungRecoveryFactoryResetGuide();
                         return true;
                     }
@@ -11753,7 +11802,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                         if (AtIsSuccess(r2)) resetOk = true;
                         else if (AtHasError(r2) &&
                                  r2.IndexOf("NOT_ALLOWED", StringComparison.OrdinalIgnoreCase) >= 0)
-                            Log("[i] CFUN blocked (NOT_ALLOWED) — screen unlock ပြီးမှ ထပ်စမ်း/Recovery သုံးပါ။", Color.Orange);
+                            Log("[i] CFUN blocked (NOT_ALLOWED) — unlock the screen, then retry / use Recovery.", Color.Orange);
 
                         if (!AtIsSuccess(r2))
                         {
@@ -11926,14 +11975,14 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
         private void ShowSamsungRecoveryFactoryResetGuide()
         {
             Log("[i] ===== RECOVERY MODE FACTORY RESET (no ADB) =====", Color.FromArgb(0, 200, 255));
-            Log("[i] 1) ဖုန်းကို Power off ပါ", Color.White);
-            Log("[i] 2) Vol+ ကို ဆက်နှိပ်ထားပြီး Power ကို နှိပ် — Samsung logo ပေါ်မှ လွှတ်", Color.White);
-            Log("[i]    (Home button ရှိရင် Vol+ + Home + Power)", Color.White);
-            Log("[i] 3) Recovery menu ဝင်ပြီးရင်:", Color.White);
-            Log("[i]      • Wipe data / Factory reset ရွေး", Color.White);
-            Log("[i]      • Yes — delete all user data ရွေး", Color.White);
-            Log("[i]      • Reboot system now ရွေး", Color.White);
-            Log("[i] 4) Vol+ / Vol- = ရွေး, Power = အတည်ပြု", Color.White);
+            Log("[i] 1) Power off the phone", Color.White);
+            Log("[i] 2) Keep holding Vol+ and press Power — release when Samsung logo appears", Color.White);
+            Log("[i]    (If there is a Home button: Vol+ + Home + Power)", Color.White);
+            Log("[i] 3) Once in Recovery menu:", Color.White);
+            Log("[i]      • Select Wipe data / Factory reset", Color.White);
+            Log("[i]      • Select Yes — delete all user data", Color.White);
+            Log("[i]      • Select Reboot system now", Color.White);
+            Log("[i] 4) Vol+ / Vol- = navigate, Power = confirm", Color.White);
             Log("[i] ======================================================", Color.FromArgb(0, 200, 255));
 
             MessageBox.Show(
@@ -11965,8 +12014,8 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             if (string.IsNullOrWhiteSpace(ver) || ver.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
                 ver.Contains("is not recognized", StringComparison.OrdinalIgnoreCase))
             {
-                Log("[!] heimdall.exe မတွေ့ပါ — Download mode detect/PIT/flash မရ။", Color.OrangeRed);
-                Log("    bundled-tools\\samsung\\heimdall.exe ရှိမှန် စစ်ပါ။", Color.Orange);
+                Log("[!] heimdall.exe not found — Download mode detect/PIT/flash unavailable.", Color.OrangeRed);
+                Log("    Check that bundled-tools\\samsung\\heimdall.exe exists.", Color.Orange);
             }
             else
             {
@@ -11995,7 +12044,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             if (dlDevs.Count == 0 && allSam.Count > 0)
             {
                 // Samsung USB ရှိပေမယ့် known DL PID မဟုတ် — ရှိတာအားလုံး ပြ
-                Log("  • Samsung USB   : (download PID မတွေ့ — ရှိတဲ့ device တွေ):", Color.Orange);
+                Log("  • Samsung USB   : (download PID not found — devices present):", Color.Orange);
                 foreach (var d in allSam.Take(4))
                     Log("      PID " + d.Pid + " | " + (string.IsNullOrWhiteSpace(d.FriendlyName) ? d.Service : d.FriendlyName), Color.Gray);
             }
@@ -12015,19 +12064,19 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             }
             else
             {
-                Log("[!] Samsung USB device မတွေ့ပါ — Download mode မဝင်ရသေး/cable မချိတ်။", Color.OrangeRed);
-                Log("    Vol- + Home + Power  (သို့)  Vol+ + Vol- + USB ချိတ် → Warning screen → Vol+ ဖြင့် ဝင်ပါ။", Color.Orange);
+                Log("[!] Samsung USB device not found — not in Download mode / cable not connected.", Color.OrangeRed);
+                Log("    Vol- + Home + Power  or  Vol+ + Vol- + plug USB → Warning screen → press Vol+ to enter.", Color.Orange);
             }
 
             // ၄) အခြေအနေ summary
             if (heimdallOk || dlDevs.Count > 0)
             {
-                Log("[OK] Download mode — PIT download / Heimdall flash အတွက် အဆင်သင့်။", Color.LightGreen);
-                Log("[i] Partition ကြည့်ချင်ရင် Download PIT၊ flash ချင်ရင် Firmware FLASH block သုံးပါ။", Color.Orange);
+                Log("[OK] Download mode — ready for PIT download / Heimdall flash.", Color.LightGreen);
+                Log("[i] Use Download PIT to view partitions, Firmware FLASH block to flash.", Color.Orange);
             }
             else
             {
-                Log("[i] Download mode မဝင်ရသေး — ဖုန်းကို DL mode ဝင်ပြီး ထပ်နှိပ်ပါ။", Color.Orange);
+                Log("[i] Not in Download mode yet — put the phone in DL mode and press again.", Color.Orange);
             }
             Log("========================================================", Color.FromArgb(0, 180, 255));
         }
@@ -12112,10 +12161,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
                 if (SamsungSoftBrick.FindDownloadModeDevice(out int vid, out int pid) == null)
                 {
-                    Log("[!] Samsung Download mode USB မတွေ့ပါ (VID_04E8).", Color.OrangeRed);
-                    Log("    ဖုန်းကို Download mode ဝင်ပြီး USB ပြန်တပ်ပါ:", Color.Orange);
-                    Log("    Vol- + Vol- + USB (newer)  (သို့)  Vol- + Home + Power → Warning → Vol+", Color.Orange);
-                    Log("    Samsung USB driver / Zadig WinUSB တပ်ထားရမယ်။", Color.Orange);
+                    Log("[!] Samsung Download mode USB not found (VID_04E8).", Color.OrangeRed);
+                    Log("    Put the phone in Download mode and replug USB:", Color.Orange);
+                    Log("    Vol- + Vol- + USB (newer)  or  Vol- + Home + Power → Warning → Vol+", Color.Orange);
+                    Log("    Samsung USB driver / Zadig WinUSB must be installed.", Color.Orange);
                     SetProgress(0, "Failed");
                     return;
                 }
@@ -12140,14 +12189,14 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 if (ok)
                 {
                     SetProgress(100, "SoftBrick fix OK");
-                    Log("[OK] SoftBrick Fix ပြီးပါပြီ — flash count reset ပြီး Download mode ပြန်ဝင်ပါမယ်။", Color.LightGreen);
-                    Log("[i] Error screen ပျောက်ပြီး firmware ပြန်ထည့်ချင်ရင် Firmware FLASH block သုံးပါ။", Color.Orange);
+                    Log("[OK] SoftBrick Fix done — flash count reset; Download mode can be entered again.", Color.LightGreen);
+                    Log("[i] To re-flash firmware after the error screen is gone, use the Firmware FLASH block.", Color.Orange);
                 }
                 else
                 {
                     SetProgress(0, "Failed");
                     Log("[FAIL] " + (string.IsNullOrWhiteSpace(err) ? "SoftBrick Fix failed" : err), Color.Red);
-                    Log("    heimdall/Odin ပိတ်၊ cable ပြောင်း၊ Download mode ပြန်ဝင်ပြီး retry ပါ။", Color.Orange);
+                    Log("    Close heimdall/Odin, change cable, re-enter Download mode and retry.", Color.Orange);
                 }
                 Log("========================================================", Color.FromArgb(0, 180, 255));
             }
@@ -12547,7 +12596,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             }
             if (huaweiComPorts.Count > 0 && !huaweiComPorts.Contains(port))
             {
-                Log("[!] " + port + " က HUAWEI USB COM မဟုတ်ဘူး — Driver မှန်မှန် install ရှိရင် '(HUAWEI)' port ကို ရွေးပါ။", Color.Orange);
+                Log("[!] " + port + " is not a HUAWEI USB COM port — with the driver installed correctly, select the '(HUAWEI)' port.", Color.Orange);
             }
 
             if (MessageBox.Show(
