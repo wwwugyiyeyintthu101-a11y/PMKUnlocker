@@ -1,0 +1,56 @@
+{
+    "Xiaomi": {
+        "Redmi Note 8": { "da": "", "auth": "", "preloader": "" },
+        "Redmi Note 9": { "da": "", "auth": "", "preloader": "" },
+        "Redmi Note 10": { "da": "", "auth": "", "preloader": "" },
+        "Redmi Note 11": { "da": "", "auth": "", "preloader": "" },
+        "Redmi 9": { "da": "", "auth": "", "preloader": "" },
+        "Redmi 10": { "da": "", "auth": "", "preloader": "" },
+        "Poco X3": { "da": "", "auth": "", "preloader": "" },
+        "Poco M3": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Oppo": {
+        "A15": { "da": "", "auth": "", "preloader": "" },
+        "A16": { "da": "", "auth": "", "preloader": "" },
+        "A55": { "da": "", "auth": "", "preloader": "" },
+        "A74": { "da": "", "auth": "", "preloader": "" },
+        "F17": { "da": "", "auth": "", "preloader": "" },
+        "F19": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Vivo": {
+        "Y12": { "da": "", "auth": "", "preloader": "" },
+        "Y15": { "da": "", "auth": "", "preloader": "" },
+        "Y20": { "da": "", "auth": "", "preloader": "" },
+        "Y21": { "da": "", "auth": "", "preloader": "" },
+        "Y30": { "da": "", "auth": "", "preloader": "" },
+        "V21": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Samsung": {
+        "Galaxy A02s": { "da": "", "auth": "", "preloader": "" },
+        "Galaxy A12": { "da": "", "auth": "", "preloader": "" },
+        "Galaxy A03": { "da": "", "auth": "", "preloader": "" },
+        "Galaxy A03s": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Infinix": {
+        "Hot 10": { "da": "", "auth": "", "preloader": "" },
+        "Hot 11": { "da": "", "auth": "", "preloader": "" },
+        "Hot 12": { "da": "", "auth": "", "preloader": "" },
+        "Note 10": { "da": "", "auth": "", "preloader": "" },
+        "Note 11": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Realme": {
+        "C11": { "da": "", "auth": "", "preloader": "" },
+        "C12": { "da": "", "auth": "", "preloader": "" },
+        "C15": { "da": "", "auth": "", "preloader": "" },
+        "C21": { "da": "", "auth": "", "preloader": "" },
+        "Narzo 30": { "da": "", "auth": "", "preloader": "" },
+        "Narzo 50": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Tecno": {
+        "Spark 7": { "da": "", "auth": "", "preloader": "" },
+        "Spark 8": { "da": "", "auth": "", "preloader": "" },
+        "Spark 9": { "da": "", "auth": "", "preloader": "" },
+        "Camon 17": { "da": "", "auth": "", "preloader": "" },
+        "Camon 18": { "da": "", "auth": "", "preloader": "" }
+    }
+}

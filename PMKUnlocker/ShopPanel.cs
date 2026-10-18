@@ -50,7 +50,7 @@ public partial class Form1
         string command = arguments.Trim();
         // server-level adb/fb commands က device serial မလို — binding ကျော်
         if (command == "devices" || command == "devices -l" || command == "version" || command == "--version" ||
-            command == "kill-server" || command == "start-server")
+            command == "kill-server" || command == "start-server" || command == "wait-for-device")
             return arguments;
         bool adb = tool == "adb.exe";
         string output = await ReviewSafety.RunQuickAsync(ResolveToolPath(fileName), "devices");

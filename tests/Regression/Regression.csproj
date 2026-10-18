@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkClientProtocol.cs" Link="MediaTek/MtkClientProtocol.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />

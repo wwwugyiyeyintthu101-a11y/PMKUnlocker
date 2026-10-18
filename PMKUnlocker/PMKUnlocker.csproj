@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 
@@ -63,13 +64,10 @@
     <None Update="pmk_devices.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="pmk_mtk_op.py">
+    <None Update="pmk_qc_loaders.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="pmk_flash_guard.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Update="pmk_sparse.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Update="pmk_gpt.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Update="pmk_qc_loaders.json">
+    <None Update="pmk_mtk_devices.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="pmk_codenames.json">
@@ -85,10 +83,10 @@
   <!-- MTK Auth Bypass (in-tool) — MTK-bypass/bypass_utility (MIT) + exploits_collection payloads
        + UsbDk installer — '🔐 MTK Auth Bypass' ခလုတ်က ခေါ်တယ် (external MABT exe မသုံး) -->
   <ItemGroup>
-    <None Remove="tools\mtkbypass\**\*" />
-    <None Remove="tools\mtkbypass\**\__pycache__\**" />
-    <Content Include="tools\mtkbypass\**\*" Exclude="tools\mtkbypass\**\__pycache__\**;tools\mtkbypass\**\__pycache__\*.*">
-      <TargetPath>tools\mtkbypass\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    <None Remove="tools\mtkclient\**\*" />
+    <None Remove="tools\mtkclient\**\__pycache__\**" />
+    <Content Include="tools\mtkclient\**\*" Exclude="tools\mtkclient\**\__pycache__\**;tools\mtkclient\**\__pycache__\*.*">
+      <TargetPath>tools\mtkclient\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

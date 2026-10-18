@@ -2,8 +2,8 @@
     "schema":  1,
     "bundledInventory":  {
                              "path":  "PMKUnlocker/bundled-tools/integrity.json",
-                             "sha256":  "405ba4c9bfca37351e3e279595e6efd8532a0a769a034e7686a703da750458cd",
-                             "entries":  973
+                             "sha256":  "0bb66914072e90a57c6830524f0f0e97698634b15be38c8929d49114bec270cf",
+                             "entries":  1073
                          },
     "libraries":  [
                       {
@@ -32,7 +32,7 @@
                       }
                   ],
     "optionalBackends":  {
-                             "mtkclient":  "External, not bundled; exact version and device compatibility must be recorded before enabling at a shop",
+                             "mtkclient":  "Bundled local CLI 2.1.4; files pinned in mtkclient-lock.json; hardware compatibility not validated",
                              "python":  "External, not bundled; supply a complete environment rather than python.exe alone",
                              "edl.py":  "External, not bundled; dependencies and approved loader must be configured"
                          },

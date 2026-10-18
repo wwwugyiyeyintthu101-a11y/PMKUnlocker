@@ -1,4 +1,5 @@
 using PMKUnlocker;
+using PMKUnlocker.MediaTek;
 using PMKUnlocker.MtkFirmware;
 using System.Diagnostics;
 using System.Formats.Tar;
@@ -849,6 +850,36 @@ try
     Check(hsum.Contains("SUCCESS") && hsum.Contains("MOCK"),
         "summary: success line includes backend note");
 
+    var mtkGpt = MtkClientEngine.ParseGpt(new MtkCommandResult(0, new[] {
+        "boot: Offset 0x1000, Length 0x2000, Flags 0x00000000" }));
+    Check(mtkGpt.Count == 1 && mtkGpt[0].Offset == 4096 && mtkGpt[0].Length == 8192,
+        "new MTK engine: GPT byte ranges parsed correctly");
+    bool RejectMtk(Action check) { try { check(); return false; } catch (Exception ex) when (ex is IOException or InvalidDataException) { return true; } }
+    Check(RejectMtk(() => MtkClientEngine.ParseGpt(new(0, new[] { "GPT Table:" }))),
+        "new MTK engine: empty GPT never authorizes operations");
+    Check(RejectMtk(() => MtkClientEngine.ParseGpt(new(0, new[] {
+        "boot: Offset 0x1000, Length 0x2000", "BOOT: Offset 0x3000, Length 0x2000" }))),
+        "new MTK engine: duplicate partition names rejected");
+    Check(RejectMtk(() => MtkClientEngine.ParseGpt(new(0, new[] { "boot: Offset 0x1000, Length 0x0" }))),
+        "new MTK engine: zero-size partition rejected");
+    MtkClientEngine.RequireWriteEvidence(new(0, new[] { @"Wrote C:\ROM folder\tee.img to sector 10 with sector count 20." }), "tee1", @"C:\ROM folder\tee.img");
+    Check(true, "new MTK engine: completion matches exact image path even when partition name differs");
+    Check(RejectMtk(() => MtkClientEngine.RequireWriteEvidence(new(0, new[] { "100%" }), "boot", "boot.img")),
+        "new MTK engine: exit zero and progress are not write evidence");
+    Check(RejectMtk(() => MtkClientEngine.RequireWriteEvidence(new(0, new[] { "Wrote other.img to sector 10" }), "boot", "boot.img")),
+        "new MTK engine: another image cannot satisfy completion");
+    Check(RejectMtk(() => MtkClientEngine.RequireWriteEvidence(new(0, new[] { "Wrote boot.img to sector 10", "Failed to write" }), "boot", "boot.img")),
+        "new MTK engine: error output overrides completion evidence");
+    Check(RejectMtk(() => MtkClientEngine.RequireWriteEvidence(new(1, new[] { "Wrote boot.img to sector 10" }), "boot", "boot.img")),
+        "new MTK engine: failed process overrides completion evidence");
+    Check(new MtkCommandResult(0, new[] { "DaHandler - Please disconnect, start mtkclient and reconnect." }).HasError,
+        "new MTK engine: reconnect-demand output is an error even with exit zero");
+    Check(MtkClientEngine.HasWriteEvidence(new(0, new[] { @"Wrote C:\t\seccfg_out.bin to sector 4" }), @"C:\t\seccfg_out.bin"),
+        "new MTK engine: HasWriteEvidence accepts exact completion line");
+    Check(!MtkClientEngine.HasWriteEvidence(new(0, new[] { "Wrote other.bin to sector 4" }), @"C:\t\seccfg_out.bin"),
+        "new MTK engine: HasWriteEvidence rejects another image path");
+    Check(new MtkCommandResult(0, new[] { "Reset command was sent. Disconnect usb cable to power off." }).HasError == false,
+        "new MTK engine: reset confirmation is not an error");
     Console.WriteLine($"{passed} regression checks passed.");
 }
 finally { Directory.Delete(dir, recursive: true); }

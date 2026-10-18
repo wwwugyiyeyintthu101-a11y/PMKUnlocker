@@ -42,20 +42,19 @@ function Add-SourceFile([string]$Source, [string]$Relative) {
     if ((Get-IntegrityHash $target) -ne $hash) { throw "Stale packaged file: $Relative" }
     $entries[$Relative.Replace('\','/')] = $hash
 }
-foreach ($name in @('pmk_mtk_op.py','pmk_flash_guard.py','pmk_sparse.py','pmk_gpt.py')) {
-    Add-SourceFile (Join-Path $SourceRoot $name) $name
-}
 foreach ($library in $approval.libraries) {
     $source = Join-Path (Split-Path $SourceRoot -Parent) $library.path
     if ((Get-IntegrityHash $source) -ne $library.sha256) { throw "Library differs from dependency lock: $($library.path)" }
     Add-SourceFile $source $library.target
 }
-$extraTools = Join-Path $SourceRoot 'tools/mtkbypass'
-if (Test-Path -LiteralPath $extraTools) {
-    Get-ChildItem -LiteralPath $extraTools -Recurse -File |
-        Where-Object { $_.FullName -notmatch '[\\/]__pycache__[\\/]' } | ForEach-Object {
-            Add-SourceFile $_.FullName ('tools/mtkbypass/' + $_.FullName.Substring($extraTools.Length + 1).Replace('\','/'))
-        }
+$extraTools = Join-Path $SourceRoot 'tools/mtkclient'
+$mtkLock = Get-Content -LiteralPath (Join-Path $SourceRoot '../mtkclient-lock.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($mtkLock.schema -ne 1 -or !($mtkLock.files | Where-Object path -eq 'mtk.exe')) { throw 'Missing mtkclient approval inventory.' }
+foreach ($file in $mtkLock.files) {
+    $source = [IO.Path]::GetFullPath((Join-Path $extraTools $file.path))
+    if (!$source.StartsWith($extraTools.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+        (Get-IntegrityHash $source) -ne $file.sha256) { throw "mtkclient file differs from lock: $($file.path)" }
+    Add-SourceFile $source ('tools/mtkclient/' + $file.path)
 }
 $map = @($entries.Keys | Sort-Object | ForEach-Object { [ordered]@{ k = $_; h = $entries[$_] } })
 $json = ConvertTo-Json -InputObject $map -Depth 3
