@@ -9316,13 +9316,13 @@ namespace PMKUnlocker
             // Step A: su prompt — screen ပေါ် Allow စောင့် (temp root)
             if (!hasRoot)
             {
-                Log("[1/4] adb root + su probe...", Color.Orange);
+                Log("[1/4] adb root + su probe...", Color.Cyan);
                 await ExecuteCommandQuickAsync("adb.exe", "root");
                 await Task.Delay(800);
                 suId = await ProbeSuAsync();
                 hasRoot = suId.Contains("uid=0");
                 if (hasRoot) Log("[OK] Root obtained via adb root/su: " + suId, Color.LightGreen);
-                else Log("[i] No root from adb root/su yet.", Color.Orange);
+                else Log("[i] No root from adb root/su yet.", Color.Gray);
             }
             else
             {
@@ -9339,7 +9339,7 @@ namespace PMKUnlocker
                               fp.Soc.IndexOf("MT6886", StringComparison.OrdinalIgnoreCase) >= 0 ||
                               fp.Kernel.IndexOf("5.15.180", StringComparison.Ordinal) >= 0);
             if (!hasRoot && looksXiaomi && skipToken)
-                Log("[2/4] Token path skip — Android16/zircon (token payload unreliable here, ~30s) → going straight to kernel exploit", Color.Gray);
+                Log("[2/4] Token path skip — Android16/zircon (token payload unreliable here, ~30s) → going straight to kernel exploit", Color.Cyan);
             if (!hasRoot && looksXiaomi && !skipToken)
             {
                 var swMst = Stopwatch.StartNew();
@@ -9389,9 +9389,7 @@ namespace PMKUnlocker
                 int ci = (suId ?? "").IndexOf("context=", StringComparison.Ordinal);
                 if (ci >= 0) suCtx = suId.Substring(ci + 8).Trim();
                 bool viaKsu = suCtx.IndexOf("u:r:ksu:s0", StringComparison.OrdinalIgnoreCase) >= 0;
-                string exLabel = viaMst ? "MST token"
-                    : exploitMatch != null && exploitSec >= 0
-                        ? (string.IsNullOrWhiteSpace(exploitMatch.Id) ? exploitMatch.Name : exploitMatch.Id) : "";
+                string exLabel = viaMst || (exploitMatch != null && exploitSec >= 0) ? "PMK root" : "";
                 double exSec = viaMst ? mstSec : exploitSec;
 
                 Log("", Color.Gray);
@@ -9411,7 +9409,7 @@ namespace PMKUnlocker
                 return;
             }
 
-            Log("[4/4] No temp root → No-root MIUI path: provision + wizard skip...", Color.Orange);
+            Log("[4/4] No temp root → No-root MIUI path: provision + wizard skip...", Color.Cyan);
 
             // Step B: MIUI/Xiaomi provision settings (no-root path only)
             if (!tempRootAborted)
@@ -9750,7 +9748,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 return (false, -1);
             }
 
-            Log("[2/4] Token payload (MST) — token-gated, no GUI...", Color.Orange);
+            Log("[2/4] Token payload (MST) — token-gated, no GUI...", Color.Cyan);
 
             // payload ရဲ့ FNV input နဲ့ တူအောင်: ro.serialno → ro.boot.serialno → "unknown"
             string serial = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.serialno")).Trim();
@@ -9818,7 +9816,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             bool hostMode = string.Equals(ex.RunMode, "host", StringComparison.OrdinalIgnoreCase);
             Log("[3/4] Kernel exploit: " + (string.IsNullOrWhiteSpace(ex.Name) ? ex.Id : ex.Name) +
                 (hostMode ? " [host]" : " [device]") +
-                (attempt > 0 ? " · retry " + attempt + "/1" : ""), Color.Orange);
+                (attempt > 0 ? " · retry " + attempt + "/1" : ""), Color.Cyan);
 
             string local = KernelExploit.PayloadFullPath(exploitsRoot, ex);
             if (!File.Exists(local))
@@ -10076,11 +10074,12 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                                     t.Contains("never rooted") || t.Contains("rejected") ||
                                     t.Contains("resolved profile loaded") || t.Contains("profile release mismatch") ||
                                     t.Contains("cannot load profile") || t.Contains("no entrypoint") ||
-                                    t.Contains("route won") || t.Contains("route done") ||
-                                    t.Contains("temporary root ready") || t.Contains("root script start") ||
+                                    t.Contains("temporary root ready") ||
                                     t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                     t.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0;
                         if (!keep) continue;
+                        t = Regex.Replace(t, @"\s*\[T\+\d+ms\]", "");
+                        t = Regex.Replace(t, @"\s{2,}", " ");
                         Color lc;
                         if (t.Contains("exploit complete")) lc = Color.Cyan;
                         else if (t.Contains("never rooted") || t.Contains("rejected") ||
@@ -10093,9 +10092,8 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                         else if (t.Contains("offsets matched") || t.Contains("child uid") ||
                                  t.Contains("child is root") || t.Contains("SELinux permissive") ||
                                  t.Contains("Write 1 complete") || t.Contains("enforcing restored") ||
-                                 t.Contains("KernelSU ready") || t.Contains("root script start") ||
-                                 t.Contains("tcp route won") || t.Contains("resolved profile loaded") ||
-                                 t.Contains("route won") || t.Contains("route done") ||
+                                 t.Contains("KernelSU ready") ||
+                                 t.Contains("resolved profile loaded") ||
                                  t.Contains("temporary root ready"))
                             lc = Color.LightGreen;
                         else lc = Color.Gray;
@@ -10167,7 +10165,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 foreach (string line in ksuLog.Replace("\r", "").Split('\n'))
                 {
                     string t = line.TrimEnd();
-                    if (t.Length > 0) Log("    " + t, Color.Gray);
+                    if (t.Length == 0) continue;
+                    if (t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        t.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0)
+                        Log("    " + t, Color.OrangeRed);
                 }
                 if (ksuLog.IndexOf("KernelSU module loaded", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     ksuLog.IndexOf("KernelSU ready", StringComparison.OrdinalIgnoreCase) >= 0 ||
