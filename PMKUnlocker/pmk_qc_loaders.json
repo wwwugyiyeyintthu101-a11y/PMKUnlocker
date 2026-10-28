@@ -215,7 +215,30 @@
                    "[AuthBypass] MI 10X":  "edl/loaders/Xiaomi/[AuthBypass] MI 10X.elf",
                    "[AuthBypass] POCO F2 PRO":  "edl/loaders/Xiaomi/[AuthBypass] POCO F2 PRO.elf",
                    "[NoAuth] SNAPDRAGON 610":  "edl/loaders/Xiaomi/[NoAuth] SNAPDRAGON 610.mbn",
-                   "[AuthBypass] REDMI K40 PRO":  "edl/loaders/Xiaomi/[AuthBypass] REDMI K40 PRO.elf"
+                   "[AuthBypass] REDMI K40 PRO":  "edl/loaders/Xiaomi/[AuthBypass] REDMI K40 PRO.elf",
+                   "Xiaomi_Mi_3":  "edl/loaders/Xiaomi/Xiaomi_Mi_3.mbn",
+                   "Xiaomi_Mi_4C":  "edl/loaders/Xiaomi/Xiaomi_Mi_4C.mbn",
+                   "Xiaomi_Mi_4i":  "edl/loaders/Xiaomi/Xiaomi_Mi_4i.mbn",
+                   "Xiaomi_Mi_5X":  "edl/loaders/Xiaomi/Xiaomi_Mi_5X.mbn",
+                   "Xiaomi_Mi_6":  "edl/loaders/Xiaomi/Xiaomi_Mi_6.elf",
+                   "Xiaomi_Mi_A1":  "edl/loaders/Xiaomi/Xiaomi_Mi_A1.mbn",
+                   "Xiaomi_Mi_Max-PT":  "edl/loaders/Xiaomi/Xiaomi_Mi_Max-PT.mbn",
+                   "Xiaomi_Redmi_5A":  "edl/loaders/Xiaomi/Xiaomi_Redmi_5A.mbn",
+                   "Xiaomi_Redmi_5_Plus":  "edl/loaders/Xiaomi/Xiaomi_Redmi_5_Plus.mbn",
+                   "Xiaomi_Redmi_6":  "edl/loaders/Xiaomi/Xiaomi_Redmi_6.elf",
+                   "Xiaomi_Redmi_Note_4G":  "edl/loaders/Xiaomi/Xiaomi_Redmi_Note_4G.mbn",
+                   "Xiaomi_Redmi_Note_5A-GP":  "edl/loaders/Xiaomi/Xiaomi_Redmi_Note_5A-GP.mbn",
+                   "Xiaomi_Redmi_Note_5A-PT":  "edl/loaders/Xiaomi/Xiaomi_Redmi_Note_5A-PT.mbn",
+                   "Xiaomi_Redmi_Note_5A-Prime":  "edl/loaders/Xiaomi/Xiaomi_Redmi_Note_5A-Prime.mbn",
+                   "Xiaomi_Redmi_Y1_Lite":  "edl/loaders/Xiaomi/Xiaomi_Redmi_Y1_Lite.mbn",
+                   "xiaomi_loader_1":  "edl/loaders/Xiaomi/xiaomi_loader_1.elf",
+                   "xiaomi_loader_2":  "edl/loaders/Xiaomi/xiaomi_loader_2.elf",
+                   "xiaomi_loader_3":  "edl/loaders/Xiaomi/xiaomi_loader_3.elf",
+                   "xiaomi_loader_5":  "edl/loaders/Xiaomi/xiaomi_loader_5.elf",
+                   "xiaomi_loader_6":  "edl/loaders/Xiaomi/xiaomi_loader_6.elf",
+                   "xiaomi_loader_7":  "edl/loaders/Xiaomi/xiaomi_loader_7.elf",
+                   "xiaomi_loader_8":  "edl/loaders/Xiaomi/xiaomi_loader_8.elf",
+                   "xiaomi_loader_9":  "edl/loaders/Xiaomi/xiaomi_loader_9.elf"
                },
     "Nexus":  {
                   "NEXUS 5":  "edl/loaders/Nexus/NEXUS 5.mbn",
@@ -241,7 +264,21 @@
                    "K10":  "edl/loaders/Lenovo/K10.mbn",
                    "TAB_6_5G":  "edl/loaders/Lenovo/TAB_6_5G.elf",
                    "ZUK":  "edl/loaders/Lenovo/ZUK.mbn",
-                   "K5":  "edl/loaders/Lenovo/K5.mbn"
+                   "K5":  "edl/loaders/Lenovo/K5.mbn",
+                   "Lenovo_A6020I36":  "edl/loaders/Lenovo/Lenovo_A6020I36.mbn",
+                   "Lenovo_K33":  "edl/loaders/Lenovo/Lenovo_K33.mbn",
+                   "Lenovo_K53":  "edl/loaders/Lenovo/Lenovo_K53.mbn",
+                   "Lenovo_K53A48":  "edl/loaders/Lenovo/Lenovo_K53A48.mbn",
+                   "Lenovo_K6_Note_K53A48":  "edl/loaders/Lenovo/Lenovo_K6_Note_K53A48.mbn",
+                   "Lenovo_K920":  "edl/loaders/Lenovo/Lenovo_K920.mbn",
+                   "Lenovo_P1a42":  "edl/loaders/Lenovo/Lenovo_P1a42.mbn",
+                   "Lenovo_S90":  "edl/loaders/Lenovo/Lenovo_S90.mbn",
+                   "TB-320FC":  "edl/loaders/Lenovo/TB-320FC.elf",
+                   "TB-371FC":  "edl/loaders/Lenovo/TB-371FC.elf",
+                   "TB-610FU":  "edl/loaders/Lenovo/TB-610FU.elf",
+                   "TB-Q706F":  "edl/loaders/Lenovo/TB-Q706F.elf",
+                   "TB352FU":  "edl/loaders/Lenovo/TB352FU.elf",
+                   "TB371FC":  "edl/loaders/Lenovo/TB371FC.elf"
                },
     "Oppo":  {
                  "RENO_4_4G_CPH2113":  "edl/loaders/Oppo/RENO_4_4G_CPH2113.elf",
@@ -409,7 +446,12 @@
                  "410_5":  "edl/loaders/Oppo/410_5.mbn",
                  "A37F":  "edl/loaders/Oppo/A37F.elf",
                  "RENO_4_5G_CPH2091":  "edl/loaders/Oppo/RENO_4_5G_CPH2091.elf",
-                 "A7":  "edl/loaders/Oppo/A7.elf"
+                 "A7":  "edl/loaders/Oppo/A7.elf",
+                 "Oppo_A13F":  "edl/loaders/Oppo/Oppo_A13F.mbn",
+                 "Oppo_A37":  "edl/loaders/Oppo/Oppo_A37.mbn",
+                 "Oppo_F1-2":  "edl/loaders/Oppo/Oppo_F1-2.mbn",
+                 "Oppo_R9S":  "edl/loaders/Oppo/Oppo_R9S.mbn",
+                 "Oppo_Vivo":  "edl/loaders/Oppo/Oppo_Vivo.mbn"
              },
     "Infinix":  {
                     "425_2":  "edl/loaders/Infinix/425_2.mbn",
@@ -607,7 +649,11 @@
                  "V20_SE_PD20238CF":  "edl/loaders/Vivo/V20_SE_PD20238CF.elf",
                  "Z5X_PD1911":  "edl/loaders/Vivo/Z5X_PD1911.elf",
                  "Y51_PD2050F":  "edl/loaders/Vivo/Y51_PD2050F.elf",
-                 "625_3":  "edl/loaders/Vivo/625_3.mbn"
+                 "625_3":  "edl/loaders/Vivo/625_3.mbn",
+                 "Vivo_T1_Pro_5G_PD2193F":  "edl/loaders/Vivo/Vivo_T1_Pro_5G_PD2193F.elf",
+                 "Vivo_X50_Pro_PD2005F":  "edl/loaders/Vivo/Vivo_X50_Pro_PD2005F.elf",
+                 "Vivo_X7":  "edl/loaders/Vivo/Vivo_X7.mbn",
+                 "Vivo_XPlay_6":  "edl/loaders/Vivo/Vivo_XPlay_6.elf"
              },
     "Samsung":  {
                     "[G981] SM-G981U":  "edl/loaders/Samsung/[G981] SM-G981U.elf",
@@ -699,12 +745,23 @@
                     "[S908] SM-S908N":  "edl/loaders/Samsung/[S908] SM-S908N.elf",
                     "[S918] SM-S916B":  "edl/loaders/Samsung/[S918] SM-S916B.elf",
                     "[X906] SM-X906C":  "edl/loaders/Samsung/[X906] SM-X906C.elf",
-                    "[A015] SM-A015M":  "edl/loaders/Samsung/[A015] SM-A015M.mbn"
+                    "[A015] SM-A015M":  "edl/loaders/Samsung/[A015] SM-A015M.mbn",
+                    "A015AZ_LOADER_BIT-A":  "edl/loaders/Samsung/A015AZ_LOADER_BIT-A.mbn",
+                    "F936U_BIT-4":  "edl/loaders/Samsung/F936U_BIT-4.elf",
+                    "J810Y_BIT3":  "edl/loaders/Samsung/J810Y_BIT3.mbn",
+                    "N981N_Bit8":  "edl/loaders/Samsung/N981N_Bit8.elf",
+                    "N981U_BIT C":  "edl/loaders/Samsung/N981U_BIT C.elf",
+                    "S918B_BIT-4":  "edl/loaders/Samsung/S918B_BIT-4.elf",
+                    "SM-T636B_BIT-9":  "edl/loaders/Samsung/SM-T636B_BIT-9.elf",
+                    "g991u_bitf":  "edl/loaders/Samsung/g991u_bitf.elf",
+                    "prog_firehose_ddr":  "edl/loaders/Samsung/prog_firehose_ddr.elf",
+                    "s908e_bitc":  "edl/loaders/Samsung/s908e_bitc.elf"
                 },
     "ZTE":  {
                 "NX789J":  "edl/loaders/ZTE/NX789J.elf",
                 "NX721J":  "edl/loaders/ZTE/NX721J.elf",
-                "NP03J":  "edl/loaders/ZTE/NP03J.elf"
+                "NP03J":  "edl/loaders/ZTE/NP03J.elf",
+                "ZTE_Lite":  "edl/loaders/ZTE/ZTE_Lite.mbn"
             },
     "LG":  {
                "765_765G_768G":  "edl/loaders/LG/765_765G_768G.elf"
@@ -892,5 +949,137 @@
                   "M6_NOTE":  "edl/loaders/Meizu/M6_NOTE.mbn",
                   "625":  "edl/loaders/Meizu/625.mbn",
                   "NOTE_9":  "edl/loaders/Meizu/NOTE_9.elf"
+              },
+    "Acer":  {
+                 "Acer_8909":  "edl/loaders/Acer/Acer_8909.mbn"
+             },
+    "Asus":  {
+                 "07c01589":  "edl/loaders/Asus/07c01589.elf",
+                 "088f73c2":  "edl/loaders/Asus/088f73c2.elf",
+                 "0945afec":  "edl/loaders/Asus/0945afec.elf",
+                 "160fe1da":  "edl/loaders/Asus/160fe1da.elf",
+                 "29f37a82":  "edl/loaders/Asus/29f37a82.elf",
+                 "2cd2f0bb":  "edl/loaders/Asus/2cd2f0bb.elf",
+                 "3f8fb7a2":  "edl/loaders/Asus/3f8fb7a2.elf",
+                 "4c2c494e":  "edl/loaders/Asus/4c2c494e.elf",
+                 "4ee67c3a":  "edl/loaders/Asus/4ee67c3a.elf",
+                 "566d466b":  "edl/loaders/Asus/566d466b.elf",
+                 "5c0ed62c":  "edl/loaders/Asus/5c0ed62c.elf",
+                 "6353db47":  "edl/loaders/Asus/6353db47.elf",
+                 "6460ee78":  "edl/loaders/Asus/6460ee78.elf",
+                 "7484d821":  "edl/loaders/Asus/7484d821.elf",
+                 "7c7a3073":  "edl/loaders/Asus/7c7a3073.elf",
+                 "7da26bda":  "edl/loaders/Asus/7da26bda.elf",
+                 "8c9b1589":  "edl/loaders/Asus/8c9b1589.elf",
+                 "90418c30":  "edl/loaders/Asus/90418c30.elf",
+                 "95bf8174":  "edl/loaders/Asus/95bf8174.elf",
+                 "Asus_X003_T500":  "edl/loaders/Asus/Asus_X003_T500.mbn",
+                 "a0c4387b":  "edl/loaders/Asus/a0c4387b.elf",
+                 "aae8910b":  "edl/loaders/Asus/aae8910b.elf",
+                 "ac3b4872":  "edl/loaders/Asus/ac3b4872.elf",
+                 "ae162be1":  "edl/loaders/Asus/ae162be1.elf",
+                 "b6323ea4":  "edl/loaders/Asus/b6323ea4.elf",
+                 "bb9f46f0":  "edl/loaders/Asus/bb9f46f0.elf",
+                 "bd08489f":  "edl/loaders/Asus/bd08489f.elf",
+                 "c4bec8f2":  "edl/loaders/Asus/c4bec8f2.elf",
+                 "c96f847b":  "edl/loaders/Asus/c96f847b.elf",
+                 "ca3b3636":  "edl/loaders/Asus/ca3b3636.elf",
+                 "ce531605":  "edl/loaders/Asus/ce531605.elf",
+                 "d6e7d9b0":  "edl/loaders/Asus/d6e7d9b0.elf",
+                 "d6e845aa":  "edl/loaders/Asus/d6e845aa.elf",
+                 "d71cd6ad":  "edl/loaders/Asus/d71cd6ad.elf",
+                 "fa9c7e8e":  "edl/loaders/Asus/fa9c7e8e.elf",
+                 "faffb184":  "edl/loaders/Asus/faffb184.elf"
+             },
+    "BLU":  {
+                "BLU_8937":  "edl/loaders/BLU/BLU_8937.mbn",
+                "BLU_8x26":  "edl/loaders/BLU/BLU_8x26.mbn"
+            },
+    "Casper":  {
+                   "Casper_VIA_E1C":  "edl/loaders/Casper/Casper_VIA_E1C.mbn",
+                   "Casper_VIA_P1":  "edl/loaders/Casper/Casper_VIA_P1.mbn",
+                   "Casper_VIA_V10":  "edl/loaders/Casper/Casper_VIA_V10.mbn",
+                   "Casper_VIA_V6":  "edl/loaders/Casper/Casper_VIA_V6.mbn"
+               },
+    "Coolpad":  {
+                    "Coolpad_3635A":  "edl/loaders/Coolpad/Coolpad_3635A.mbn",
+                    "Coolpad_Cool1":  "edl/loaders/Coolpad/Coolpad_Cool1.mbn"
+                },
+    "General_Mobile":  {
+                           "General_Mobile_GM5":  "edl/loaders/General_Mobile/General_Mobile_GM5.mbn",
+                           "General_Mobile_GM8":  "edl/loaders/General_Mobile/General_Mobile_GM8.mbn",
+                           "General_Mobile_GM_5_Plus":  "edl/loaders/General_Mobile/General_Mobile_GM_5_Plus.mbn",
+                           "General_Mobile_GM_9_Pro":  "edl/loaders/General_Mobile/General_Mobile_GM_9_Pro.elf"
+                       },
+    "Generic-Chipset":  {
+                            "MSM8917":  "edl/loaders/Generic-Chipset/MSM8917.mbn",
+                            "MSM8926":  "edl/loaders/Generic-Chipset/MSM8926.mbn",
+                            "MSM8929":  "edl/loaders/Generic-Chipset/MSM8929.mbn",
+                            "MSM8936":  "edl/loaders/Generic-Chipset/MSM8936.mbn",
+                            "MSM8937":  "edl/loaders/Generic-Chipset/MSM8937.mbn",
+                            "MSM8939":  "edl/loaders/Generic-Chipset/MSM8939.mbn",
+                            "MSM8953":  "edl/loaders/Generic-Chipset/MSM8953.mbn",
+                            "MSM8976":  "edl/loaders/Generic-Chipset/MSM8976.mbn",
+                            "MSM8992":  "edl/loaders/Generic-Chipset/MSM8992.mbn",
+                            "MSM8994":  "edl/loaders/Generic-Chipset/MSM8994.mbn",
+                            "MSM8996":  "edl/loaders/Generic-Chipset/MSM8996.mbn",
+                            "MSM8x10":  "edl/loaders/Generic-Chipset/MSM8x10.mbn",
+                            "MSM8x26":  "edl/loaders/Generic-Chipset/MSM8x26.mbn",
+                            "prog_ufs_firehose_sm6250_lite":  "edl/loaders/Generic-Chipset/prog_ufs_firehose_sm6250_lite.elf"
+                        },
+    "LYF":  {
+                "LYF2":  "edl/loaders/LYF/LYF2.mbn",
+                "LYF3":  "edl/loaders/LYF/LYF3.mbn",
+                "LYF_S5010":  "edl/loaders/LYF/LYF_S5010.mbn"
+            },
+    "Mixed":  {
+                  "Loader_V2":  "edl/loaders/Mixed/Loader_V2.mbn",
+                  "YT-K606F":  "edl/loaders/Mixed/YT-K606F.elf",
+                  "courbet":  "edl/loaders/Mixed/courbet.elf",
+                  "gauguin":  "edl/loaders/Mixed/gauguin.elf",
+                  "marble":  "edl/loaders/Mixed/marble.elf",
+                  "moonstone":  "edl/loaders/Mixed/moonstone.elf",
+                  "nabu":  "edl/loaders/Mixed/nabu.elf",
+                  "nokia_6_1":  "edl/loaders/Mixed/nokia_6_1.elf",
+                  "nokia_8":  "edl/loaders/Mixed/nokia_8.elf",
+                  "note_10_pro_sweet":  "edl/loaders/Mixed/note_10_pro_sweet.elf",
+                  "phoenix":  "edl/loaders/Mixed/phoenix.elf",
+                  "sunstone":  "edl/loaders/Mixed/sunstone.elf",
+                  "t505n_u7":  "edl/loaders/Mixed/t505n_u7.elf",
+                  "veux":  "edl/loaders/Mixed/veux.elf",
+                  "xiaomi_sky":  "edl/loaders/Mixed/xiaomi_sky.elf",
+                  "xiaomi_vayu":  "edl/loaders/Mixed/xiaomi_vayu.elf"
+              },
+    "Nokia":  {
+                  "Nokia_TA-1003_Hisen":  "edl/loaders/Nokia/Nokia_TA-1003_Hisen.mbn",
+                  "Nokia_TA-1029":  "edl/loaders/Nokia/Nokia_TA-1029.mbn"
+              },
+    "Oppo-Realme":  {
+                        "OnePlus Nord 5G AC2001_prog_firehose_ddr":  "edl/loaders/Oppo-Realme/OnePlus Nord 5G AC2001_prog_firehose_ddr.elf",
+                        "sdm710":  "edl/loaders/Oppo-Realme/sdm710.elf"
+                    },
+    "Other":  {
+                  "Gionee_GN5007":  "edl/loaders/Other/Gionee_GN5007.mbn",
+                  "HAI_8909":  "edl/loaders/Other/HAI_8909.mbn",
+                  "LeEco_Le_2_X528":  "edl/loaders/Other/LeEco_Le_2_X528.mbn",
+                  "MPRG8916_Xiaomi":  "edl/loaders/Other/MPRG8916_Xiaomi.mbn",
+                  "Motoath_MSM8952":  "edl/loaders/Other/Motoath_MSM8952.mbn",
+                  "NK5":  "edl/loaders/Other/NK5.mbn",
+                  "NK6":  "edl/loaders/Other/NK6.mbn",
+                  "Orange_Dive_71":  "edl/loaders/Other/Orange_Dive_71.mbn",
+                  "Turkcell_T60_8916":  "edl/loaders/Other/Turkcell_T60_8916.mbn",
+                  "Vestel_5.5V_VSP355G":  "edl/loaders/Other/Vestel_5.5V_VSP355G.mbn",
+                  "Vestel_V1_29S":  "edl/loaders/Other/Vestel_V1_29S.mbn",
+                  "Vestel_Venus_Go":  "edl/loaders/Other/Vestel_Venus_Go.mbn",
+                  "Vestel_Venus_V3_5000":  "edl/loaders/Other/Vestel_Venus_V3_5000.mbn",
+                  "Vestel_Venus_V3_5010":  "edl/loaders/Other/Vestel_Venus_V3_5010.mbn",
+                  "Vestel_Venus_V3_5040":  "edl/loaders/Other/Vestel_Venus_V3_5040.mbn",
+                  "Vestel_Venus_V3_5070":  "edl/loaders/Other/Vestel_Venus_V3_5070.mbn",
+                  "Vestel_Venus_V3_5530":  "edl/loaders/Other/Vestel_Venus_V3_5530.mbn",
+                  "Vestel_Venus_V3_5570":  "edl/loaders/Other/Vestel_Venus_V3_5570.mbn",
+                  "Vestel_Venus_V6":  "edl/loaders/Other/Vestel_Venus_V6.mbn",
+                  "Vestel_Venus_Z20":  "edl/loaders/Other/Vestel_Venus_Z20.elf",
+                  "Xioami_Mi_4C_S":  "edl/loaders/Other/Xioami_Mi_4C_S.mbn",
+                  "ZUK_Z2-Pro":  "edl/loaders/Other/ZUK_Z2-Pro.elf"
               }
 }

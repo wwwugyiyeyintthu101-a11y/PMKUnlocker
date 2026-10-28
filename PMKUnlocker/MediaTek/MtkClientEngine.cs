@@ -40,23 +40,31 @@ internal sealed partial class MtkClientEngine
             // argparse trap: subparsers with parents=[base] (w/e/r/reset/...) overwrite
             // top-level flags with their own defaults. "multi" has no [base], so it keeps
             // top-level flags. Base flags are therefore passed both before the subcommand
-            // (for multi) and right after it (for every other command).
+            // (for multi) and after the deepest subcommand token (for every other command).
             string[] cmdArgs = command as string[] ?? command.ToArray();
             bool isMulti = cmdArgs.Length > 0 &&
                 string.Equals(cmdArgs[0], "multi", StringComparison.OrdinalIgnoreCase);
+            // da subcommands (imei/seccfg/...) are two-level: both "da" and its subcommand
+            // carry parents=[base], so base flags placed after "da" are overwritten by the
+            // subcommand's own defaults — they must sit after the subcommand token instead.
+            int baseFlagAt = BaseFlagInsertIndex(cmdArgs);
             AddFile("--loader", connection.Loader);
             AddFile("--auth", connection.Auth);
             AddFile("--preloader", connection.Preloader);
             for (int i = 0; i < cmdArgs.Length; i++)
             {
-                if (i == 1 && !isMulti)
+                if (i == baseFlagAt)
                 {
                     AddFile("--loader", connection.Loader);
                     AddFile("--auth", connection.Auth);
                     AddFile("--preloader", connection.Preloader);
                 }
                 string arg = cmdArgs[i];
-                if (arg.IndexOfAny(new[] { ',', '\r', '\n' }) >= 0)
+                // multi script (i==1) ထဲက csv partition lists ("e a,b,c") ကို ခွင့်ပြု —
+                // comma block က file path args အတွက်ပဲ (path comma = argv split break)
+                bool multiScriptArg = isMulti && i == 1;
+                if (arg.IndexOfAny(new[] { '\r', '\n' }) >= 0 ||
+                    (!multiScriptArg && !IsImeiWriteListArg(cmdArgs, i) && arg.IndexOf(',') >= 0))
                     throw new InvalidDataException("mtkclient does not support commas or line breaks in these file paths.");
                 psi.ArgumentList.Add(arg);
             }
@@ -79,6 +87,8 @@ internal sealed partial class MtkClientEngine
                     {
                         lines.Add(line);
                         if (IsProtectedPhaseLine(line)) daPhase = true;
+                        // raw transcript — display mapper ကျောက်ထားတဲ့ \r progress စတာတွေ ပြန်စစ်လို့ရအောင်
+                        try { File.AppendAllText(Path.Combine(sessionDirectory, "last-run.raw.log"), line + "\n"); } catch { }
                     }
                     output(line);
                 }

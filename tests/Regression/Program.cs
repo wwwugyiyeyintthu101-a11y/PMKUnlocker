@@ -1,6 +1,7 @@
 using PMKUnlocker;
 using PMKUnlocker.MediaTek;
 using PMKUnlocker.MtkFirmware;
+using PMKUnlocker.Qualcomm;
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.Reflection;
@@ -55,6 +56,91 @@ try
         "Connected preferred pin is kept");
     Check(ShopServices.ResolvePreferred("List of devices attached\n", true, "old") == "old",
         "No phones — stale pin kept so SelectSerial rejects");
+
+    // ---- MTK DA catalog (drop-in folder scan + path resolve) ----
+    string mtkCat = Path.Combine(dir, "mtk-catalog"); Directory.CreateDirectory(mtkCat);
+    string mtkJson = Path.Combine(mtkCat, "pmk_mtk_devices.json");
+    string mtkLoaders = Path.Combine(mtkCat, "mtk", "loaders"); Directory.CreateDirectory(mtkLoaders);
+    File.WriteAllText(mtkJson, "{ \"Xiaomi\": { \"Redmi 9\": { \"da\": \"\", \"auth\": \"\", \"preloader\": \"\" } } }");
+    var catEmpty = MtkDaCatalog.Load(mtkJson, mtkLoaders);
+    Check(catEmpty.Count == 1 && catEmpty["Xiaomi"].ContainsKey("Redmi 9") &&
+          catEmpty["Xiaomi"]["Redmi 9"].Da == "", "Catalog loads JSON seed with empty DA paths");
+    string redmi9 = Path.Combine(mtkLoaders, "Xiaomi", "Redmi 9"); Directory.CreateDirectory(redmi9);
+    File.WriteAllBytes(Path.Combine(redmi9, "da.bin"), new byte[8]);
+    File.WriteAllBytes(Path.Combine(redmi9, "auth.auth"), new byte[4]);
+    File.WriteAllBytes(Path.Combine(redmi9, "preloader.bin"), new byte[4]);
+    var catFilled = MtkDaCatalog.Load(mtkJson, mtkLoaders);
+    var r9 = catFilled["Xiaomi"]["Redmi 9"];
+    Check(File.Exists(r9.Da) && File.Exists(r9.Auth) && File.Exists(r9.Preloader), "Drop-in folder auto-fills DA/auth/preloader paths");
+    Check(r9.Da.EndsWith("da.bin", StringComparison.OrdinalIgnoreCase) &&
+          r9.Auth.EndsWith("auth.auth", StringComparison.OrdinalIgnoreCase) &&
+          r9.Preloader.EndsWith("preloader.bin", StringComparison.OrdinalIgnoreCase), "Conventional filenames resolve to the right roles");
+    string tecno = Path.Combine(mtkLoaders, "Tecno", "Spark 7"); Directory.CreateDirectory(tecno);
+    File.WriteAllBytes(Path.Combine(tecno, "MTK_AllInOne_DA_6765.bin"), new byte[8]);
+    var catSubstr = MtkDaCatalog.Load(mtkJson, mtkLoaders);
+    Check(catSubstr.ContainsKey("Tecno") && catSubstr["Tecno"].ContainsKey("Spark 7") &&
+          catSubstr["Tecno"]["Spark 7"].Da.EndsWith("MTK_AllInOne_DA_6765.bin", StringComparison.OrdinalIgnoreCase),
+        "Role substring matches DA files not named da.bin, and scan adds new brands");
+    string baseDir = Path.Combine(mtkCat, "mtk");
+    Check(MtkDaCatalog.Resolve("loaders/Xiaomi/Redmi 9/da.bin", baseDir) == Path.Combine(baseDir, "loaders", "Xiaomi", "Redmi 9", "da.bin"),
+        "Relative catalog path resolves under the mtk base");
+    Check(MtkDaCatalog.Resolve(Path.Combine(baseDir, "loaders", "Xiaomi", "da.bin"), baseDir) == Path.Combine(baseDir, "loaders", "Xiaomi", "da.bin"),
+        "Absolute catalog path passes through unchanged");
+    Check(MtkDaCatalog.Resolve("", baseDir) == "", "Empty path resolves to empty");
+    var catNoJson = MtkDaCatalog.Load(Path.Combine(mtkCat, "missing.json"), mtkLoaders);
+    Check(catNoJson.Count == 2 && catNoJson["Xiaomi"].ContainsKey("Redmi 9"),
+        "Folder scan alone builds the catalog when JSON is missing");
+
+    // ---- Wired umbrage catalog (real bundled-tools/mtk/loaders + pmk_mtk_devices.json) ----
+    string probe = AppContext.BaseDirectory, projRoot = "";
+    while (probe != null && !(Directory.Exists(Path.Combine(probe, "PMKUnlocker")) && Directory.Exists(Path.Combine(probe, "tests"))))
+        probe = Path.GetDirectoryName(probe);
+    if (probe != null) projRoot = probe;
+    Check(!string.IsNullOrEmpty(projRoot), "Project root resolved for wired catalog check");
+    var wired = MtkDaCatalog.Load(Path.Combine(projRoot, "PMKUnlocker", "pmk_mtk_devices.json"),
+        Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk", "loaders"));
+    Check(wired.ContainsKey("Lenovo") && wired.ContainsKey("Motorola") && wired.ContainsKey("Nothing") &&
+          wired.ContainsKey("Honor") && wired.ContainsKey("Doogee") && wired.ContainsKey("Itel"),
+        "Wired catalog adds Lenovo/Motorola/Nothing/Honor/Doogee/Itel brands");
+    Check(File.Exists(wired["Xiaomi"]["Redmi 9"].Da) && File.Exists(wired["Xiaomi"]["Redmi 9"].Auth) &&
+          File.Exists(wired["Xiaomi"]["Redmi 9"].Preloader), "Wired Redmi 9 has DA/auth/preloader files");
+    Check(wired["Motorola"]["G13+G23"].Da.EndsWith("da.bin", StringComparison.OrdinalIgnoreCase) &&
+          File.Exists(wired["Motorola"]["G13+G23"].Da), "Wired Motorola G13+G23 DA resolves to a file");
+    Check(wired["Lenovo"]["IdeaTab A7600-H"].Da.Length > 0 && wired["Lenovo"]["IdeaTab A7600-H"].Preloader.Length > 0 &&
+          wired["Lenovo"]["IdeaTab A7600-H"].Auth.Length == 0, "Wired Lenovo has DA+preloader but no auth");
+    Check(File.Exists(wired["Honor"]["Honor 200 Lite"].Da), "Wired Honor 200 Lite DA resolves to a file");
+    Check(File.Exists(wired["Vivo"]["iQOO Neo 7"].Da) && File.Exists(wired["Vivo"]["iQOO Neo 7"].Auth),
+        "Wired iQOO Neo 7 has DA+auth files");
+    int wiredModels = 0;
+    foreach (var b in wired.Values) foreach (var m in b.Values) if (m.Da.Length > 0) wiredModels++;
+    Check(wiredModels >= 51, "Wired catalog fills DA for all 51 umbrage+mtk-escape models");
+    Check(new[] { "Hot 11", "Hot 12", "Note 10", "Note 11" }.All(m => File.Exists(wired["Infinix"][m].Da)) &&
+          new[] { "Camon 17", "Camon 18" }.All(m => File.Exists(wired["Tecno"][m].Da)),
+        "Wired MT6769 models resolve a DA (Infinix Hot 11/12, Note 10/11, Tecno Camon 17/18)");
+    Check(File.ReadAllBytes(wired["Infinix"]["Hot 11"].Da)
+              .SequenceEqual(File.ReadAllBytes(wired["Motorola"]["G13+G23"].Da)),
+        "MT6769 model DAs reuse the chipset-level MT6769 download agent");
+    Check(File.Exists(wired["Samsung"]["A155F_BIT_5"].Auth) && File.Exists(wired["Samsung"]["SM-X115"].Auth) &&
+          File.Exists(wired["Lenovo"]["TB351FU"].Auth),
+        "Samsung/Lenovo MTK auth files resolve through the catalog");
+    Check(!wired["Xiaomi"].ContainsKey("Redmi Note 8") && !wired["Xiaomi"].ContainsKey("Redmi Note 10") &&
+          !wired["Xiaomi"].ContainsKey("Redmi Note 11") && !wired["Xiaomi"].ContainsKey("Poco X3") &&
+          !wired["Xiaomi"].ContainsKey("Poco M3") && !wired["Oppo"].ContainsKey("A74") &&
+          !wired["Oppo"].ContainsKey("F17") && !wired["Oppo"].ContainsKey("F19") &&
+          !wired["Samsung"].ContainsKey("Galaxy A02s") && !wired["Samsung"].ContainsKey("Galaxy A03"),
+        "QC/SPD stubs are no longer offered by the MTK catalog");
+    Check(new[] { "Spark 8", "Spark 9" }.All(m => File.Exists(wired["Tecno"][m].Da)) &&
+          new[] { "Y21", "Y30" }.All(m => File.Exists(wired["Vivo"][m].Da)) &&
+          File.Exists(wired["Samsung"]["Galaxy A12"].Da) && File.Exists(wired["Tecno"]["Spark 7"].Da),
+        "Wired MT6765/MT6761 models resolve a DA (Tecno Spark 7/8/9, Vivo Y21/Y30, Galaxy A12)");
+    Check(File.ReadAllBytes(wired["Vivo"]["Y21"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6765_2"].Da)),
+        "MT6765 model DAs reuse the chipset-level MediaTek AllInOne DA");
+    Check(!wired["Vivo"].ContainsKey("Y20"), "Vivo Y20 (Snapdragon 460) is no longer offered by the MTK catalog");
+    Check(File.Exists(wired["Vivo"]["Y12"].Da) && File.Exists(wired["Vivo"]["Y12"].Auth) &&
+          File.Exists(wired["Vivo"]["Y15"].Da) && File.Exists(wired["Vivo"]["Y15"].Auth),
+        "Wired MT6762 models (Vivo Y12/Y15) resolve DA+auth");
+    Check(File.ReadAllBytes(wired["Vivo"]["Y12"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6761_2"].Da)),
+        "MT6762 model DAs reuse the 0x6761 AllInOne download agent (upstream mtkclient maps MT6762 to dacode 0x6761)");
 
     string backupDir = Path.Combine(dir, "verified-backup"); Directory.CreateDirectory(backupDir);
     var layout = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { ["nvram"] = 16, ["boot"] = 4096 };
@@ -878,8 +964,134 @@ try
         "new MTK engine: HasWriteEvidence accepts exact completion line");
     Check(!MtkClientEngine.HasWriteEvidence(new(0, new[] { "Wrote other.bin to sector 4" }), @"C:\t\seccfg_out.bin"),
         "new MTK engine: HasWriteEvidence rejects another image path");
-    Check(new MtkCommandResult(0, new[] { "Reset command was sent. Disconnect usb cable to power off." }).HasError == false,
+    Check(new MtkCommandResult(0, new[] { "Reset command was sent. Rebooting device to system - unplug the USB cable." }).HasError == false,
         "new MTK engine: reset confirmation is not an error");
+
+    Check(MtkClientEngine.LuhnValid("490154203237518") && MtkClientEngine.LuhnValid("356938035643809"),
+        "IMEI write: valid 15-digit Luhn IMEIs accepted");
+    Check(!MtkClientEngine.LuhnValid("490154203237519") && !MtkClientEngine.LuhnValid("4901542032375") && !MtkClientEngine.LuhnValid("49015420323a518"),
+        "IMEI write: bad check digit, short, and non-digit IMEIs rejected");
+    Check(MtkClientEngine.IsImeiWriteListArg(new[] { "da", "imei", "490154203237518,356938035643809" }, 2),
+        "new MTK engine: da imei positional IMEI list is the comma carve-out slot");
+    Check(!MtkClientEngine.IsImeiWriteListArg(new[] { "da", "imei", "a,b" }, 1) &&
+          !MtkClientEngine.IsImeiWriteListArg(new[] { "w", "boot", "a,b.img" }, 2) &&
+          !MtkClientEngine.IsImeiWriteListArg(new[] { "multi", "e a,b" }, 1),
+        "new MTK engine: comma guard still rejects commas outside the da imei slot");
+    Check(MtkClientEngine.BaseFlagInsertIndex(new[] { "w", "boot", "boot.img" }) == 1 &&
+          MtkClientEngine.BaseFlagInsertIndex(new[] { "reset" }) == 1,
+        "new MTK engine: single-level commands get base flags after the subcommand");
+    Check(MtkClientEngine.BaseFlagInsertIndex(new[] { "da", "imei", "a,b", "--write" }) == 2,
+        "new MTK engine: two-level da subcommand gets base flags after the subcommand token");
+    Check(MtkClientEngine.BaseFlagInsertIndex(new[] { "multi", "da seccfg unlock;reset" }) == -1,
+        "new MTK engine: multi script keeps top-level base flags only");
+    Check(MtkClientEngine.IsImeiWriteSuccess(new(0, new[] { "IMEIs were written successfully" })) &&
+          !MtkClientEngine.IsImeiWriteFailed(new(0, new[] { "IMEIs were written successfully" })),
+        "IMEI write: success line detected without error");
+    Check(MtkClientEngine.IsImeiWriteFailed(new(0, new[] { "Failed to write IMEIs." })) &&
+          !MtkClientEngine.IsImeiWriteSuccess(new(0, new[] { "Failed to write IMEIs." })),
+        "IMEI write: explicit failure line detected even with exit zero");
+    Check(MtkClientEngine.IsImeiWriteFailed(new(1, new[] { "something broke" })),
+        "IMEI write: nonzero exit counts as failure");
+    Check(!MtkClientEngine.IsImeiWriteSuccess(new(0, new[] { "done" })) &&
+          !MtkClientEngine.IsImeiWriteFailed(new(0, new[] { "done" })),
+        "IMEI write: unrelated output is neither success nor failure");
+
+    Check(ReviewSafety.QcEfsPartitions.Length == 5 &&
+          ReviewSafety.QcEfsPartitions.SequenceEqual(new[] { "persist", "modemst1", "modemst2", "fsg", "fsc" }),
+        "QC EFS: partition set covers persist/modemst1/modemst2/fsg/fsc");
+
+    string efsDir = Path.Combine(dir, "efs"); Directory.CreateDirectory(efsDir);
+    foreach (var (name, len) in new[] { ("persist", 100L), ("modemst1", 200L), ("modemst2", 300L), ("fsg", 400L), ("fsc", 500L) })
+        File.WriteAllBytes(Path.Combine(efsDir, name + ".bin"), new byte[len]);
+    var efsLive = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+    { ["persist"] = 100, ["modemst1"] = 200, ["modemst2"] = 300, ["fsg"] = 400, ["fsc"] = 999 };
+    var (efsPlan, efsSkipped) = ReviewSafety.BuildQcEfsRestorePlan(efsDir, ReviewSafety.QcEfsPartitions, efsLive);
+    Check(efsPlan.Count == 4 && efsSkipped.Count == 1 && efsSkipped[0].Contains("fsc"),
+        "QC EFS: size mismatch skips only the mismatched partition");
+
+    string efsMissingDir = Path.Combine(dir, "efs-partial"); Directory.CreateDirectory(efsMissingDir);
+    File.WriteAllBytes(Path.Combine(efsMissingDir, "persist.bin"), new byte[100]);
+    var (missingPlan, missingSkipped) = ReviewSafety.BuildQcEfsRestorePlan(efsMissingDir, ReviewSafety.QcEfsPartitions,
+        new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase));
+    Check(missingPlan.Count == 1 && missingPlan[0].Name == "persist" && missingSkipped.Count == 4 &&
+          missingSkipped.All(s => s.Contains("no ") && s.Contains(".bin")),
+        "QC EFS: missing .bin files are skipped with a note");
+
+    var (noLivePlan, noLiveSkipped) = ReviewSafety.BuildQcEfsRestorePlan(efsDir, ReviewSafety.QcEfsPartitions,
+        new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase));
+    Check(noLivePlan.Count == 5 && noLiveSkipped.Count == 0,
+        "QC EFS: without a live GPT, all present files are planned (no size check)");
+
+    // ===== Native QC firehose: GPT parser + rawprogram XML + sector math =====
+    byte[] GptHeader(long entryLba, int entryCount, int entrySize, string sig = "EFI PART")
+    {
+        var h = new byte[512];
+        Encoding.ASCII.GetBytes(sig).CopyTo(h, 0);
+        BitConverter.GetBytes(entryLba).CopyTo(h, 72);
+        BitConverter.GetBytes(entryCount).CopyTo(h, 80);
+        BitConverter.GetBytes(entrySize).CopyTo(h, 84);
+        return h;
+    }
+    byte[] GptEntry(string name, long firstLba, long lastLba)
+    {
+        var e = new byte[128];
+        Guid.NewGuid().ToByteArray().CopyTo(e, 0);
+        BitConverter.GetBytes(firstLba).CopyTo(e, 32);
+        BitConverter.GetBytes(lastLba).CopyTo(e, 40);
+        Encoding.Unicode.GetBytes(name).CopyTo(e, 56);
+        return e;
+    }
+
+    Check(GptParser.HasSignature(GptHeader(2, 4, 128)) && !GptParser.HasSignature(new byte[512]),
+        "GPT: EFI PART signature detected, empty header rejected");
+    var (ec, es, elba) = GptParser.HeaderInfo(GptHeader(2, 4, 128));
+    Check(ec == 4 && es == 128 && elba == 2, "GPT: header entry count/size/LBA parsed");
+    bool badHdr = false;
+    try { GptParser.HeaderInfo(new byte[512]); } catch (InvalidDataException) { badHdr = true; }
+    Check(badHdr, "GPT: header without signature is rejected");
+    bool shortHdr = false;
+    try { GptParser.HeaderInfo(new byte[64]); } catch (InvalidDataException) { shortHdr = true; }
+    Check(shortHdr, "GPT: undersized header is rejected");
+
+    var hdr = GptHeader(2, 2, 128);
+    var entries = new byte[2 * 128];
+    GptEntry("boot", 34, 66).CopyTo(entries, 0);
+    GptEntry("system", 67, 500).CopyTo(entries, 128);
+    var parts = GptParser.ParseEntries(hdr, entries);
+    Check(parts.Count == 2 && parts[0].Name == "boot" && parts[0].FirstLba == 34 && parts[0].LastLba == 66,
+        "GPT: entries parsed with name + LBA range");
+    Check(parts[0].SectorCount == 33 && parts[0].ByteOffset(512) == 34L * 512 && parts[0].ByteLength(512) == 33L * 512,
+        "GPT: sector count and byte offset/length math");
+    Check(parts[1].Name == "system" && parts[1].ByteLength(4096) == (500 - 67 + 1L) * 4096,
+        "GPT: 4096-byte sector math for UFS devices");
+
+    var entriesZero = new byte[2 * 128];
+    GptEntry("boot", 34, 66).CopyTo(entriesZero, 128);
+    var partsOne = GptParser.ParseEntries(hdr, entriesZero);
+    Check(partsOne.Count == 1 && partsOne[0].Name == "boot", "GPT: zero (unused) entries are skipped");
+
+    var xml = GptParser.BuildRawProgramXml(parts, 512);
+    var progs = XDocument.Parse(xml).Descendants("program").ToList();
+    Check(progs.Count == 2, "rawprogram: one program entry per partition");
+    Check((string?)progs[0].Attribute("label") == "boot" &&
+          (string?)progs[0].Attribute("filename") == "boot.bin" &&
+          (string?)progs[0].Attribute("start_sector") == "34" &&
+          (string?)progs[0].Attribute("num_partition_sectors") == "33" &&
+          (string?)progs[0].Attribute("start_byte_hex") == "0x4400" &&
+          (string?)progs[0].Attribute("SECTOR_SIZE_IN_BYTES") == "512",
+        "rawprogram: boot entry attributes + byte offset (34*512=0x4400)");
+    Check((string?)progs[1].Attribute("start_sector") == "67" &&
+          (string?)progs[1].Attribute("num_partition_sectors") == "434" &&
+          (string?)progs[1].Attribute("start_byte_hex") == "0x8600",
+        "rawprogram: system entry LBA range + byte offset (67*512=0x8600)");
+
+    var escHdr = GptHeader(2, 1, 128);
+    var escEntries = new byte[128];
+    GptEntry("a&b", 10, 20).CopyTo(escEntries, 0);
+    var escXml = GptParser.BuildRawProgramXml(GptParser.ParseEntries(escHdr, escEntries), 512);
+    Check(escXml.Contains("label=\"a&amp;b\"") && escXml.Contains("filename=\"a&amp;b.bin\""),
+        "rawprogram: partition names are XML-escaped");
+
     Console.WriteLine($"{passed} regression checks passed.");
 }
 finally { Directory.Delete(dir, recursive: true); }

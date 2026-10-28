@@ -1,34 +1,29 @@
 {
     "Xiaomi": {
-        "Redmi Note 8": { "da": "", "auth": "", "preloader": "" },
         "Redmi Note 9": { "da": "", "auth": "", "preloader": "" },
-        "Redmi Note 10": { "da": "", "auth": "", "preloader": "" },
-        "Redmi Note 11": { "da": "", "auth": "", "preloader": "" },
         "Redmi 9": { "da": "", "auth": "", "preloader": "" },
-        "Redmi 10": { "da": "", "auth": "", "preloader": "" },
-        "Poco X3": { "da": "", "auth": "", "preloader": "" },
-        "Poco M3": { "da": "", "auth": "", "preloader": "" }
+        "Redmi 10": { "da": "", "auth": "", "preloader": "" }
     },
     "Oppo": {
         "A15": { "da": "", "auth": "", "preloader": "" },
         "A16": { "da": "", "auth": "", "preloader": "" },
         "A55": { "da": "", "auth": "", "preloader": "" },
-        "A74": { "da": "", "auth": "", "preloader": "" },
-        "F17": { "da": "", "auth": "", "preloader": "" },
-        "F19": { "da": "", "auth": "", "preloader": "" }
+        "Reno 6 5G": { "da": "", "auth": "", "preloader": "" }
     },
     "Vivo": {
         "Y12": { "da": "", "auth": "", "preloader": "" },
         "Y15": { "da": "", "auth": "", "preloader": "" },
-        "Y20": { "da": "", "auth": "", "preloader": "" },
         "Y21": { "da": "", "auth": "", "preloader": "" },
         "Y30": { "da": "", "auth": "", "preloader": "" },
-        "V21": { "da": "", "auth": "", "preloader": "" }
+        "V21": { "da": "", "auth": "", "preloader": "" },
+        "iQOO Neo 7": { "da": "", "auth": "", "preloader": "" },
+        "S1": { "da": "", "auth": "", "preloader": "" },
+        "T2 Pro 5G + iQOO Z7 Pro 5G": { "da": "", "auth": "", "preloader": "" },
+        "T3 5G": { "da": "", "auth": "", "preloader": "" },
+        "T4X + iQOO Z10X": { "da": "", "auth": "", "preloader": "" }
     },
     "Samsung": {
-        "Galaxy A02s": { "da": "", "auth": "", "preloader": "" },
         "Galaxy A12": { "da": "", "auth": "", "preloader": "" },
-        "Galaxy A03": { "da": "", "auth": "", "preloader": "" },
         "Galaxy A03s": { "da": "", "auth": "", "preloader": "" }
     },
     "Infinix": {
@@ -36,7 +31,8 @@
         "Hot 11": { "da": "", "auth": "", "preloader": "" },
         "Hot 12": { "da": "", "auth": "", "preloader": "" },
         "Note 10": { "da": "", "auth": "", "preloader": "" },
-        "Note 11": { "da": "", "auth": "", "preloader": "" }
+        "Note 11": { "da": "", "auth": "", "preloader": "" },
+        "Note 30": { "da": "", "auth": "", "preloader": "" }
     },
     "Realme": {
         "C11": { "da": "", "auth": "", "preloader": "" },
@@ -44,13 +40,66 @@
         "C15": { "da": "", "auth": "", "preloader": "" },
         "C21": { "da": "", "auth": "", "preloader": "" },
         "Narzo 30": { "da": "", "auth": "", "preloader": "" },
-        "Narzo 50": { "da": "", "auth": "", "preloader": "" }
+        "Narzo 50": { "da": "", "auth": "", "preloader": "" },
+        "10+10 4G": { "da": "", "auth": "", "preloader": "" }
     },
     "Tecno": {
         "Spark 7": { "da": "", "auth": "", "preloader": "" },
         "Spark 8": { "da": "", "auth": "", "preloader": "" },
         "Spark 9": { "da": "", "auth": "", "preloader": "" },
         "Camon 17": { "da": "", "auth": "", "preloader": "" },
-        "Camon 18": { "da": "", "auth": "", "preloader": "" }
+        "Camon 18": { "da": "", "auth": "", "preloader": "" },
+        "Spark 30 Pro": { "da": "", "auth": "", "preloader": "" },
+        "Pova 4": { "da": "", "auth": "", "preloader": "" },
+        "Pova 4 Pro": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Lenovo": {
+        "IdeaTab A7600-H": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Motorola": {
+        "G13+G23": { "da": "", "auth": "", "preloader": "" },
+        "G17+G17 Power": { "da": "", "auth": "", "preloader": "" },
+        "G24+G24 Power": { "da": "", "auth": "", "preloader": "" },
+        "E15": { "da": "", "auth": "", "preloader": "" },
+        "E32s": { "da": "", "auth": "", "preloader": "" },
+        "G05+G15": { "da": "", "auth": "", "preloader": "" },
+        "G22": { "da": "", "auth": "", "preloader": "" },
+        "G8 Power Lite": { "da": "", "auth": "", "preloader": "" },
+        "TAB G20": { "da": "", "auth": "", "preloader": "" },
+        "TAB G70": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Nothing": {
+        "Phone 2A": { "da": "", "auth": "", "preloader": "" },
+        "Phone 2A Plus": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Doogee": {
+        "Blade GT Play": { "da": "", "auth": "", "preloader": "" },
+        "Blade GT Pro": { "da": "", "auth": "", "preloader": "" },
+        "TAB E3 Max": { "da": "", "auth": "", "preloader": "" },
+        "TAB E3 Plus": { "da": "", "auth": "", "preloader": "" },
+        "TAB E3 Pro": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Honor": {
+        "Honor 200 Lite": { "da": "", "auth": "", "preloader": "" },
+        "Honor 90 Lite 5G": { "da": "", "auth": "", "preloader": "" },
+        "Honor 90 Smart": { "da": "", "auth": "", "preloader": "" },
+        "Honor Play 40 Plus": { "da": "", "auth": "", "preloader": "" },
+        "Honor Play 50 Plus": { "da": "", "auth": "", "preloader": "" },
+        "Honor Play 7T": { "da": "", "auth": "", "preloader": "" },
+        "Honor Play 8T": { "da": "", "auth": "", "preloader": "" },
+        "Honor X40i": { "da": "", "auth": "", "preloader": "" },
+        "Honor X5 Plus": { "da": "", "auth": "", "preloader": "" },
+        "Honor X50i": { "da": "", "auth": "", "preloader": "" },
+        "Honor X50i Plus": { "da": "", "auth": "", "preloader": "" },
+        "Honor X5b": { "da": "", "auth": "", "preloader": "" },
+        "Honor X6": { "da": "", "auth": "", "preloader": "" },
+        "Honor X6a": { "da": "", "auth": "", "preloader": "" },
+        "Honor X6b": { "da": "", "auth": "", "preloader": "" },
+        "Honor X7a": { "da": "", "auth": "", "preloader": "" }
+    },
+    "Itel": {
+        "P55 5G": { "da": "", "auth": "", "preloader": "" },
+        "RS4": { "da": "", "auth": "", "preloader": "" },
+        "S24": { "da": "", "auth": "", "preloader": "" }
     }
 }

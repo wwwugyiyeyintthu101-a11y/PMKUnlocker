@@ -17,6 +17,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
+using PMKUnlocker.Qualcomm;
 
 namespace PMKUnlocker
 {
@@ -145,6 +146,9 @@ namespace PMKUnlocker
         private Button btnQcUserlockReset;
         private Button btnQcFullBackup;
         private Button btnQcEfsBackup;
+        private Button btnQcRestoreBackup;
+        private Button btnQcEfsRestore;
+        private Button btnQcImeiReadEfs;
         private Button btnQcReset;
         // EDL auto-auth session (Unlock Tool style) — COM port တစ်ခုအတွက် တစ်ခါသာ
         private string qcAuthedPort { get => qcLoaderSession.Port; set => qcLoaderSession.Port = value; }
@@ -198,6 +202,8 @@ namespace PMKUnlocker
         private TextBox txtQcFirmware, txtSamFirmware, txtSpdFirmware;
         private Button btnQcPickFirmware, btnQcStartFlash, btnSamPickFirmware, btnSamStartFlash;
         private Button btnSamDownloadPit;
+        private Button btnSamEfsBackup;
+        private Button btnSamEfsRestore;
         private Button btnSpdPickFirmware, btnSpdDirectFlash;
         private Button btnSpdReadGpt, btnSpdReadPart, btnSpdWritePart, btnSpdErasePart;
         private Button btnSpdDiagFrp, btnSpdDiagUserlock;
@@ -1223,6 +1229,34 @@ namespace PMKUnlocker
             Panel grpQcInfo = CreateGroupPanel("INFO", UiX(0), UiY(0), 2, btnQcReadInfo, btnQcReset);
             Panel grpQcBackup = CreateGroupPanel("BACKUP", UiX(0) + 360, UiY(0), 3, btnQcSaveGpt, btnQcFullBackup, btnQcEfsBackup);
             Panel grpQcUnlock = CreateGroupPanel("UNLOCK", UiX(0), UiY(2), 2, btnQcFrpRemove, btnQcUserlockReset);
+
+            // RESTORE — backup folder (rl dump / EFS dump) ထဲက <partition>.bin တွေကို ပြန်ရေး
+            btnQcRestoreBackup = Create3DButton("♻ Restore Backup", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Green);
+            btnQcRestoreBackup.Click += BtnQcRestoreBackup_Click;
+            if (toolTipMain != null)
+                Tip(btnQcRestoreBackup,
+                    "Backup folder ထဲက <partition>.bin ဖိုင်တွေကို edl.py w နဲ့ ပြန်ရေးမယ်။\r\n" +
+                    "Partition size ကို Read Info / GPT နဲ့ တိုက်စစ်ပြီး မကိုက်ရင် ကျော်မယ်။\r\n" +
+                    "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။");
+
+            // EFS Restore (IMEI repair) — EFS backup folder ထဲက persist/modemst1/modemst2/fsg/fsc ကို ပြန်ရေး
+            btnQcEfsRestore = Create3DButton("♻ EFS Restore (IMEI)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Green);
+            btnQcEfsRestore.Click += BtnQcEfsRestore_Click;
+            if (toolTipMain != null)
+                Tip(btnQcEfsRestore,
+                    "EFS backup folder (persist/modemst1/modemst2/fsg/fsc) ကို edl.py w နဲ့ ပြန်ရေးပြီး\r\n" +
+                    "IMEI/baseband ပျက်တာ ပြန်ကောင်းစေမယ်။ Partition size မကိုက်ရင် ကျော်မယ်။\r\n" +
+                    "ဒီ backup က ဒီဖုန်းနဲ့ မကိုက်ရင် brick ဖြစ်နိုင်လို့ ဖုန်းပိုင်ရှင်ခွင့်ပြုချက်နဲ့ပဲ လုပ်ပါ။");
+
+            // IMEI Read (EFS) — EFS backup ဖိုင်တွေထဲက IMEI ကို heuristic scan
+            btnQcImeiReadEfs = Create3DButton("📱 IMEI Read (EFS)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
+            btnQcImeiReadEfs.Click += BtnQcImeiReadEfs_Click;
+            if (toolTipMain != null)
+                Tip(btnQcImeiReadEfs,
+                    "EFS backup folder (persist/modemst1/modemst2/fsg/fsc .bin) ထဲက IMEI ကို\r\n" +
+                    "heuristic scan (plain + hex-encoded ASCII, Luhn) နဲ့ ရှာမယ်။ sticker/About phone နဲ့ ပြန်တိုက်ပါ။");
+
+            Panel grpQcRestore = CreateGroupPanel("RESTORE / IMEI REPAIR", UiX(0), UiY(5), 3, btnQcRestoreBackup, btnQcEfsRestore, btnQcImeiReadEfs);
             // SETUP group (📦 EDL Module / 🧩 Firehose Loader) — user request နဲ့ ဖယ်လိုက်
             // (loader ရွေးဖို့ = အပေါ်က LOADER PICKER၊ edl.py path = auto-find + dialog)
 
@@ -1256,7 +1290,7 @@ namespace PMKUnlocker
             chkQcAutoReboot.Location = new Point(UiX(0) + 697, UiY(4) + 23);
 
             tabQc.Controls.AddRange(new Control[] {
-    grpQcInfo, grpQcBackup, grpQcUnlock, grpQcLoaderPicker,
+    grpQcInfo, grpQcBackup, grpQcUnlock, grpQcLoaderPicker, grpQcRestore,
                 txtQcFirmware, btnQcPickFirmware, btnQcStartFlash, chkQcAutoReboot,
     chkQcBackupEfsFirst, chkQcSkipUserdata, chkQcResetFrpAfter
 });
@@ -1360,6 +1394,16 @@ namespace PMKUnlocker
             // cols=2 → Info + SoftBrick Fix (same row, MTP group width 345)
             Panel grpSamDl = CreateGroupPanel("DOWNLOAD MODE", UiX(0) + 540, UiY(3), 2, btnSamDlInfo, btnSamSoftBrick);
 
+            // EFS / NV backup + restore (ADB root) — heimdall က download-mode ဖတ်လို့မရလို့
+            // efs/modem/persist/param ကို su + dd နဲ့ ဖတ်/ရေးတယ်
+            btnSamEfsBackup = Create3DButton("💾 EFS Backup", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
+            btnSamEfsBackup.Click += BtnSamEfsBackup_Click;
+            Tip(btnSamEfsBackup, "ADB + root: efs / modem / persist / param partitions ကို .bin အဖြစ် dump (IMEI/NV backup).");
+            btnSamEfsRestore = Create3DButton("♻ EFS Restore", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Orange);
+            btnSamEfsRestore.Click += BtnSamEfsRestore_Click;
+            Tip(btnSamEfsRestore, "ADB + root: backup folder ထဲက efs/modem/persist/param .bin တွေကို ပြန်ရေး (size တိုက်စစ်ပြီးမှ).");
+            Panel grpSamEfs = CreateGroupPanel("EFS BACKUP / RESTORE (ADB ROOT)", UiX(0), UiY(4), 2, btnSamEfsBackup, btnSamEfsRestore);
+
             txtSamFirmware.Location = new Point(UiX(0), UiY(4) + 77);
             btnSamPickFirmware.Location = new Point(UiX(0) + 400, UiY(4) + 75);
             btnSamStartFlash.Location = new Point(UiX(0) + 510, UiY(4) + 70);
@@ -1367,7 +1411,7 @@ namespace PMKUnlocker
             lblSamHint.Location = new Point(UiX(0), UiY(8) + 4);
 
             tabSamsung.Controls.AddRange(new Control[] {
-    grpSamInfo, grpSamUnlock, grpSamMtp, grpSamReboot, grpSamDl,
+    grpSamInfo, grpSamUnlock, grpSamMtp, grpSamReboot, grpSamDl, grpSamEfs,
                 txtSamFirmware, btnSamPickFirmware, btnSamStartFlash, btnSamDownloadPit,
     chkSamBackupPit, chkSamAutoReboot
 });
@@ -1656,7 +1700,8 @@ namespace PMKUnlocker
                 BackColor = Color.FromArgb(10, 11, 14),
                 ForeColor = Color.FromArgb(0, 255, 128),
                 Font = new Font("Consolas", 10f, FontStyle.Regular),
-                BorderStyle = BorderStyle.None
+                BorderStyle = BorderStyle.None,
+                HideSelection = false   // search match ကို focus မရှိလည်း highlight မြင်ရအောင်
             };
             rtbLog.Name = "pmkRtbLog";
 
@@ -1765,7 +1810,9 @@ namespace PMKUnlocker
                 BackColor = Color.FromArgb(22, 25, 30),
                 Padding = new Padding(6, 7, 0, 0)   // raised border + button gap
             };
-            string[] platformNames = { "ADB", "Fastboot", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon" };
+            // နောက်ဆုံး "Setup" က ShopPanel က ထည့်တဲ့ "Setup / Backups" tab (index 7) —
+            // platform bar မရှိခဲ့ရင် အဲဒီ tab ကို ဘယ်ကမှ ရောက်လို့မရဘူး
+            string[] platformNames = { "ADB", "Fastboot", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon", "⚙ Setup" };
             platformBtns = new List<Button>();
             for (int i = 0; i < platformNames.Length; i++)
             {
@@ -1773,12 +1820,13 @@ namespace PMKUnlocker
                 Button pb = new Button
                 {
                     Text = platformNames[i],
-                    Size = new Size(118, 32),
+                    // 8 button ဆိုတာ ညာဘက် panel (~900px) ထဲ ဆံ့အောင် width/margin ကို ချိန်ထားတယ်
+                    Size = new Size(106, 32),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.FromArgb(38, 44, 54),
                     ForeColor = Color.White,
-                    Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-                    Margin = new Padding(0, 0, 4, 2),
+                    Font = new Font("Segoe UI", 8.75f, FontStyle.Bold),
+                    Margin = new Padding(0, 0, 3, 2),
                     Cursor = Cursors.Hand,
                     Tag = "platform"
                 };
@@ -3381,8 +3429,7 @@ namespace PMKUnlocker
 
             if (IsQualcommTab())
             {
-                if (!EnsureEdlModule()) return false;
-                return await ExecuteCommandCleanAsync("python", BuildEdlArgs(arg), title);
+                return await RunNativeEdlAsync(arg, title, false);
             }
 
             // SPD tab — spd_dump (mtk.exe မသုံးရ — မှားသုံးရင် brick အန္တရာယ်)
@@ -4183,6 +4230,129 @@ namespace PMKUnlocker
 
         private const int PitEntrySize = 132;        // 9×u32 + 3×32-byte (UTF-16) name field
         private const long SamsungBlockSize = 512;   // PIT block unit
+
+        // Samsung EFS/NV — heimdall က download-mode ကနေ partition ဖတ်လို့မရလို့ ADB root (su + dd) သုံးတယ်
+        private static readonly string[] SamsungEfsPartitions = { "efs", "modem", "persist", "param" };
+
+        private async void BtnSamEfsBackup_Click(object sender, EventArgs e)
+        {
+            if (!await EnsureAdbRootAsync("Samsung EFS backup")) return;
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Samsung EFS backup သိမ်းမယ့် folder ရွေးပါ" })
+            {
+                if (fbd.ShowDialog() != DialogResult.OK) return;
+                string dir = Path.Combine(fbd.SelectedPath, "SamsungEFS_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                try { Directory.CreateDirectory(dir); }
+                catch (Exception ex) { Log("[FAIL] Backup folder create failed: " + ex.Message, Color.Red); return; }
+
+                await RunFlashWorkflowAsync(async () =>
+                {
+                    int ok = 0;
+                    var missing = new List<string>();
+                    foreach (string part in SamsungEfsPartitions)
+                    {
+                        if (stopRequested) break;
+                        if (await RunAdbRootPartitionOpAsync("r", part, Path.Combine(dir, part + ".bin"),
+                                "Samsung EFS backup (" + part + ")"))
+                            ok++;
+                        else
+                            missing.Add(part);
+                    }
+                    Log($"[OK] Samsung EFS backup — {ok}/{SamsungEfsPartitions.Length} partition(s) → {dir}", Color.LightGreen);
+                    if (missing.Count > 0)
+                        Log("[i] Not backed up (missing/unreadable on this model): " + string.Join(", ", missing), Color.Gray);
+                }, autoRebootAfter: false);
+            }
+        }
+
+        private async void BtnSamEfsRestore_Click(object sender, EventArgs e)
+        {
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Samsung EFS backup folder ရွေးပါ (efs.bin / modem.bin / persist.bin / param.bin)" })
+            {
+                if (fbd.ShowDialog() != DialogResult.OK) return;
+                string dir = fbd.SelectedPath;
+
+                var files = new List<(string Name, string Path)>();
+                foreach (string part in SamsungEfsPartitions)
+                {
+                    string f = Path.Combine(dir, part + ".bin");
+                    if (File.Exists(f)) files.Add((part, f));
+                }
+                if (files.Count == 0)
+                {
+                    Log("[!] Backup folder ထဲမှာ efs.bin / modem.bin / persist.bin / param.bin မတွေ့ပါ: " + dir, Color.Orange);
+                    return;
+                }
+                if (!await EnsureAdbRootAsync("Samsung EFS restore")) return;
+
+                // size တိုက်စစ် — partition size မသိတဲ့ model မှာ သတိပေးချက်နဲ့ ဆက်ခွင့်ပြု
+                var plan = new List<(string Name, string Path)>();
+                var skipped = new List<string>();
+                bool unknownSize = false;
+                foreach (var f in files)
+                {
+                    long partBytes = await GetAdbPartitionBytesAsync(f.Name);
+                    long fileBytes;
+                    try { fileBytes = new FileInfo(f.Path).Length; } catch { fileBytes = -1; }
+                    if (partBytes <= 0) { unknownSize = true; plan.Add(f); continue; }
+                    if (fileBytes != partBytes)
+                    {
+                        skipped.Add($"{f.Name} (file {fileBytes} B ≠ partition {partBytes} B)");
+                        continue;
+                    }
+                    plan.Add(f);
+                }
+                foreach (string s in skipped) Log("[!] Skipped — size does not match this device: " + s, Color.Orange);
+                if (plan.Count == 0)
+                {
+                    Log("[!] Nothing to restore — every file failed the partition-size check.", Color.OrangeRed);
+                    return;
+                }
+                if (unknownSize)
+                {
+                    Log("[!] Some partition sizes could not be read — restore is unverified.", Color.Orange);
+                    if (MessageBox.Show(this, "Partition size မသိနိုင်တဲ့ partition ရှိတယ်။\nSize မတိုက်စစ်ဘဲ ဆက်ရေးမလား?",
+                            "Samsung EFS restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                }
+                if (MessageBox.Show(this,
+                        "Restore " + plan.Count + " partition(s)?\n\n" + string.Join(", ", plan.Select(p => p.Name)) +
+                        "\n\nEFS မှားရင် IMEI/baseband ပျက်နိုင်တယ်။ Backup က ဒီဖုန်းအတွက် ဟုတ်ကြောင်း သေချာအောင်။\n\nဆက်လုပ်မလား?",
+                        "Confirm Samsung EFS restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                await RunFlashWorkflowAsync(async () =>
+                {
+                    int done = 0;
+                    foreach (var f in plan)
+                    {
+                        if (stopRequested) break;
+                        if (!await RunAdbRootPartitionOpAsync("w", f.Name, f.Path, "Samsung EFS restore (" + f.Name + ")"))
+                            throw new IOException("Restore stopped at " + f.Name + " — remaining partitions were NOT written.");
+                        done++;
+                    }
+                    Log($"[OK] Samsung EFS restore finished — {done}/{plan.Count} partition(s) written. Reboot the phone.", Color.LightGreen);
+                }, autoRebootAfter: false);
+            }
+        }
+
+        private async Task<bool> EnsureAdbRootAsync(string title)
+        {
+            string id = (await ProbeSuAsync()).Trim();
+            if (id.Contains("uid=0")) return true;
+            Log("[!] " + title + ": root (su) မရပါ — Magisk / KernelSU root ဖုန်းမှာသာ လုပ်လို့ရတယ်.", Color.OrangeRed);
+            MessageBox.Show("Root (su) မရပါ။\n\nEFS backup/restore ကို ADB + root နဲ့သာ လုပ်လို့ရတယ် (heimdall က partition ဖတ်လို့မရ)။",
+                title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        private async Task<long> GetAdbPartitionBytesAsync(string partition)
+        {
+            string sz = (await ExecuteCommandQuickAsync("adb.exe",
+                "shell su -c \"blockdev --getsize64 /dev/block/by-name/" + partition + " 2>/dev/null\"")).Trim();
+            if (long.TryParse(sz, out long bytes) && bytes > 0) return bytes;
+            string sec = (await ExecuteCommandQuickAsync("adb.exe",
+                "shell su -c \"cat /sys/class/block/$(basename $(readlink -f /dev/block/by-name/" + partition + "))/size 2>/dev/null\"")).Trim();
+            if (long.TryParse(sec, out long sectors) && sectors > 0) return sectors * 512;
+            return 0;
+        }
 
         private string FindHeimdall()
         {
@@ -5255,6 +5425,7 @@ namespace PMKUnlocker
 
                 rtbLog.SelectionStart = rtbLog.TextLength;
                 rtbLog.SelectionLength = 0;
+                AppendLogTimestamp(message);
                 rtbLog.SelectionColor = color ?? Color.FromArgb(0, 255, 128);
 
                 rtbLog.AppendText(message + "\r\n");
@@ -5263,6 +5434,16 @@ namespace PMKUnlocker
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
+        }
+
+        // စာကြောင်း တိုင်းရဲ့ ရှေ့မှာ dim ရောင် [HH:mm:ss] ထည့် — separator ဗလာကြောင်း ကတော့ မထည့်
+        private void AppendLogTimestamp(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            rtbLog.SelectionStart = rtbLog.TextLength;
+            rtbLog.SelectionLength = 0;
+            rtbLog.SelectionColor = Color.FromArgb(110, 120, 136);
+            rtbLog.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] ");
         }
 
         private void LogPair(string label, string value, Color labelColor, Color valueColor, bool boldValue = true)
@@ -5278,6 +5459,7 @@ namespace PMKUnlocker
 
                 rtbLog.SelectionStart = rtbLog.TextLength;
                 rtbLog.SelectionLength = 0;
+                AppendLogTimestamp(label);
                 rtbLog.SelectionColor = labelColor;
                 rtbLog.AppendText(label);
                 rtbLog.SelectionColor = valueColor;
@@ -5397,7 +5579,7 @@ namespace PMKUnlocker
                     {
                         FileName = "powershell",
                         Arguments = "-NoProfile -NonInteractive -Command \"Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | " +
-                                    "Where-Object { $_.InstanceId -like '*VID_0E8D*' -or $_.FriendlyName -like '*Device Descriptor Request Failed*' } | ForEach-Object { " +
+                                    "Where-Object { $_.InstanceId -like '*VID_0E8D*' -or $_.FriendlyName -like '*Device Descriptor Request Failed*' -or $_.FriendlyName -like '*UsbDk*' } | ForEach-Object { " +
                                     "$s = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data; " +
                                     "$_.InstanceId + '|' + $s + '|' + $_.FriendlyName }\"",
                         RedirectStandardOutput = true,
@@ -5441,6 +5623,22 @@ namespace PMKUnlocker
                         {
                             string fid = line.Split('|')[0].Trim();
                             if (fid.Length > 0) usbFailed.Add(fid);
+                            continue;
+                        }
+                        // UsbDk redirect node (DA session) — instance id ထဲ VID_0E8D မပါနိုင်
+                        // (UsbDk namespace) → MTK device အဖြစ် သတ်မှတ်ပြီး header ပြဖို့
+                        if (up.Contains("USBDK"))
+                        {
+                            string[] uparts = line.Split('|');
+                            string usvc = uparts.Length > 1 ? uparts[1].Trim() : "";
+                            if (string.IsNullOrEmpty(usvc)) usvc = "UsbDk";
+                            if (!pidSvcs.ContainsKey("2001"))
+                            {
+                                pidSvcs["2001"] = new List<string>();
+                                pidOrder.Add("2001");
+                            }
+                            if (!pidSvcs["2001"].Exists(x => string.Equals(x, usvc, StringComparison.OrdinalIgnoreCase)))
+                                pidSvcs["2001"].Add(usvc);
                             continue;
                         }
                         if (!up.Contains("VID_0E8D")) continue;
@@ -8294,6 +8492,22 @@ namespace PMKUnlocker
                 // MtkFirmware / QcFirmware ကို ရေးတော့မပါ — ပိတ်ရင် path အဟောင်း ဖျက်သွားမယ်
                 Str("LastPort", cmbPorts?.SelectedItem?.ToString() ?? "", sb);
                 Str("SplitterDistance", userAdjustedSplit ? splitMain.SplitterDistance.ToString() : "", sb);
+                // panel-written keys (MtkNvBackupRoot …) — whole-file rewrite မှာ မပျက်အောင် preserve
+                var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "QcBackupEfsFirst", "QcSkipUserdata", "QcResetFrpAfter", "QcAutoReboot", "SamBackupPit", "SamAutoReboot", "LightTheme", "LastPort", "SplitterDistance" };
+                try
+                {
+                    if (File.Exists(SettingsFile))
+                        foreach (string raw in File.ReadAllLines(SettingsFile))
+                        {
+                            string line = raw.Trim();
+                            if (line.Length == 0 || line.StartsWith("#")) continue;
+                            int eq = line.IndexOf('=');
+                            if (eq <= 0) continue;
+                            if (!knownKeys.Contains(line.Substring(0, eq).Trim())) sb.AppendLine(line);
+                        }
+                }
+                catch { }
                 File.WriteAllText(SettingsFile, sb.ToString(), Encoding.UTF8);
             }
             catch (Exception ex)
@@ -8306,25 +8520,6 @@ namespace PMKUnlocker
         private string FindEdlScript()
         {
             return FindFileInToolFolders("edl.py");
-        }
-
-        private bool EnsureEdlModule()
-        {
-            if (!string.IsNullOrEmpty(edlScriptPath) && File.Exists(edlScriptPath)) return true;
-
-            edlScriptPath = FindEdlScript();
-            if (!string.IsNullOrEmpty(edlScriptPath))
-            {
-                Log("[*] EDL module: " + edlScriptPath, Color.Cyan);
-                SaveEdlPaths();
-                return true;
-            }
-
-            Log("[!] EDL module (edl.py) not found.", Color.Orange);
-            var pick = MessageBox.Show("EDL module (edl.py) မတွေ့ပါ။\n\nခုဏ ရွေးပေးမလား? (tool folder ထဲ ဒါမှမဟုတ် external path)",
-                "EDL Module လိုအပ်ပါတယ်", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-            if (pick == DialogResult.OK) BrowseEdlScript();
-            return !string.IsNullOrEmpty(edlScriptPath) && File.Exists(edlScriptPath);
         }
 
         // QC reboot args — flash က edl.py မသုံးလို့ path မရှိနိုင်; op ပြီးမှ တစ်ခါထပ်ရှာ (tools.json/tool folder)
@@ -8382,14 +8577,32 @@ namespace PMKUnlocker
         private async Task RunEdlAsync(string command, string title, bool clearPartitions = false,
             Func<List<string>, bool> tolerateRaw = null)
         {
-            if (!EnsureEdlModule()) return;
-            if (!await EnsureQcAuthAsync()) return;
-            await ExecuteCommandCleanAsync("python", BuildEdlArgs(command), title, clearPartitions, tolerateRaw: tolerateRaw);
+            bool ok = await RunNativeEdlAsync(command, title, clearPartitions);
+            if (!ok && flashWorkflowContext.Value) workflowFailed = true;
         }
 
-        // Unlock Tool လို — Qualcomm op မဆိုမတိုင်မီ auto Sahara + sig auth
-        // (ခလုတ်သီးခြားမထည့်ဘဲ လုပ်ငန်းတိုင်းထဲ အလိုအလျောက်ဝင်)
-        private async Task<bool> EnsureQcAuthAsync()
+        // Native QC dispatch — replaces `python edl.py <command>` for the Qualcomm tab.
+        // Opens one firehose session (Sahara + ping + sig auth), then runs the verb.
+        private async Task<bool> RunNativeEdlAsync(string command, string title, bool clearPartitions)
+        {
+            if (isTaskRunning || (flashWorkflowRunning && !flashWorkflowContext.Value))
+            {
+                Log("[!] Another operation is still running - wait for it to finish or press STOP.", Color.OrangeRed);
+                return false;
+            }
+
+            isTaskRunning = true;
+            try
+            {
+                return await RunNativeEdlCoreAsync(command, title, clearPartitions);
+            }
+            finally
+            {
+                isTaskRunning = false;
+            }
+        }
+
+        private async Task<bool> RunNativeEdlCoreAsync(string command, string title, bool clearPartitions)
         {
             string port = cmbPorts.SelectedItem?.ToString();
             if (string.IsNullOrEmpty(port) || !port.StartsWith("COM"))
@@ -8398,40 +8611,230 @@ namespace PMKUnlocker
                 return false;
             }
 
-            // တစ်ခါ auth ပြီးပြီးသား COM port ဆို ထပ်မလုပ် (device ကနေ EDL မထွက်ချိန်)
-            if (qcAuthed && string.Equals(qcAuthedPort, port, StringComparison.OrdinalIgnoreCase))
-                return true;
+            string loader = (!string.IsNullOrEmpty(edlLoaderPath) && File.Exists(edlLoaderPath)) ? edlLoaderPath : null;
+            string sig = string.IsNullOrEmpty(edlSigPath) ? null : edlSigPath;
 
-            Log("[*] Auto EDL auth (Sahara + sig)...", Color.Orange);
-            SetProgress(20, "EDL Auth");
-            var res = await EdlAuth.BypassAsync(
-                port,
-                string.IsNullOrEmpty(edlLoaderPath) ? null : edlLoaderPath,
-                msg =>
-                {
-                    if (msg.StartsWith("[+]")) Log(" " + msg, Color.LightGreen);
-                    else if (msg.StartsWith("[!]")) Log(" " + msg, Color.Orange);
-                    else Log(" " + msg, Color.White);
-                },
-                default,
-                string.IsNullOrEmpty(edlSigPath) ? null : edlSigPath);
-
-            if (res.Ok)
+            // STOP ကို firehose serial op တိုင်းမှာ ချက်ချင်းတုံ့ပြန်စေဖို့ — stopRequested
+            // ဖြစ်တာနဲ့ CTS ကို cancel (ReadResponseAsync / data loop တွေ အားလုံး ရပ်)
+            using var cts = new CancellationTokenSource();
+            var stopWatcher = Task.Run(async () =>
             {
-                qcAuthed = true;
-                qcAuthedPort = port;
-                SetProgress(50, "Auth OK");
-                Log("[OK] EDL authenticated" + (string.IsNullOrEmpty(res.TargetName) ? "" : " — TargetName=" + res.TargetName), Color.LightGreen);
+                try
+                {
+                    while (!stopRequested && !cts.Token.IsCancellationRequested)
+                        await Task.Delay(100, cts.Token);
+                    if (stopRequested) cts.Cancel();
+                }
+                catch (OperationCanceledException) { }
+            });
+
+            try
+            {
+                Log("========================================================", Color.FromArgb(0, 180, 255));
+                Log("           PMK TOOL - " + title.ToUpper() + "             ", Color.White);
+                Log("========================================================", Color.FromArgb(0, 180, 255));
+                Log("[*] Initializing Task...", Color.Orange);
+                SetProgress(10, "Initializing");
+
+                var args = SplitArgs(command);
+                if (args.Count == 0)
+                {
+                    Log("[FAIL] Empty command.", Color.Red);
+                    return false;
+                }
+
+                using var session = await FirehoseSession.OpenAsync(port, loader, sig, NativeEdlLog, cts.Token);
+                if (flashWorkflowContext.Value) workflowDidOp = true;
+
+                switch (args[0].ToLowerInvariant())
+                {
+                    case "printgpt":
+                        if (clearPartitions) ClearPartitionData();
+                        await NativeReadGptAsync(session, cts.Token);
+                        break;
+                    case "gpt":
+                        await NativeSaveGptXmlAsync(session, args, cts.Token);
+                        break;
+                    case "r":
+                        await NativeReadPartitionAsync(session, args, cts.Token);
+                        break;
+                    case "w":
+                        await NativeWritePartitionAsync(session, args, cts.Token);
+                        break;
+                    case "e":
+                        await NativeErasePartitionsAsync(session, args, cts.Token);
+                        break;
+                    case "rl":
+                        await NativeReadAllAsync(session, args, cts.Token);
+                        break;
+                    case "reset":
+                        await session.ResetAsync(cts.Token);
+                        Log("[OK] Reset command sent.", Color.LightGreen);
+                        break;
+                    default:
+                        Log("[FAIL] Unknown Qualcomm command: " + args[0], Color.Red);
+                        return false;
+                }
+
+                Log("[OK] " + title + " completed.", Color.LightGreen);
+                SetProgress(100, "Done");
                 return true;
             }
-
-            qcAuthed = false;
-            qcAuthedPort = "";
-            SetProgress(100, "Auth FAIL");
-            Log("[FAIL] EDL auto-auth: " + res.Message, Color.Red);
-            return false;
+            catch (OperationCanceledException)
+            {
+                Log(stopRequested ? "[!] Stopped by user." : "[!] Cancelled.", Color.OrangeRed);
+                SetProgress(0, "Stopped");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log("[FAIL] " + title + ": " + ex.Message, Color.Red);
+                SetProgress(100, "FAIL");
+                return false;
+            }
+            finally
+            {
+                cts.Cancel();
+                try { await stopWatcher; } catch { }
+            }
         }
 
+        // FirehoseSession log -> UI log (တစ်နေရာတည်း ရောင်စုံ mapping)
+        private void NativeEdlLog(string msg)
+        {
+            if (msg.StartsWith("[+]")) Log(" " + msg, Color.LightGreen);
+            else if (msg.StartsWith("[!]")) Log(" " + msg, Color.Orange);
+            else Log(" " + msg, Color.White);
+        }
+
+        private async Task NativeReadGptAsync(FirehoseSession session, CancellationToken ct)
+        {
+            Log("[*] Reading GPT (partition table)...", Color.Orange);
+            SetProgress(20, "Reading GPT");
+            var parts = await session.ReadGptAsync(ct);
+            foreach (var p in parts)
+            {
+                AddPartitionRow(p.Name,
+                    "0x" + p.ByteOffset(session.SectorSize).ToString("x"),
+                    "0x" + p.ByteLength(session.SectorSize).ToString("x"));
+            }
+            Log($"[OK] {parts.Count} partition(s) read.", Color.LightGreen);
+        }
+
+        private async Task NativeSaveGptXmlAsync(FirehoseSession session, List<string> args, CancellationToken ct)
+        {
+            string folder = args.Count > 1 ? args[1] : "";
+            if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                throw new IOException("Select a valid folder for GPT + XML output.");
+            Log("[*] Reading GPT for XML export...", Color.Orange);
+            SetProgress(20, "Reading GPT");
+            var parts = await session.ReadGptAsync(ct);
+            string xml = GptParser.BuildRawProgramXml(parts, session.SectorSize);
+            string path = Path.Combine(folder, "rawprogram0.xml");
+            File.WriteAllText(path, xml);
+            Log($"[OK] GPT saved — {parts.Count} partition(s), rawprogram0.xml written.", Color.LightGreen);
+        }
+
+        private async Task NativeReadPartitionAsync(FirehoseSession session, List<string> args, CancellationToken ct)
+        {
+            if (args.Count < 3) throw new IOException("Read needs: r <partition> <file>");
+            string name = args[1], dest = args[2];
+            var p = await session.FindPartitionAsync(name, ct);
+            if (p == null) throw new IOException("Partition not found in GPT: " + name);
+            Log("[*] Reading " + name + " (" + FormatBytesLong(p.ByteLength(session.SectorSize)) + ")...", Color.Orange);
+            SetProgress(0, "Reading " + name);
+            await session.ReadToFileAsync(p.FirstLba, p.SectorCount, dest,
+                pct => SetProgress(pct, "Reading " + name), ct, () => stopRequested);
+            Log("[OK] " + name + " -> " + dest, Color.LightGreen);
+        }
+
+        private async Task NativeWritePartitionAsync(FirehoseSession session, List<string> args, CancellationToken ct)
+        {
+            if (args.Count < 3) throw new IOException("Write needs: w <partition> <file>");
+            string name = args[1], src = args[2];
+            if (!File.Exists(src)) throw new IOException("Image not found: " + src);
+            var p = await session.FindPartitionAsync(name, ct);
+            if (p == null) throw new IOException("Partition not found in GPT: " + name);
+            long fileLen = new FileInfo(src).Length;
+            long partLen = p.ByteLength(session.SectorSize);
+            if (fileLen > partLen)
+                throw new IOException($"{name}: image {fileLen} B larger than partition {partLen} B — refusing to overwrite neighbors.");
+            Log("[*] Writing " + name + " (" + FormatBytesLong(fileLen) + ")...", Color.Orange);
+            SetProgress(0, "Writing " + name);
+            await session.ProgramAsync(p.FirstLba, src,
+                pct => SetProgress(pct, "Writing " + name), ct, () => stopRequested);
+            Log("[OK] " + name + " written.", Color.LightGreen);
+        }
+
+        private async Task NativeErasePartitionsAsync(FirehoseSession session, List<string> args, CancellationToken ct)
+        {
+            if (args.Count < 2) throw new IOException("Erase needs: e <partition[,partition...]>");
+            var names = args[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (string name in names)
+            {
+                if (stopRequested) throw new OperationCanceledException("STOP");
+                var p = await session.FindPartitionAsync(name, ct);
+                if (p == null)
+                {
+                    Log("[!] Partition not found — skipping erase: " + name, Color.Orange);
+                    continue;
+                }
+                Log("[*] Erasing " + name + " (" + FormatBytesLong(p.ByteLength(session.SectorSize)) + ")...", Color.Orange);
+                await session.EraseAsync(p.FirstLba, p.SectorCount, ct);
+                Log("[OK] " + name + " erased.", Color.LightGreen);
+            }
+        }
+
+        private async Task NativeReadAllAsync(FirehoseSession session, List<string> args, CancellationToken ct)
+        {
+            string folder = args.Count > 1 ? args[1] : "";
+            if (string.IsNullOrEmpty(folder)) throw new IOException("Select a valid backup folder.");
+            Directory.CreateDirectory(folder);
+            var parts = await session.ReadGptAsync(ct);
+            int done = 0, failed = 0;
+            foreach (var p in parts)
+            {
+                if (stopRequested) throw new OperationCanceledException("STOP");
+                string dest = Path.Combine(folder, p.Name + ".bin");
+                try
+                {
+                    Log("[*] Reading " + p.Name + " (" + FormatBytesLong(p.ByteLength(session.SectorSize)) + ")...", Color.Orange);
+                    await session.ReadToFileAsync(p.FirstLba, p.SectorCount, dest,
+                        pct => SetProgress(pct, "Reading " + p.Name), ct, () => stopRequested);
+                    done++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Log("[!] " + p.Name + " read failed: " + ex.Message, Color.Orange);
+                }
+            }
+            Log($"[OK] Full backup finished — {done}/{parts.Count} partition(s) read" + (failed > 0 ? $" ({failed} failed)" : ""), Color.LightGreen);
+        }
+
+        // Quote-aware tokenizer — `gpt "C:\my folder" --genxml` → ["gpt", "C:\my folder", "--genxml"]
+        private static List<string> SplitArgs(string command)
+        {
+            var args = new List<string>();
+            var sb = new StringBuilder();
+            bool inQuotes = false;
+            foreach (char c in command)
+            {
+                if (c == '"') { inQuotes = !inQuotes; continue; }
+                if (c == ' ' && !inQuotes)
+                {
+                    if (sb.Length > 0) { args.Add(sb.ToString()); sb.Clear(); }
+                    continue;
+                }
+                sb.Append(c);
+            }
+            if (sb.Length > 0) args.Add(sb.ToString());
+            return args;
+        }
+
+        // Unlock Tool လို — Qualcomm op မဆိုမတိုင်မီ auto Sahara + sig auth
+        // (native firehose session OpenAsync ထဲ အလိုအလျောက် ပါပြီးသား — သီးခြား auth step မလို)
         private async void BtnQcReadInfo_Click(object sender, EventArgs e)
         {
             await RunFlashWorkflowAsync(() => RunEdlAsync("printgpt", "Qualcomm Read Info / GPT", clearPartitions: true));
@@ -8439,7 +8842,6 @@ namespace PMKUnlocker
 
         private async void BtnQcSaveGpt_Click(object sender, EventArgs e)
         {
-            if (!EnsureEdlModule()) return;
             using (FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "GPT + rawprogram XML သိမ်းမယ့် folder ကို ရွေးပါ" })
             {
                 if (fbd.ShowDialog() == DialogResult.OK)
@@ -8495,7 +8897,6 @@ namespace PMKUnlocker
 
         private async void BtnQcFullBackup_Click(object sender, EventArgs e)
         {
-            if (!EnsureEdlModule()) return;
             using (FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Partition အားလုံး backup သိမ်းမယ့် folder ကို ရွေးပါ" })
             {
                 if (fbd.ShowDialog() == DialogResult.OK)
@@ -8503,22 +8904,19 @@ namespace PMKUnlocker
             }
         }
 
-        // EFS Backup — persist / modemst1 / modemst2 / fsg partition တွေကို bin အဖြစ် dump။
-        // ReviewSafety.PrepareEfsBackup နဲ့ တူညီတဲ့ partition set (fsg ထပ်ပါ)။
-        // edl.py `r` က partition တစ်ခုတည်းအတွက် — missing partition မပျက်အောင် sequential call သုံးတယ်။
+        // EFS Backup — persist / modemst1 / modemst2 / fsg / fsc partition တွေကို bin အဖြစ် dump။
+        // ReviewSafety.QcEfsPartitions set အတိုင်း loop — edl.py `r` က partition တစ်ခုတည်းအတွက်ဆိုတော့
+        // missing partition (fsc မရှိတဲ့ ဖုန်း) မှာတောင် ကျန်တာတွေ ဆက်ထွက်အောင် sequential call သုံးတယ်။
         private async void BtnQcEfsBackup_Click(object sender, EventArgs e)
         {
-            if (!EnsureEdlModule()) return;
             using (FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "EFS backup သိမ်းမယ့် folder ကို ရွေးပါ" })
             {
                 if (fbd.ShowDialog() != DialogResult.OK) return;
                 string dir = fbd.SelectedPath;
                 await RunFlashWorkflowAsync(async () =>
                 {
-                    await RunEdlAsync("r persist \"" + Path.Combine(dir, "persist.bin") + "\"", "EFS Backup (persist)");
-                    await RunEdlAsync("r modemst1 \"" + Path.Combine(dir, "modemst1.bin") + "\"", "EFS Backup (modemst1)");
-                    await RunEdlAsync("r modemst2 \"" + Path.Combine(dir, "modemst2.bin") + "\"", "EFS Backup (modemst2)");
-                    await RunEdlAsync("r fsg \"" + Path.Combine(dir, "fsg.bin") + "\"", "EFS Backup (fsg)");
+                    foreach (string name in ReviewSafety.QcEfsPartitions)
+                        await RunEdlAsync("r " + name + " \"" + Path.Combine(dir, name + ".bin") + "\"", "EFS Backup (" + name + ")");
                 });
             }
         }
@@ -8531,20 +8929,208 @@ namespace PMKUnlocker
             await RunFlashWorkflowAsync(() => RunEdlAsync("reset --resetmode=reset", "Qualcomm Reset Device"), autoRebootAfter: false);
         }
 
-        // edl.py manual pick — SETUP button ဖယ်ပြီးနောက် EnsureEdlModule က ဒီ method ကိုပဲ ခေါ်တယ်
-        private void BrowseEdlScript()
+        // QC Restore — Full Backup (`edl.py rl`) / EFS Backup folder ထဲက <partition>.bin တွေကို ပြန်ရေး။
+        // Read Info/GPT ဖတ်ထားရင် live partition size နဲ့ တိုက်စစ်ပြီး မကိုက်တဲ့ ဖိုင်ကို ကျော်တယ်
+        // (မှားတဲ့ ဖိုင်/မှားတဲ့ ဖုန်း backup ကို မရေးမိအောင်)။
+        private async void BtnQcRestoreBackup_Click(object sender, EventArgs e)
         {
-            using (OpenFileDialog ofd = new OpenFileDialog
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog
             {
-                Filter = "EDL script (edl.py)|edl.py|Python (*.py)|*.py|All Files (*.*)|*.*",
-                Title = "edl.py ကို ရွေးပါ"
+                Description = "Restore လုပ်မယ့် backup folder ရွေးပါ (<partition>.bin ဖိုင်များ)"
             })
             {
-                if (ofd.ShowDialog() != DialogResult.OK) return;
-                edlScriptPath = ofd.FileName;
-                SaveEdlPaths();
-                Log("[OK] EDL module set: " + edlScriptPath, Color.LightGreen);
+                if (fbd.ShowDialog() != DialogResult.OK) return;
+                string dir = fbd.SelectedPath;
+
+                var files = new List<(string Name, string Path)>();
+                try
+                {
+                    foreach (string f in Directory.GetFiles(dir, "*.bin"))
+                    {
+                        string name = Path.GetFileNameWithoutExtension(f);
+                        if (IsValidPartitionName(name)) files.Add((name, f));
+                    }
+                }
+                catch (Exception ex) { Log("[FAIL] Backup folder read failed: " + ex.Message, Color.Red); return; }
+                files.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+                if (files.Count == 0)
+                {
+                    Log("[!] No <partition>.bin files found in " + dir, Color.Orange);
+                    return;
+                }
+
+                // live table (Read Info / GPT) — ရှိရင် size တိုက်စစ်မယ်၊ မရှိရင် သတိပေးပြီး မေးမယ်
+                var live = QcLiveSizes();
+
+                var plan = new List<(string Name, string Path)>();
+                var skipped = new List<string>();
+                foreach (var f in files)
+                {
+                    if (live.TryGetValue(f.Name, out long len))
+                    {
+                        long actual;
+                        try { actual = new FileInfo(f.Path).Length; } catch { actual = -1; }
+                        if (actual != len)
+                        {
+                            skipped.Add($"{f.Name} (file {actual} B ≠ partition {len} B)");
+                            continue;
+                        }
+                    }
+                    plan.Add(f);
+                }
+                foreach (string s in skipped) Log("[!] Skipped — size does not match this device: " + s, Color.Orange);
+                if (plan.Count == 0)
+                {
+                    Log("[!] Nothing to restore — every file failed the partition-size check.", Color.OrangeRed);
+                    if (live.Count == 0) Log("[i] Read Info / GPT first so sizes can be checked.", Color.Gray);
+                    return;
+                }
+
+                if (live.Count == 0 &&
+                    MessageBox.Show(this,
+                        "Device partition table was not read — backup file sizes cannot be checked.\n\n" +
+                        "If this backup came from a different phone/firmware, restoring it can brick the device.\n\n" +
+                        "Continue anyway?", "Restore without size check",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                string preview = string.Join(", ", plan.Take(12).Select(p => p.Name)) + (plan.Count > 12 ? ", …" : "");
+                if (MessageBox.Show(this,
+                        $"Restore {plan.Count} partition(s) from:\n{dir}\n\n{preview}\n\n" +
+                        "Each partition will be overwritten. This cannot be undone.\n\n" +
+                        "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
+                        "Confirm QC Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                await RunFlashWorkflowAsync(async () =>
+                {
+                    int done = 0;
+                    foreach (var f in plan)
+                    {
+                        if (stopRequested) break;
+                        bool ok = await RunEdlCommandAsync(
+                            "w " + f.Name + " \"" + f.Path + "\"", "Qualcomm Restore — " + f.Name);
+                        if (!ok)
+                            throw new IOException("Restore stopped at " + f.Name + " — the remaining partitions were NOT written.");
+                        done++;
+                    }
+                    Log($"[OK] Restore finished — {done}/{plan.Count} partition(s) written" +
+                        (skipped.Count > 0 ? $" ({skipped.Count} skipped)" : ""), Color.LightGreen);
+                    Log("[i] Reboot the phone after the restore (Reset Device) if it does not restart by itself.", Color.Cyan);
+                }, autoRebootAfter: false);
             }
+        }
+
+        // Read Info / GPT (loadedPartitions) ကနေ partition name -> size (bytes) map တည်ဆောက်။
+        // "-" / မဖတ်နိုင်တဲ့ size row တွေကို ကျော်တယ် — size check မလုပ်ဘူး။
+        private Dictionary<string, long> QcLiveSizes()
+        {
+            var live = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (PartitionMeta pm in loadedPartitions)
+            {
+                if (string.IsNullOrWhiteSpace(pm.Name) || live.ContainsKey(pm.Name)) continue;
+                try
+                {
+                    long len = ReviewSafety.ParseSize(pm.LengthHex);
+                    if (len > 0) live[pm.Name] = len;
+                }
+                catch { /* unknown size — skip size check for this row */ }
+            }
+            return live;
+        }
+
+        // EFS Restore (IMEI repair) — EFS backup folder ထဲက persist/modemst1/modemst2/fsg/fsc ကို ပြန်ရေး။
+        // Qualcomm မှာ diag/QMI IMEI-write လမ်းမရှိလို့ IMEI repair = NV/EFS partition restore (honest limitation)။
+        private async void BtnQcEfsRestore_Click(object sender, EventArgs e)
+        {
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog
+            {
+                Description = "EFS restore လုပ်မယ့် backup folder ရွေးပါ (persist/modemst1/modemst2/fsg/fsc .bin)"
+            })
+            {
+                if (fbd.ShowDialog() != DialogResult.OK) return;
+                string dir = fbd.SelectedPath;
+
+                var live = QcLiveSizes();
+                var (plan, skipped) = ReviewSafety.BuildQcEfsRestorePlan(dir, ReviewSafety.QcEfsPartitions, live);
+                foreach (string s in skipped) Log("[!] Skipped — " + s, Color.Orange);
+                if (plan.Count == 0)
+                {
+                    Log("[!] Nothing to restore — no matching EFS files found in " + dir, Color.OrangeRed);
+                    if (live.Count == 0) Log("[i] Read Info / GPT first so sizes can be checked.", Color.Gray);
+                    return;
+                }
+
+                if (live.Count == 0 &&
+                    MessageBox.Show(this,
+                        "Device partition table was not read — EFS file sizes cannot be checked.\n\n" +
+                        "If this backup came from a different phone/firmware, restoring it can brick the device.\n\n" +
+                        "Continue anyway?", "EFS Restore without size check",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                string preview = string.Join(", ", plan.Select(p => p.Name));
+                if (MessageBox.Show(this,
+                        $"Restore {plan.Count} EFS partition(s) from:\n{dir}\n\n{preview}\n\n" +
+                        "Each partition will be overwritten. This cannot be undone.\n\n" +
+                        "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
+                        "Confirm EFS Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                await RunFlashWorkflowAsync(async () =>
+                {
+                    int done = 0;
+                    foreach (var p in plan)
+                    {
+                        if (stopRequested) break;
+                        bool ok = await RunEdlCommandAsync(
+                            "w " + p.Name + " \"" + p.Path + "\"", "Qualcomm EFS Restore — " + p.Name);
+                        if (!ok)
+                            throw new IOException("EFS restore stopped at " + p.Name + " — the remaining partitions were NOT written.");
+                        done++;
+                    }
+                    Log($"[OK] EFS restore finished — {done}/{plan.Count} partition(s) written" +
+                        (skipped.Count > 0 ? $" ({skipped.Count} skipped)" : ""), Color.LightGreen);
+                    Log("[i] Reboot the phone after the restore (Reset Device) if it does not restart by itself.", Color.Cyan);
+                }, autoRebootAfter: false);
+            }
+        }
+
+        // IMEI Read (EFS) — pure file scan (no device/plug cycle), heuristic ASCII + hex-encoded ASCII, Luhn-checked.
+        private async void BtnQcImeiReadEfs_Click(object sender, EventArgs e)
+        {
+            using var pick = new FolderBrowserDialog { Description = "Select EFS backup folder (persist/modemst1/modemst2/fsg/fsc .bin)" };
+            if (pick.ShowDialog(this) != DialogResult.OK) return;
+            string dir = pick.SelectedPath;
+            var perFile = new List<(string File, string[] Imeis)>();
+            foreach (string name in ReviewSafety.QcEfsPartitions)
+            {
+                string f = Path.Combine(dir, name + ".bin");
+                if (!File.Exists(f)) continue;
+                var imeis = await Task.Run(() => ExtractImeiCandidates(File.ReadAllBytes(f)));
+                if (imeis.Length > 0) perFile.Add((Path.GetFileName(f), imeis));
+            }
+            var distinct = perFile
+                .SelectMany(p => p.Imeis.Select(i => (Imei: i, p.File)))
+                .GroupBy(x => x.Imei)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => (Imei: g.Key, Files: string.Join("+", g.Select(x => x.File).Distinct())))
+                .ToList();
+            if (distinct.Count == 0)
+            {
+                Log("  * Result ... no IMEI found in the selected EFS backup", Color.Orange);
+                MessageBox.Show(this,
+                    "No IMEI was found in the selected EFS backup folder.\n\nScanned: " + string.Join(", ", ReviewSafety.QcEfsPartitions.Select(n => n + ".bin")) +
+                    "\n\nQualcomm IMEI is usually in modemst1/modemst2/fsg/fsc — make sure this is an EFS backup from this device.",
+                    "IMEI Read (EFS)", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            foreach (var x in distinct) Log($"  * IMEI ... {x.Imei}   [{x.Files}]", Color.LightGreen);
+            Log("  [!] Scan is heuristic (plain + hex-encoded ASCII, Luhn-checked) — cross-check against the sticker / About phone.", Color.Orange);
+            MessageBox.Show(this,
+                "IMEI found in EFS backup:\n\n" + string.Join("\n", distinct.Select(x => x.Imei + "   (" + x.Files + ")")) + "\n\nfrom:\n" + dir,
+                "IMEI Read (EFS)", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private async Task<bool> RunEdlCommandAsync(string command, string title)
+        {
+            return await RunNativeEdlAsync(command, title, false);
         }
 
         // Firehose loader manual pick — loader picker ရဲ့ "Manual / saved loader" ကနေ / Loader file row ကနေ ခေါ်တယ်

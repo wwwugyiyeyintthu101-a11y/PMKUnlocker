@@ -250,7 +250,7 @@ internal static class EdlAuth
     }
 
     // QSaharaServer.exe — loader ကို device ထဲ တင် (Sahara imgID 13)
-    private static async Task<bool> RunSaharaAsync(string portName, string loaderPath, CancellationToken ct)
+    internal static async Task<bool> RunSaharaAsync(string portName, string loaderPath, CancellationToken ct)
     {
         try
         {
@@ -293,7 +293,7 @@ internal static class EdlAuth
     }
 
     // QSaharaServer.exe path — app base / tools.json / PATH မှာ ရှာ (bare name မသုံးတော့)
-    private static string ResolveSaharaExe()
+    internal static string ResolveSaharaExe()
     {
         const string name = "QSaharaServer.exe";
         try
@@ -321,7 +321,7 @@ internal static class EdlAuth
 
     // SIG file တွေ — preferred path ပထမ၊ ပြီးရင် Qualcomm-firehoses SIG #1 + QLM/*
     // (zeros payload = Signature Verification Failed, stat is 7)
-    private static List<(string Name, byte[] Bytes)> LoadSigCandidates(string? preferredPath, Action<string> say)
+    internal static List<(string Name, byte[] Bytes)> LoadSigCandidates(string? preferredPath, Action<string> say)
     {
         var list = new List<(string Name, byte[] Bytes)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -430,7 +430,7 @@ internal static class EdlAuth
         return roots;
     }
 
-    private static async Task WriteAsciiAsync(SerialPort sp, string xml, CancellationToken ct)
+    internal static async Task WriteAsciiAsync(SerialPort sp, string xml, CancellationToken ct)
     {
         byte[] data = Encoding.ASCII.GetBytes(xml);
         await Task.Run(() => sp.Write(data, 0, data.Length), ct);
@@ -496,7 +496,7 @@ internal static class EdlAuth
         return sb.ToString();
     }
 
-    private static string ExtractAttr(string xml, string name)
+    internal static string ExtractAttr(string xml, string name)
     {
         try
         {
@@ -512,7 +512,7 @@ internal static class EdlAuth
         }
     }
 
-    private static string TrimForLog(string s)
+    internal static string TrimForLog(string s)
     {
         if (string.IsNullOrWhiteSpace(s)) return "(no response)";
         s = s.Replace("\r", " ").Replace("\n", " ").Trim();

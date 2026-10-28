@@ -356,6 +356,38 @@ internal static class ReviewSafety
         return done;
     }
 
+    // Qualcomm EFS/IMEI-critical partition set (fsg + fsc carry IMEI/EFS alongside persist + modemst).
+    internal static readonly string[] QcEfsPartitions = { "persist", "modemst1", "modemst2", "fsg", "fsc" };
+
+    // EFS restore plan — for each known EFS partition, skip missing files and files whose size
+    // does not match the live GPT (wrong device/firmware backup guard), and return the write list.
+    internal static (List<(string Name, string Path)> Plan, List<string> Skipped) BuildQcEfsRestorePlan(
+        string directory, IReadOnlyList<string> partitions, IReadOnlyDictionary<string, long> liveSizes)
+    {
+        var plan = new List<(string Name, string Path)>();
+        var skipped = new List<string>();
+        foreach (string name in partitions)
+        {
+            string path = Path.Combine(directory, name + ".bin");
+            if (!File.Exists(path))
+            {
+                skipped.Add(name + " (no " + name + ".bin)");
+                continue;
+            }
+            if (liveSizes.TryGetValue(name, out long len))
+            {
+                long actual = new FileInfo(path).Length;
+                if (actual != len)
+                {
+                    skipped.Add($"{name} (file {actual} B ≠ partition {len} B)");
+                    continue;
+                }
+            }
+            plan.Add((name, path));
+        }
+        return (plan, skipped);
+    }
+
     internal static Dictionary<string, long> PrepareEfsBackup(string source, string directory)
     {
         var doc = XDocument.Load(source);

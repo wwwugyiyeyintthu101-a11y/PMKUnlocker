@@ -1,244 +1,245 @@
-{
-  "schema": 1,
-  "version": "2.1.4 (reported by the existing mtk.exe --help)",
-  "source": "Existing local mtkclient distribution; upstream https://github.com/bkerler/mtkclient",
-  "hardwareValidated": false,
-  "files": [
-    {
-      "path": "mtk.exe",
-      "sha256": "caaef0511564896f6704642b554ed4816f4ce6adba61abb8997ae0ffbfb8ec17"
-    },
-    {
-      "path": "payloads/da_x.bin",
-      "sha256": "b83ebbbff36e330713080e719856241065e51f732658f4b931399df0e17e00fd"
-    },
-    {
-      "path": "payloads/da_xml_64.bin",
-      "sha256": "b8509bd63044bea612e32425642b2f54b340e1cf967006f01ac4faae6541ab28"
-    },
-    {
-      "path": "payloads/da_xml.bin",
-      "sha256": "befb2820693fa774eb0da9b9bb8751594dc5c99cf3749dfdc332d7038c058d7b"
-    },
-    {
-      "path": "payloads/generic_dump_payload.bin",
-      "sha256": "96eedb2f03a4c2839f289e3e437f574fd7d85d15d8339201eaa6ac00f4734b25"
-    },
-    {
-      "path": "payloads/generic_loader_payload.bin",
-      "sha256": "e887a930a9477ab9a1e56b05b31bb5a58bed30664045338d97f7fe6dc71d3f54"
-    },
-    {
-      "path": "payloads/generic_patcher_payload.bin",
-      "sha256": "6ff58af2867de71abcbbe22c3de289eb747e56d9a220fc23a64fcb8f592bc24b"
-    },
-    {
-      "path": "payloads/generic_preloader_dump_payload.bin",
-      "sha256": "3dbf96661cced9f61ae29006d05ae8bcd38928013f978a00ea788aca998791f7"
-    },
-    {
-      "path": "payloads/generic_reboot_payload.bin",
-      "sha256": "f9c276cb23bc626753286de8b1ff96df5e4b25be3f59bbcf3a8032ac439fe108"
-    },
-    {
-      "path": "payloads/generic_sram_payload.bin",
-      "sha256": "713fb9cc9b418920b24c58a2bdd1d0d3050515ef37e8e5e1e405794cd8b9b46c"
-    },
-    {
-      "path": "payloads/generic_stage1_payload.bin",
-      "sha256": "0cec003fb8b594ed374270debc0aefb198d03d66d0f4ef3db5d5f1e706098296"
-    },
-    {
-      "path": "payloads/generic_uart_dump_payload.bin",
-      "sha256": "f8490e2a765446dc26cff1377059841b9860f34d6f4ff6ee2f3163eab27a728b"
-    },
-    {
-      "path": "payloads/heapbait_arm.bin",
-      "sha256": "91a4661dd8f56d8c5762e8e89c83212b69153ccba4e9dc774b0df0bc0d5dcf54"
-    },
-    {
-      "path": "payloads/heapbait_arm64.bin",
-      "sha256": "89413d885b92bb9dce2d0682fa0a88d398da1214d412ff93250dbea84b6d7b48"
-    },
-    {
-      "path": "payloads/mt2601_payload.bin",
-      "sha256": "13e31e02c9ab0eaf2c076abaf436117acb1db1faf098c3d9855b33e6723f0d56"
-    },
-    {
-      "path": "payloads/mt6261_payload.bin",
-      "sha256": "cb3b04e1fbce58cf12adf61f78558ae5879d693f468f2681bfc948be5f25b06e"
-    },
-    {
-      "path": "payloads/mt6572_payload.bin",
-      "sha256": "4a7549d1c89a2a952bb6a8bc074f0a2dc2c48416ef1faabbd0d544fa32241a23"
-    },
-    {
-      "path": "payloads/mt6575_payload.bin",
-      "sha256": "401376830343b431bb1960d86f2765b101108e997a54357ff7676e8fad6f6f2f"
-    },
-    {
-      "path": "payloads/mt6580_payload.bin",
-      "sha256": "d943075dd1b6710bf44abcbabdd6911be76efb97d99ec147f2ed4a8b47f69dbc"
-    },
-    {
-      "path": "payloads/mt6582_payload.bin",
-      "sha256": "6d077a31541128d5974dcf0ace5805d5b7772a6d809339d76a998d68fdc22f38"
-    },
-    {
-      "path": "payloads/mt6592_payload.bin",
-      "sha256": "7b2397eab429f351ff2cf89bd02da1f635f8f759380f4bacbee88c62889e6aad"
-    },
-    {
-      "path": "payloads/mt6595_payload.bin",
-      "sha256": "8f136d8363ebb8d2e96ad618c7cc5bfa099c3b9b8bea42ccd3e5d0720f05d67d"
-    },
-    {
-      "path": "payloads/mt6735_payload.bin",
-      "sha256": "c67f8c0daaf578dfc63ecfc5e34db84225f83a3a338e8c919966356e8391718a"
-    },
-    {
-      "path": "payloads/mt6737_payload.bin",
-      "sha256": "3520c57b0fbb90c64469900ed46e78a08490da0e370581b02ee52882c94c0e43"
-    },
-    {
-      "path": "payloads/mt6739_payload.bin",
-      "sha256": "5b1befdd6c58d934a05d8e6d4ad259e296e3b9d2801885708b6bfe00a40babf4"
-    },
-    {
-      "path": "payloads/mt6752_payload.bin",
-      "sha256": "29a6596e14922c9d8a9f37df0f4cab5dc5e85ef38d613cca96c8219ccdf64a95"
-    },
-    {
-      "path": "payloads/mt6753_payload.bin",
-      "sha256": "f608f04ba6b02a9039962c93c6d677b99aaa746e1962b320ade1baf3175d35ec"
-    },
-    {
-      "path": "payloads/mt6755_payload.bin",
-      "sha256": "71308466f4fdfd61aafd4490a32f2ea020930352c2fdc2033ad487b2a82593dd"
-    },
-    {
-      "path": "payloads/mt6757_payload.bin",
-      "sha256": "4d732f2183f4a32560972db52e2ef20d730729b4065489778550e095c9183f82"
-    },
-    {
-      "path": "payloads/mt6758_payload.bin",
-      "sha256": "632bb2cb90afefd593b71d210db626b99c0ebff7413752d9b3973591833ac362"
-    },
-    {
-      "path": "payloads/mt6761_payload.bin",
-      "sha256": "e15edfddcca2702d7c5f2796531889947d3ba666bed8152acf71a27f13834a2b"
-    },
-    {
-      "path": "payloads/mt6763_payload.bin",
-      "sha256": "98a569c5bdb6a05b9a2d93d484e926489415d065ecb8991bdf1033ca687fef17"
-    },
-    {
-      "path": "payloads/mt6765_payload.bin",
-      "sha256": "9da60fd8d35527e9d1d643d8d81c6c4560e6cd5640c904a0e9a7206ecd582476"
-    },
-    {
-      "path": "payloads/mt6768_payload.bin",
-      "sha256": "1374139e112b7961abf6571582c8330d879d956ff33ed39bd51c882ddec8a6c5"
-    },
-    {
-      "path": "payloads/mt6771_payload.bin",
-      "sha256": "898654d927bf5a9bcff40702801e1a498d013abcc4de406bbae1aa025a65e637"
-    },
-    {
-      "path": "payloads/mt6779_payload.bin",
-      "sha256": "859c6dce3baf937bdee85d5acf0061b584b5960057fff25e452f9d326adc7116"
-    },
-    {
-      "path": "payloads/mt6781_payload.bin",
-      "sha256": "47f6d92ad871b7aa0ddc7c5d15f6246522872c0851daa40e97acaf9d426876b0"
-    },
-    {
-      "path": "payloads/mt6785_payload.bin",
-      "sha256": "eec7575441c2099bfed1fd20ee3fbe85d5dbba520dde49d785996b26d78cceb5"
-    },
-    {
-      "path": "payloads/mt6795_payload.bin",
-      "sha256": "6fbcf8af42028ced3b74cebc19df8093283f28d570915901a5db249a77486472"
-    },
-    {
-      "path": "payloads/mt6797_payload.bin",
-      "sha256": "2464e4e3a7dd48ddf03240b39fd569d786ec9ac8cd134cfa0ef53997f786d86b"
-    },
-    {
-      "path": "payloads/mt6799_payload.bin",
-      "sha256": "c0d5e29a81a0109dcfa16f39d279e1f091ae35333b5601c56cfa3c1f8c88261f"
-    },
-    {
-      "path": "payloads/mt6833_payload.bin",
-      "sha256": "921590545eadd986ebdb152e268afea672e0d0930c43a0b25c5743623569ef03"
-    },
-    {
-      "path": "payloads/mt6853_payload.bin",
-      "sha256": "edb8c91ae9eb13c83d6172d25fc8e835510fe2a9371e18597cc7d34ac85c82db"
-    },
-    {
-      "path": "payloads/mt6873_payload.bin",
-      "sha256": "19a10d6fba9d0fef479e36b71569cee5c986aeafd83816ddb3e2d5a225ea6099"
-    },
-    {
-      "path": "payloads/mt6877_payload.bin",
-      "sha256": "514beb6a882f0c204dc1ff64172968094e0fd229fdbbe6ade331bd0beb9c853f"
-    },
-    {
-      "path": "payloads/mt6885_payload.bin",
-      "sha256": "77378f8f83d2a36e478a388b1704af466515e054a92874bbb9dd53845a57610d"
-    },
-    {
-      "path": "payloads/mt6893_payload.bin",
-      "sha256": "6a3063c6227401afce591ce9d5699062bd1b1042c636bfed3fcd00fcd5e70952"
-    },
-    {
-      "path": "payloads/mt8127_payload.bin",
-      "sha256": "8b7f22771078ddcc6515b97ea8e2f12eda79eac969cd6ca014624cb2575f1e09"
-    },
-    {
-      "path": "payloads/mt8163_payload.bin",
-      "sha256": "92185a7501513c4836b68dd7baed19526c5e6dd3a7171a26fe4672398c49ffae"
-    },
-    {
-      "path": "payloads/mt8167_payload.bin",
-      "sha256": "7bf98fa19b32eab41cf26578fe5017b3e277efa22f49e134ed4192c4634c8ecf"
-    },
-    {
-      "path": "payloads/mt8168_payload.bin",
-      "sha256": "5438a8b24766eff2c59292090bd9ef85b62dc986b8c8bc690e03f56997fb7f5c"
-    },
-    {
-      "path": "payloads/mt8173_payload.bin",
-      "sha256": "1fcc63e4eae171be11a89d5d49074ae4cf4120ec97a0b9571f267dcb922cdbf3"
-    },
-    {
-      "path": "payloads/mt8176_payload.bin",
-      "sha256": "8c38525214cbc0d22a29ee83bf4e5ca7e573ba58264f95e4dfa6472a17877d09"
-    },
-    {
-      "path": "payloads/mt8512_payload.bin",
-      "sha256": "8ddddd00d6a54e872c341c65a178ec05b705fc2ee02974a634b60274506fb9b4"
-    },
-    {
-      "path": "payloads/mt8516_payload.bin",
-      "sha256": "001f5034237252e10c1a2b3046fb5340a5cfddfb36c150d9964fea7b8afd5a64"
-    },
-    {
-      "path": "payloads/mt8590_payload.bin",
-      "sha256": "f1c7aa26e28b82b37f2e9827c99996030af45ec8852e492a141dddd1bed0f95e"
-    },
-    {
-      "path": "payloads/mt8695_payload.bin",
-      "sha256": "16bea9ac9fb67fcdf6a58912a7742d2e37d6cb4c3584a9101600f94600aeb29e"
-    },
-    {
-      "path": "payloads/pl.bin",
-      "sha256": "330de824646e1f49c4784e2f515fcbb1e47132ea7ecc8ceb034c6c4f42e665ed"
-    },
-    {
-      "path": "payloads/stage2.bin",
-      "sha256": "94e3e2ffbe1b36e48f7b5a6adb0371c651adba44860af3f4126e6f1091908fdf"
-    }
-  ]
+﻿{
+    "schema":  1,
+    "version":  "2.2.9 (mtk.exe wfscatter + shlex multi/script + EMMC_BOOT/BRLYT preloader wrap + reset via WDT retry-loop stub at DA extensions addr 0x4fff0000); rebuilt 2026-10-27 from bkerler/mtkclient @ ebe450da (2026-08-16)",
+    "source":  "Rebuilt from https://github.com/bkerler/mtkclient @ ebe450da (2026-08-16) with patches: xflash_lib send_param dsize 0x200 -\u003e 0x10000 (512B USB write chunks caused ~7MB/s cap); Packet length print gated to first call; new wfscatter cmd (MST-style: GPT rebuild from scatter with reserved-from-live + gap-fill, sparse-aware streaming writes, evidence lines); preloader boot writes wrapped as EMMC_BOOT+BRLYT factory format (header reused from device boot1 when present, template fallback; payload at 0x800, region 0x40800) — raw file at LUN offset 0 hard-bricks this platform; multi/script command parsing via shlex (quoted paths with spaces); reset cmd chain: 1) BOOT_TO corrected generic_reboot_payload (84B ARM stub: WDT unlock key 0x1971, interval, SWSYSRST via BOTH keys 0x88\u003c\u003c16 and legacy 0x22\u003c\u003c24, HW watchdog enable as guaranteed-reset fallback, dsb/isb/wfi — BOOT_TO DOES jump: old stub\u0027s PC-relative literal was misaligned so WDT writes hit DRAM garbage and it busy-looped = DA-idle look), 2) async DA shutdown (async_mode=1, bootmode=1), 3) BOOT_TO device preloader at 0x200000, 4) sync shutdown — DA SHUTDOWN itself powers off this platform (all dandelion tests); pyinstaller onefile, python 3.14",
+    "hardwareValidated":  true,
+    "hardwareValidationNote":  "2026-10-21 dandelion (Redmi 9A, MT6765, eMMC CJTD4R). EMMC_BOOT/BRLYT preloader wrap fix HARDWARE-VALIDATED: full MST-parity flash with fixed mtk.exe (2.2.1) — GPT primary+secondary rebuilt, 24 writes incl wrapped preloader→boot1+boot2, Total 5.61 G, Elapsed 7m25s, device rebooted AND booted into Android normally. Prior brick root-caused: factory boot partitions hold EMMC_BOOT+BRLYT wrapper (2048B header, payload at 0x800, region 0x40800 — byte-verified vs Oct-11 factory boot dumps in Backups); raw preloader at LUN offset 0 (old 2.2.0) destroyed the wrapper → bootROM cannot load preloader → hard dead (battery pull no help, BROM still reachable; MST SPFT rescued by writing wrapped form). Fix: handler reuses device\u0027s existing EMMC_BOOT header (template fallback == factory header byte-perfect offline) and writes [hdr][payload][zero-pad to region]. Earlier same-day: 19-partition subset (no preloader write) 4.63G/6m25s OK; broken 24-write run 5.61G/6m58s dead. 2.2.3 reset auto-reboot attempts HARDWARE-FAILED on dandelion (2026-10-27): bootmode=1 (HOME_SCREEN) alone → power off; + xflash enablewdt=1 → power off (Userlock Remove + Reset Device tests). 2.2.4 BOOT_TO generic_reboot_payload stub at 0x40000000 also HARDWARE-FAILED (2026-10-27 Reset Device: phone powered off). 2.2.5: reset now BOOT_TO\u0027s the device\u0027s OWN preloader (mtk.config.preloader, dumped from RAM at BROM connect, EMI-validated) at 0x200000 — the CPU jumps into the normal cold-boot chain (preloader -\u003e lk -\u003e Android); stub + DA shutdown kept as fallbacks; reset cmd prints flush=True (stdout survives hard exit); C# Reset Device button now accepts confirmation line even when exit!=0 (device disconnect during reboot expected). 2.2.5 TEST (2026-10-27): preloader jump path ran (both PMK reset lines printed, boot_to returned True) but NO jump happened — device stayed alive in DA idle (0e8d:2001 COM37, screen black) → BOOT_TO ACK does not guarantee the CPU jump for non-protocol targets. 2.2.6 async-shutdown-first TEST (2026-10-27): async DA shutdown (async_mode=1,bootmode=1) ACKed cleanly, confirmation printed, USB disconnected - but phone STILL powered off (DA firmware on MT6765 ignores reboot intent in shutdown flags). 2.2.7 ROOT-CAUSED the old stub by disassembling generic_reboot_payload with capstone: BOOT_TO DOES jump (stub executed) but its PC-relative literal pointer was misaligned (0x2a instead of 0x2c) so the WDT writes landed on DRAM garbage 0x001a0000 and the stub busy-looped = DA-idle look. New stub assembled with keystone (capstone round-trip verified, 21 insns): unlock WDT key 0x1971, interval, WDT_RESTART, SWSYSRST=0x00880014 (key 0x88\u003c\u003c16) then SWSYSRST=0x22000014 (legacy lk key 0x22\u003c\u003c24) - chip software reset with normal-boot reason - then WDT_MODE=key|EN as guaranteed HW-watchdog fallback, dsb/isb/wfi; reset chain reordered stub-first; PENDING hardware confirmation (2026-10-27 Reset Device test). 2.2.7 stub TEST (2026-10-27): stub line printed at 0x40000000, no boot_to error (status 0 ACK), but device STAYED in DA idle (COM37 alive) = BOOT_TO to plain DRAM addr is ACKed but NOT jumped. 2.2.8: stub moved to the DA extensions address 0x4fff0000 (the ONLY addr the DA provably jumps to - extensions load uses it every session); stub rewritten as infinite retry loop (unlock WDT key 0x1971, interval, loop: kick WDT_RESTART + SWSYSRST via key 0x88\u003c\u003c16 then legacy 0x22\u003c\u003c24 + WDT_MODE=key|EN) - enabled HW watchdog fires in ~125ms even if every SWSYSRST write is ignored; PENDING hardware confirmation. 2.2.9 REBOOT PARITY HARDWARE-VALIDATED (2026-10-27): root-cause of 2.2.8 silent-fail was WRONG WDT register keys - PMK stub wrote WDT_MODE key 0x1971\u003c\u003c16 and SWSYSRST 0x880014/0x22000014, but the device DA\u0027s OWN reboot function (MTK_DA_V5.bin @ 0x49a94, disassembled) writes WDT_MODE(0x10007000)=0x22000024 (key 0x22\u003c\u003c24) and SWSYSRST(0x10007014)=0x1209 (matches mtkclient meta.py wdg+0x14\u003c-0x1209). Wrong keys = HW ignores every write = stub busy-loops forever (DA USB stack dead -\u003e Unknown USB Device descriptor error, phone black, no boot). Also fixed: DaHandler has no self.da attribute -\u003e DA object is self.mtk.daloader.da (2.2.8b diagnostic print exposed it: \u0027stub load failed: AttributeError\u0027). Payload v3 (56B): MODE=0x22000024, ~1M-iter delay, loop { MODE + SWSYSRST=0x1209 + dsb }. TEST (2026-10-27 13:02): raw log shows \u0027stub file ... exists=True\u0027 + \u0027TOPRGU stub at 0x4fff0000 (56B)\u0027, USB dropped mid-handshake (Stage wasn\u0027t executed = expected, chip reset), phone AUTO-BOOTED TO MI LOGO - MST-parity reboot achieved; mtk.exe sha 5e71fcc18b9aed9b1e108b0b536b066a28f1c05a8a4a40f5f371b39da1d0b526, payload sha 1a99a3f095fc93fe32ba1929491606867c397e8035e4874f957869f87f285d13.",
+    "files":  [
+                  {
+                      "path":  "mtk.exe",
+                      "sha256":  "5e71fcc18b9aed9b1e108b0b536b066a28f1c05a8a4a40f5f371b39da1d0b526"
+                  },
+                  {
+                      "path":  "payloads/da_x.bin",
+                      "sha256":  "b83ebbbff36e330713080e719856241065e51f732658f4b931399df0e17e00fd"
+                  },
+                  {
+                      "path":  "payloads/da_xml_64.bin",
+                      "sha256":  "b8509bd63044bea612e32425642b2f54b340e1cf967006f01ac4faae6541ab28"
+                  },
+                  {
+                      "path":  "payloads/da_xml.bin",
+                      "sha256":  "befb2820693fa774eb0da9b9bb8751594dc5c99cf3749dfdc332d7038c058d7b"
+                  },
+                  {
+                      "path":  "payloads/generic_dump_payload.bin",
+                      "sha256":  "96eedb2f03a4c2839f289e3e437f574fd7d85d15d8339201eaa6ac00f4734b25"
+                  },
+                  {
+                      "path":  "payloads/generic_loader_payload.bin",
+                      "sha256":  "e887a930a9477ab9a1e56b05b31bb5a58bed30664045338d97f7fe6dc71d3f54"
+                  },
+                  {
+                      "path":  "payloads/generic_patcher_payload.bin",
+                      "sha256":  "6ff58af2867de71abcbbe22c3de289eb747e56d9a220fc23a64fcb8f592bc24b"
+                  },
+                  {
+                      "path":  "payloads/generic_preloader_dump_payload.bin",
+                      "sha256":  "3dbf96661cced9f61ae29006d05ae8bcd38928013f978a00ea788aca998791f7"
+                  },
+                  {
+                      "path":  "payloads/generic_reboot_payload.bin",
+                      "sha256":  "1a99a3f095fc93fe32ba1929491606867c397e8035e4874f957869f87f285d13"
+                  },
+                  {
+                      "path":  "payloads/generic_sram_payload.bin",
+                      "sha256":  "713fb9cc9b418920b24c58a2bdd1d0d3050515ef37e8e5e1e405794cd8b9b46c"
+                  },
+                  {
+                      "path":  "payloads/generic_stage1_payload.bin",
+                      "sha256":  "0cec003fb8b594ed374270debc0aefb198d03d66d0f4ef3db5d5f1e706098296"
+                  },
+                  {
+                      "path":  "payloads/generic_uart_dump_payload.bin",
+                      "sha256":  "f8490e2a765446dc26cff1377059841b9860f34d6f4ff6ee2f3163eab27a728b"
+                  },
+                  {
+                      "path":  "payloads/heapbait_arm.bin",
+                      "sha256":  "91a4661dd8f56d8c5762e8e89c83212b69153ccba4e9dc774b0df0bc0d5dcf54"
+                  },
+                  {
+                      "path":  "payloads/heapbait_arm64.bin",
+                      "sha256":  "89413d885b92bb9dce2d0682fa0a88d398da1214d412ff93250dbea84b6d7b48"
+                  },
+                  {
+                      "path":  "payloads/mt2601_payload.bin",
+                      "sha256":  "13e31e02c9ab0eaf2c076abaf436117acb1db1faf098c3d9855b33e6723f0d56"
+                  },
+                  {
+                      "path":  "payloads/mt6261_payload.bin",
+                      "sha256":  "cb3b04e1fbce58cf12adf61f78558ae5879d693f468f2681bfc948be5f25b06e"
+                  },
+                  {
+                      "path":  "payloads/mt6572_payload.bin",
+                      "sha256":  "4a7549d1c89a2a952bb6a8bc074f0a2dc2c48416ef1faabbd0d544fa32241a23"
+                  },
+                  {
+                      "path":  "payloads/mt6575_payload.bin",
+                      "sha256":  "401376830343b431bb1960d86f2765b101108e997a54357ff7676e8fad6f6f2f"
+                  },
+                  {
+                      "path":  "payloads/mt6580_payload.bin",
+                      "sha256":  "d943075dd1b6710bf44abcbabdd6911be76efb97d99ec147f2ed4a8b47f69dbc"
+                  },
+                  {
+                      "path":  "payloads/mt6582_payload.bin",
+                      "sha256":  "6d077a31541128d5974dcf0ace5805d5b7772a6d809339d76a998d68fdc22f38"
+                  },
+                  {
+                      "path":  "payloads/mt6592_payload.bin",
+                      "sha256":  "7b2397eab429f351ff2cf89bd02da1f635f8f759380f4bacbee88c62889e6aad"
+                  },
+                  {
+                      "path":  "payloads/mt6595_payload.bin",
+                      "sha256":  "8f136d8363ebb8d2e96ad618c7cc5bfa099c3b9b8bea42ccd3e5d0720f05d67d"
+                  },
+                  {
+                      "path":  "payloads/mt6735_payload.bin",
+                      "sha256":  "c67f8c0daaf578dfc63ecfc5e34db84225f83a3a338e8c919966356e8391718a"
+                  },
+                  {
+                      "path":  "payloads/mt6737_payload.bin",
+                      "sha256":  "3520c57b0fbb90c64469900ed46e78a08490da0e370581b02ee52882c94c0e43"
+                  },
+                  {
+                      "path":  "payloads/mt6739_payload.bin",
+                      "sha256":  "5b1befdd6c58d934a05d8e6d4ad259e296e3b9d2801885708b6bfe00a40babf4"
+                  },
+                  {
+                      "path":  "payloads/mt6752_payload.bin",
+                      "sha256":  "29a6596e14922c9d8a9f37df0f4cab5dc5e85ef38d613cca96c8219ccdf64a95"
+                  },
+                  {
+                      "path":  "payloads/mt6753_payload.bin",
+                      "sha256":  "f608f04ba6b02a9039962c93c6d677b99aaa746e1962b320ade1baf3175d35ec"
+                  },
+                  {
+                      "path":  "payloads/mt6755_payload.bin",
+                      "sha256":  "71308466f4fdfd61aafd4490a32f2ea020930352c2fdc2033ad487b2a82593dd"
+                  },
+                  {
+                      "path":  "payloads/mt6757_payload.bin",
+                      "sha256":  "4d732f2183f4a32560972db52e2ef20d730729b4065489778550e095c9183f82"
+                  },
+                  {
+                      "path":  "payloads/mt6758_payload.bin",
+                      "sha256":  "632bb2cb90afefd593b71d210db626b99c0ebff7413752d9b3973591833ac362"
+                  },
+                  {
+                      "path":  "payloads/mt6761_payload.bin",
+                      "sha256":  "e15edfddcca2702d7c5f2796531889947d3ba666bed8152acf71a27f13834a2b"
+                  },
+                  {
+                      "path":  "payloads/mt6763_payload.bin",
+                      "sha256":  "98a569c5bdb6a05b9a2d93d484e926489415d065ecb8991bdf1033ca687fef17"
+                  },
+                  {
+                      "path":  "payloads/mt6765_payload.bin",
+                      "sha256":  "9da60fd8d35527e9d1d643d8d81c6c4560e6cd5640c904a0e9a7206ecd582476"
+                  },
+                  {
+                      "path":  "payloads/mt6768_payload.bin",
+                      "sha256":  "1374139e112b7961abf6571582c8330d879d956ff33ed39bd51c882ddec8a6c5"
+                  },
+                  {
+                      "path":  "payloads/mt6771_payload.bin",
+                      "sha256":  "898654d927bf5a9bcff40702801e1a498d013abcc4de406bbae1aa025a65e637"
+                  },
+                  {
+                      "path":  "payloads/mt6779_payload.bin",
+                      "sha256":  "859c6dce3baf937bdee85d5acf0061b584b5960057fff25e452f9d326adc7116"
+                  },
+                  {
+                      "path":  "payloads/mt6781_payload.bin",
+                      "sha256":  "47f6d92ad871b7aa0ddc7c5d15f6246522872c0851daa40e97acaf9d426876b0"
+                  },
+                  {
+                      "path":  "payloads/mt6785_payload.bin",
+                      "sha256":  "eec7575441c2099bfed1fd20ee3fbe85d5dbba520dde49d785996b26d78cceb5"
+                  },
+                  {
+                      "path":  "payloads/mt6795_payload.bin",
+                      "sha256":  "6fbcf8af42028ced3b74cebc19df8093283f28d570915901a5db249a77486472"
+                  },
+                  {
+                      "path":  "payloads/mt6797_payload.bin",
+                      "sha256":  "2464e4e3a7dd48ddf03240b39fd569d786ec9ac8cd134cfa0ef53997f786d86b"
+                  },
+                  {
+                      "path":  "payloads/mt6799_payload.bin",
+                      "sha256":  "c0d5e29a81a0109dcfa16f39d279e1f091ae35333b5601c56cfa3c1f8c88261f"
+                  },
+                  {
+                      "path":  "payloads/mt6833_payload.bin",
+                      "sha256":  "921590545eadd986ebdb152e268afea672e0d0930c43a0b25c5743623569ef03"
+                  },
+                  {
+                      "path":  "payloads/mt6853_payload.bin",
+                      "sha256":  "edb8c91ae9eb13c83d6172d25fc8e835510fe2a9371e18597cc7d34ac85c82db"
+                  },
+                  {
+                      "path":  "payloads/mt6873_payload.bin",
+                      "sha256":  "19a10d6fba9d0fef479e36b71569cee5c986aeafd83816ddb3e2d5a225ea6099"
+                  },
+                  {
+                      "path":  "payloads/mt6877_payload.bin",
+                      "sha256":  "514beb6a882f0c204dc1ff64172968094e0fd229fdbbe6ade331bd0beb9c853f"
+                  },
+                  {
+                      "path":  "payloads/mt6885_payload.bin",
+                      "sha256":  "77378f8f83d2a36e478a388b1704af466515e054a92874bbb9dd53845a57610d"
+                  },
+                  {
+                      "path":  "payloads/mt6893_payload.bin",
+                      "sha256":  "6a3063c6227401afce591ce9d5699062bd1b1042c636bfed3fcd00fcd5e70952"
+                  },
+                  {
+                      "path":  "payloads/mt8127_payload.bin",
+                      "sha256":  "8b7f22771078ddcc6515b97ea8e2f12eda79eac969cd6ca014624cb2575f1e09"
+                  },
+                  {
+                      "path":  "payloads/mt8163_payload.bin",
+                      "sha256":  "92185a7501513c4836b68dd7baed19526c5e6dd3a7171a26fe4672398c49ffae"
+                  },
+                  {
+                      "path":  "payloads/mt8167_payload.bin",
+                      "sha256":  "7bf98fa19b32eab41cf26578fe5017b3e277efa22f49e134ed4192c4634c8ecf"
+                  },
+                  {
+                      "path":  "payloads/mt8168_payload.bin",
+                      "sha256":  "5438a8b24766eff2c59292090bd9ef85b62dc986b8c8bc690e03f56997fb7f5c"
+                  },
+                  {
+                      "path":  "payloads/mt8173_payload.bin",
+                      "sha256":  "1fcc63e4eae171be11a89d5d49074ae4cf4120ec97a0b9571f267dcb922cdbf3"
+                  },
+                  {
+                      "path":  "payloads/mt8176_payload.bin",
+                      "sha256":  "8c38525214cbc0d22a29ee83bf4e5ca7e573ba58264f95e4dfa6472a17877d09"
+                  },
+                  {
+                      "path":  "payloads/mt8512_payload.bin",
+                      "sha256":  "8ddddd00d6a54e872c341c65a178ec05b705fc2ee02974a634b60274506fb9b4"
+                  },
+                  {
+                      "path":  "payloads/mt8516_payload.bin",
+                      "sha256":  "001f5034237252e10c1a2b3046fb5340a5cfddfb36c150d9964fea7b8afd5a64"
+                  },
+                  {
+                      "path":  "payloads/mt8590_payload.bin",
+                      "sha256":  "f1c7aa26e28b82b37f2e9827c99996030af45ec8852e492a141dddd1bed0f95e"
+                  },
+                  {
+                      "path":  "payloads/mt8695_payload.bin",
+                      "sha256":  "16bea9ac9fb67fcdf6a58912a7742d2e37d6cb4c3584a9101600f94600aeb29e"
+                  },
+                  {
+                      "path":  "payloads/pl.bin",
+                      "sha256":  "330de824646e1f49c4784e2f515fcbb1e47132ea7ecc8ceb034c6c4f42e665ed"
+                  },
+                  {
+                      "path":  "payloads/stage2.bin",
+                      "sha256":  "94e3e2ffbe1b36e48f7b5a6adb0371c651adba44860af3f4126e6f1091908fdf"
+                  }
+              ]
 }

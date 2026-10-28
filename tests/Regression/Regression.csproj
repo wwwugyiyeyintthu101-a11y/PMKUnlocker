@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../PMKUnlocker/MediaTek/MtkClientProtocol.cs" Link="MediaTek/MtkClientProtocol.cs" />
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCatalog.cs" Link="MediaTek/MtkDaCatalog.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
@@ -18,5 +19,6 @@
     <Compile Include="../../PMKUnlocker/MtkFirmware/FirmwarePreflight.cs" Link="MtkFirmware/FirmwarePreflight.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
+    <Compile Include="../../PMKUnlocker/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
   </ItemGroup>
 </Project>

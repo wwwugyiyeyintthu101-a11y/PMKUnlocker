@@ -42,6 +42,45 @@ internal sealed partial class MtkClientEngine
     internal static bool HasWriteEvidence(MtkCommandResult result, string imagePath) =>
         result.Lines.Any(l => l.TrimStart().StartsWith("Wrote " + imagePath + " to sector ", StringComparison.OrdinalIgnoreCase));
 
+    // da imei ရဲ့ positional arg = "imei1,imei2" — file-path comma guard ကို ဒီ slot မှာ မသုံး
+    internal static bool IsImeiWriteListArg(string[] cmdArgs, int index) =>
+        index == 2 && cmdArgs.Length > 2 &&
+        string.Equals(cmdArgs[0], "da", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(cmdArgs[1], "imei", StringComparison.OrdinalIgnoreCase);
+
+    // Where --loader/--auth/--preloader must be re-inserted (argparse parents=[base]
+    // defaults overwrite anything placed at an ancestor subparser level).
+    internal static int BaseFlagInsertIndex(string[] cmdArgs)
+    {
+        if (cmdArgs.Length > 0 && string.Equals(cmdArgs[0], "multi", StringComparison.OrdinalIgnoreCase))
+            return -1;
+        if (cmdArgs.Length >= 2 && string.Equals(cmdArgs[0], "da", StringComparison.OrdinalIgnoreCase))
+            return 2;
+        return 1;
+    }
+
+    internal static bool IsImeiWriteSuccess(MtkCommandResult result) =>
+        result.Lines.Any(l => l.Contains("IMEIs were written successfully", StringComparison.OrdinalIgnoreCase));
+
+    internal static bool IsImeiWriteFailed(MtkCommandResult result) =>
+        result.HasError || result.Lines.Any(l => l.Contains("Failed to write IMEIs.", StringComparison.OrdinalIgnoreCase));
+
+    // IMEI input guard — 15 digits, Luhn checksum (same algorithm mtkclient recomputes on write)
+    internal static bool LuhnValid(string digits)
+    {
+        if (digits.Length != 15) return false;
+        int sum = 0;
+        for (int i = 0; i < 15; i++)
+        {
+            char c = digits[i];
+            if (c < '0' || c > '9') return false;
+            int d = c - '0';
+            if ((i & 1) == 1) { d *= 2; if (d > 9) d -= 9; }
+            sum += d;
+        }
+        return sum % 10 == 0;
+    }
+
     internal static void RequireWriteEvidence(MtkCommandResult result, string partition, string imagePath)
     {
         result.RequireSuccess();
