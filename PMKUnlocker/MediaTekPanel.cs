@@ -38,6 +38,12 @@ public partial class Form1
     private TextBox txtMtkPreBox;
     private TabControl mtkModes;
     private Dictionary<string, Dictionary<string, MtkDeviceInfo>> mtkDeviceDb = new();
+    // Loader auto-detect: catalog loader resolved for the connected chip + the last chip we reported
+    private MtkChipsetMatch mtkAutoMatch;
+    private string mtkLastChipNotice = "";
+    // Brand combo modes: "Auto Detect" = mtkclient's own DA (validated default), "Auto + catalog DA" = pass the resolved loader
+    const string MtkAutoMode = "Auto Detect";
+    const string MtkAutoCatalogMode = "Auto + catalog DA";
     // ဒီ session က live GPT cache — NV Restore က GPT re-read မလုပ်ချင်ရင် (1 plug cycle) ဒါကိုသုံးတယ်
     private IReadOnlyList<MtkPartition> mediaTekLiveTable;
     // Operation Progress — flash တစ်ခုတည်းအတွက် (writes 0→95, workflow end 100)။
@@ -399,7 +405,8 @@ public partial class Form1
     {
         try
         {
-            cmbMtkBrand.Items.Add("Auto Detect");
+            cmbMtkBrand.Items.Add(MtkAutoMode);
+            cmbMtkBrand.Items.Add(MtkAutoCatalogMode);
             string jsonPath = Path.Combine(Application.StartupPath, "pmk_mtk_devices.json");
             string loadersRoot = Path.Combine(Application.StartupPath, "mtk", "loaders");
             mtkDeviceDb = MtkDaCatalog.Load(jsonPath, loadersRoot);
@@ -410,16 +417,29 @@ public partial class Form1
         catch (Exception ex) { cmbMtkBrand.Items.Add("(load error: " + ex.Message + ")"); cmbMtkBrand.SelectedIndex = 0; }
     }
 
+    static bool IsMtkAutoMode(string brand) =>
+        brand == MtkAutoMode || brand == MtkAutoCatalogMode;
+
     private void CmbMtkBrand_SelectedIndexChanged(object sender, EventArgs e)
     {
         cmbMtkModel.Items.Clear();
         cmbMtkModel.Enabled = false;
         if (cmbMtkBrand.SelectedItem is not string brand) return;
-        if (brand == "Auto Detect")
+        if (IsMtkAutoMode(brand))
         {
             mtkDaPath = ""; mtkAuthPath = ""; mtkPreloaderPath = "";
-            lblMtkDeviceStatus.Text = "Auto Detect (no manual DA selected)";
-            lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
+            if (txtMtkDaBox != null) txtMtkDaBox.Text = "";
+            if (txtMtkAuthBox != null) txtMtkAuthBox.Text = "";
+            if (txtMtkPreBox != null) txtMtkPreBox.Text = "";
+            mtkLastChipNotice = "";
+            if (brand == MtkAutoCatalogMode && mtkAutoMatch != null) ApplyCatalogLoader();
+            else
+            {
+                lblMtkDeviceStatus.Text = brand == MtkAutoCatalogMode
+                    ? "Catalog DA — run Read Info first"
+                    : "Auto Detect (mtkclient built-in DA)";
+                lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
+            }
             return;
         }
         if (!mtkDeviceDb.TryGetValue(brand, out var models)) return;
@@ -432,7 +452,7 @@ public partial class Form1
     private void CmbMtkModel_SelectedIndexChanged(object sender, EventArgs e)
     {
         if (cmbMtkBrand.SelectedItem is not string brand || cmbMtkModel.SelectedItem is not string model) return;
-        if (brand == "Auto Detect" || !mtkDeviceDb.TryGetValue(brand, out var models) || !models.TryGetValue(model, out var info)) return;
+        if (IsMtkAutoMode(brand) || !mtkDeviceDb.TryGetValue(brand, out var models) || !models.TryGetValue(model, out var info)) return;
         string baseDir = Path.Combine(Application.StartupPath, "mtk");
         mtkDaPath = MtkDaCatalog.Resolve(info.Da, baseDir);
         mtkAuthPath = MtkDaCatalog.Resolve(info.Auth, baseDir);
@@ -446,6 +466,183 @@ public partial class Form1
             : brand + " " + model + " · DA not found";
         lblMtkDeviceStatus.ForeColor = daOk ? Color.LightGreen
             : string.IsNullOrWhiteSpace(mtkDaPath) ? Color.FromArgb(86, 145, 250) : Color.Orange;
+    }
+
+    // ================= LOADER AUTO-DETECT (chipset seen in a log → catalog DA/Auth/Preloader) =================
+    // mtkclient reports the SoC on every BROM/Preloader session ("CPU: MT6765/MT8768t(...)", payloads/mt6765_payload.bin),
+    // and ADB Read Full Info / Detect report the same token earlier (ro.soc.model). Either way the catalog is
+    // consulted and the result is reported; which loader is then passed to mtkclient depends on the Brand mode:
+    // · "Auto Detect" (default) — nothing is overridden: mtkclient keeps uploading its own MTK_DA_V5.bin through
+    //   the xflash patch path, which is what every MTK operation validated on hardware so far used. A foreign
+    //   AllInOne DA breaks it (Redmi 9A 2026-10-28: "DAconfig - Using custom loader …" → "Error on boot to,
+    //   addr: 0x4fff0000" → "DA Extensions failed to enable"). If a session then fails on the loader,
+    //   HandleMediaTekLoaderFailure advances this match to the next run automatically.
+    // · "Auto + catalog DA" — the resolved loader is passed explicitly (chips mtkclient's DA set cannot serve,
+    //   or when an auth file is needed); a DA-extension boot error drops it back to the built-in path.
+    // · a hand-picked brand/model is never rewritten — it only gets a warning when it contradicts the chip.
+    private void ApplyMediaTekLoaderFromOutput(IReadOnlyList<string> lines)
+    {
+        if (IsDisposed || lines == null || lines.Count == 0 || mtkDeviceDb.Count == 0) return;
+        string chip = MtkDaCatalog.PrimaryChipset(FindMtkInfo(lines, @"CPU:\s+(.+)"));
+        if (chip == "") chip = MtkDaCatalog.ChipsetFromPayloadLines(lines);
+        if (chip == "" || string.Equals(chip, mtkLastChipNotice, StringComparison.OrdinalIgnoreCase)) return;
+        mtkLastChipNotice = chip;
+
+        string baseDir = Path.Combine(Application.StartupPath, "mtk");
+        string brand = cmbMtkBrand.SelectedItem as string;
+        string model = cmbMtkModel.SelectedItem as string;
+        bool manual = !string.IsNullOrEmpty(brand) && !IsMtkAutoMode(brand);
+        var match = MtkDaCatalog.FindByChipset(mtkDeviceDb, baseDir, chip, manual ? brand : null);
+
+        if (manual)
+        {
+            if (MtkDaCatalog.DaMatchesChipset(model ?? "", mtkDaPath, chip))
+                Log("  * Loader kept: " + brand + " " + model + " matches detected " + chip + " (manual selection).", Color.Cyan);
+            else
+                Log(" [!] Detected " + chip + " but the manually selected loader is " + brand + " " + model +
+                    (match != null ? " — " + match.Brand + " " + match.Model + " (" + match.Basis + ") fits the chip. " : ". ") +
+                    "Your selection is still used; set Brand back to Auto Detect to follow the device.", Color.Orange);
+            return;
+        }
+        mtkAutoMatch = match;
+        if (match == null)
+        {
+            Log("  * Chipset " + chip + " has no bundled DA/Auth — mtkclient's own loader is the only option here.", Color.Orange);
+            lblMtkDeviceStatus.Text = chip + " · no catalog loader";
+            lblMtkDeviceStatus.ForeColor = Color.Orange;
+            return;
+        }
+        if (brand == MtkAutoCatalogMode)
+        {
+            ApplyCatalogLoader();
+            Log("  * Catalog loader applied for " + chip + ": " + DescribeMatch(match) + " — passed as --loader on the next operation.", Color.LightGreen);
+        }
+        else
+        {
+            lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
+            lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
+            Log("  * Catalog loader for " + chip + ": " + DescribeMatch(match) +
+                " — not used, mtkclient's built-in DA stays default. Choose Brand \"" + MtkAutoCatalogMode +
+                "\" (or the model by hand) if an operation needs it.", Color.Cyan);
+        }
+    }
+
+    static string DescribeMatch(MtkChipsetMatch m) =>
+        m.Brand + " " + m.Model + " (" + m.Basis + (string.IsNullOrEmpty(m.Info.Auth) ? ", no auth file" : " + auth file") +
+        (string.IsNullOrEmpty(m.Info.Preloader) ? "" : " + preloader") + ")";
+
+    // ============== PRE-COMMAND CHIPSET (ADB prop → catalog loader, before the phone enters BROM) ==============
+    // Read Full Info / Detect read ro.soc.model ("MT6765" / "MediaTek Helio G35") and ro.board.platform
+    // ("mt6765"), which is the same token the BROM session prints later. Resolving it here means the MTK tab
+    // already knows the chip — and the matching loader — without a failed session first. Like the log-side
+    // detect it is report-only in "Auto Detect"; "Auto + catalog DA" fills the rows, a manual brand wins.
+    internal void NoteMediaTekChipFromAdb(string socProp, string boardProp)
+    {
+        if (IsDisposed || mtkDeviceDb.Count == 0) return;
+        string chip = MtkDaCatalog.PrimaryChipset(socProp ?? "");
+        if (chip == "") chip = MtkDaCatalog.PrimaryChipset(boardProp ?? "");
+        if (chip == "") return;
+        string brand = cmbMtkBrand?.SelectedItem as string;
+        if (!string.IsNullOrEmpty(brand) && !IsMtkAutoMode(brand)) return;
+        var match = MtkDaCatalog.FindByChipset(mtkDeviceDb, Path.Combine(Application.StartupPath, "mtk"), chip);
+        mtkAutoMatch = match;
+        mtkLastChipNotice = chip;
+        if (match == null)
+        {
+            Log("  * " + chip + " (from ADB) has no bundled DA/Auth — mtkclient's own loader will be used.", Color.Orange);
+            lblMtkDeviceStatus.Text = chip + " · no catalog loader";
+            lblMtkDeviceStatus.ForeColor = Color.Orange;
+            return;
+        }
+        if (brand == MtkAutoCatalogMode)
+        {
+            ApplyCatalogLoader();
+            Log("  * Catalog loader for " + chip + " (ADB): " + DescribeMatch(match) + " — ready as --loader.", Color.LightGreen);
+        }
+        else
+        {
+            lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
+            lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
+            Log("  * Catalog loader for " + chip + " (ADB): " + DescribeMatch(match) +
+                " — ready. Brand \"" + MtkAutoCatalogMode + "\" uses it, \"Auto Detect\" keeps mtkclient's built-in DA" +
+                " and switches here itself if that DA fails.", Color.Cyan);
+        }
+    }
+
+    // Pass the detected catalog loader to the engine (Brand = "Auto + catalog DA").
+    private void ApplyCatalogLoader()
+    {
+        if (mtkAutoMatch == null) return;
+        ApplyMtkLoaderPaths(mtkAutoMatch.Info, Path.Combine(Application.StartupPath, "mtk"));
+        lblMtkDeviceStatus.Text = "Catalog DA · " + mtkAutoMatch.Brand + " " + mtkAutoMatch.Model;
+        lblMtkDeviceStatus.ForeColor = Color.LightGreen;
+    }
+
+    // Loader self-heal, both directions, driven by what the session actually did:
+    //  · "Auto Detect" + a DA/loader error + the catalog has a loader for this chip → advance to it,
+    //    so chips mtkclient's own DA cannot serve get the right --loader without the user hunting menus.
+    //  · "Auto + catalog DA" + the DA-extension boot error → the foreign DA is not usable on this device
+    //    (Redmi 9A 2026-10-28) → drop back to mtkclient's built-in loader.
+    // Neither path re-runs the operation: the phone has to be re-plugged first, which only PMK can do.
+    private void HandleMediaTekLoaderFailure(MtkCommandResult result)
+    {
+        if (IsDisposed || result == null || !result.HasError) return;
+        string brand = cmbMtkBrand.SelectedItem as string;
+        if (brand == MtkAutoCatalogMode)
+        {
+            if (!result.Lines.Any(l => LoaderBootError(l))) return;
+            int auto = IndexOfItem(cmbMtkBrand, MtkAutoMode);
+            if (auto >= 0) cmbMtkBrand.SelectedIndex = auto;   // handler clears the loader rows
+            Log(" [!] The catalog DA did not boot this device's DA extensions — switched Brand back to \"" + MtkAutoMode +
+                "\" (mtkclient built-in DA). Unplug, re-plug and run the operation again.", Color.Orange);
+            return;
+        }
+        if (brand != MtkAutoMode || mtkAutoMatch == null) return;
+        // only advance for the chip this session reported (or one ADB already proved) — never a stale match
+        string chip = MtkDaCatalog.PrimaryChipset(FindMtkInfo(result.Lines, @"CPU:\s+(.+)"));
+        if (chip == "") chip = MtkDaCatalog.ChipsetFromPayloadLines(result.Lines);
+        if (chip != "" && !string.Equals(chip, mtkAutoMatch.Chipset, StringComparison.OrdinalIgnoreCase)) return;
+        if (!result.Lines.Any(l => LoaderBootError(l) || LoaderMissingError(l))) return;
+        int cat = IndexOfItem(cmbMtkBrand, MtkAutoCatalogMode);
+        if (cat < 0) return;
+        mtkLastChipNotice = "";                       // let the new mode report the chip again
+        cmbMtkBrand.SelectedIndex = cat;              // handler applies the stored match
+        Log(" [!] mtkclient's built-in loader failed on this device — advanced to the catalog loader " +
+            DescribeMatch(mtkAutoMatch) + ". Unplug, re-plug and run the operation again.", Color.Orange);
+    }
+
+    // The DA reached the phone but could not take over (custom DA without the xflash extensions).
+    static bool LoaderBootError(string line) =>
+        line.Contains("DA Extensions failed", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Error on boot to", StringComparison.OrdinalIgnoreCase);
+
+    // mtkclient has no loader for this chipset (unsupported chip / DA or auth rejected at BROM).
+    static bool LoaderMissingError(string line) =>
+        line.Contains("unsupported chipset", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("no da for", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("can't find da", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("cannot find da", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("da file not found", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("loader not found", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("invalid auth file", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("auth file", StringComparison.OrdinalIgnoreCase) && line.Contains("error", StringComparison.OrdinalIgnoreCase);
+
+    static int IndexOfItem(ComboBox cmb, string value)
+    {
+        if (cmb == null || string.IsNullOrEmpty(value)) return -1;
+        for (int i = 0; i < cmb.Items.Count; i++)
+            if (cmb.Items[i] is string s && string.Equals(s, value, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
+
+    private void ApplyMtkLoaderPaths(MtkDeviceInfo info, string baseDir)
+    {
+        mtkDaPath = MtkDaCatalog.Resolve(info.Da, baseDir);
+        mtkAuthPath = MtkDaCatalog.Resolve(info.Auth, baseDir);
+        mtkPreloaderPath = MtkDaCatalog.Resolve(info.Preloader, baseDir);
+        if (txtMtkDaBox != null) txtMtkDaBox.Text = mtkDaPath;
+        if (txtMtkAuthBox != null) txtMtkAuthBox.Text = mtkAuthPath;
+        if (txtMtkPreBox != null) txtMtkPreBox.Text = mtkPreloaderPath;
     }
 
     private void PickMediaTekScatter()
@@ -550,8 +747,26 @@ public partial class Form1
         CancellationToken token = timeoutCts?.Token ?? mediaTekCancel.Token;
         try
         {
-            return await mediaTekEngine.RunAsync(mediaTekConnection, args,
+            var result = await mediaTekEngine.RunAsync(mediaTekConnection, args,
                 line => LogMtkLine(line), token, writes);
+            // Loader auto-detect runs after the command so an in-flight session keeps the loader
+            // it already handed to mtkclient; the next operation gets the resolved one.
+            // The engine may complete off the UI thread (ConfigureAwait(false)) → marshal the picker update.
+            var lines = result?.Lines;
+            if (!IsDisposed)
+            {
+                if (InvokeRequired) BeginInvoke(new Action(() =>
+                {
+                    // detect first — the self-heal needs the match this run produced
+                    try { ApplyMediaTekLoaderFromOutput(lines); HandleMediaTekLoaderFailure(result); } catch { }
+                }));
+                else
+                {
+                    ApplyMediaTekLoaderFromOutput(lines);
+                    HandleMediaTekLoaderFailure(result);
+                }
+            }
+            return result;
         }
         finally { FlushMtkStorage(); mediaTekWriteActive = false; }
     }

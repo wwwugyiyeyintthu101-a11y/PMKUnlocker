@@ -2,9 +2,11 @@ using PMKUnlocker;
 using PMKUnlocker.MediaTek;
 using PMKUnlocker.MtkFirmware;
 using PMKUnlocker.Qualcomm;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 
@@ -141,6 +143,54 @@ try
         "Wired MT6762 models (Vivo Y12/Y15) resolve DA+auth");
     Check(File.ReadAllBytes(wired["Vivo"]["Y12"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6761_2"].Da)),
         "MT6762 model DAs reuse the 0x6761 AllInOne download agent (upstream mtkclient maps MT6762 to dacode 0x6761)");
+
+    // ---- MTK loader auto-detect (chipset reported by BROM/Preloader → catalog DA/auth) ----
+    string mtkBase = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk");
+    Check(MtkDaCatalog.PrimaryChipset("MT6765/MT8768t(Helio P35/G35)") == "MT6765",
+        "Chipset token is the first MT#### of the mtkclient CPU line");
+    Check(MtkDaCatalog.PrimaryChipset("Helio G35 · eMMC CJTD4R") == "",
+        "Marketing-only text yields no chipset token");
+    Check(MtkDaCatalog.ChipsetFromPayloadLines(new[] { "Preloader - boot rom code", "PLTools - Successfully sent payload: C:\\mtkclient\\payloads\\mt6765_payload.bin" }) == "MT6765",
+        "Accepted payload filename is the fallback chipset signal");
+    Check(MtkDaCatalog.PrimaryChipset("MT6765") == "MT6765" && MtkDaCatalog.PrimaryChipset("mt6765") == "MT6765" &&
+          MtkDaCatalog.PrimaryChipset("MediaTek MT6873") == "MT6873",
+        "ADB ro.soc.model / ro.board.platform tokens resolve the same way as the BROM CPU line");
+    Check(MtkDaCatalog.PrimaryChipset("Qualcomm SM6125") == "" && MtkDaCatalog.PrimaryChipset("Helio G85") == "",
+        "Non-MediaTek and marketing-only prop text yields no chipset token for the DA catalog");
+    var fam62 = MtkDaCatalog.ChipsetCandidates("mt6762");
+    Check(fam62.Count == 2 && fam62[0] == "MT6762" && fam62[1] == "MT6761",
+        "Chipset candidates list the device chip first, then its proven shared-DA family");
+    Check(MtkDaCatalog.ReadDaChipCode(wired["Vivo"]["Y12"].Da) == 0x6761,
+        "DA blob chip code is read from the MTK_DOWNLOAD_AGENT header (LE u16 at 0x6E)");
+    Check(MtkDaCatalog.ReadDaChipCode(Path.Combine(dir, "no-such-da.bin")) == -1,
+        "Missing or non-DA file yields no chip code");
+    var auto6765 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765");
+    Check(auto6765 != null && File.Exists(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)),
+        "MT6765 auto-resolves to a catalog loader that exists on disk");
+    Check(auto6765 != null && (MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765" ||
+          MtkDaCatalog.ReadDaChipCode(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)) == 0x6765),
+        "The MT6765 loader match is justified by the folder token or the DA's own chip code");
+    Check(auto6765 != null && MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Brand == auto6765.Brand &&
+          MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Model == auto6765.Model,
+        "Chipset resolution is deterministic across runs");
+    Check(auto6765 != null && MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765",
+        "Chipset-keyed loader folders outrank model-named folders carrying the same DA code");
+    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6762") != null,
+        "MT6762 resolves through the 0x6761 family alias");
+    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6769") != null,
+        "MT6769 resolves through the 0x6768 family alias");
+    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6893") != null &&
+          MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991") != null,
+        "Chipsets whose loaders are only folder-named (DAv5/AllInOne v6) still resolve");
+    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT9999") == null &&
+          MtkDaCatalog.FindByChipset(wired, mtkBase, "") == null &&
+          MtkDaCatalog.FindByChipset(null, mtkBase, "MT6765") == null,
+        "Unknown, empty or missing catalog input yields no loader match instead of a guess");
+    var auto6991 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991");
+    Check(auto6991 != null && !MtkDaCatalog.DaMatchesChipset(auto6991.Model, MtkDaCatalog.Resolve(auto6991.Info.Da, mtkBase), "MT6765"),
+        "A wrong-chipset manual loader is detected as a mismatch");
+    Check(auto6765 != null && MtkDaCatalog.DaMatchesChipset(auto6765.Model, MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase), "MT6765"),
+        "The resolved loader passes the manual-override sanity check for its own chipset");
 
     string backupDir = Path.Combine(dir, "verified-backup"); Directory.CreateDirectory(backupDir);
     var layout = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { ["nvram"] = 16, ["boot"] = 4096 };
@@ -1092,7 +1142,734 @@ try
     Check(escXml.Contains("label=\"a&amp;b\"") && escXml.Contains("filename=\"a&amp;b.bin\""),
         "rawprogram: partition names are XML-escaped");
 
+    // ================= native MTK DA wire layer (ROADMAP Phase 1.75 "Path B", stage B2) ============
+    // BROM speaks big-endian, the DA stage speaks little-endian, and every value asserted below is pinned to
+    // bytes a working boot actually put on the wire (RUN 6/7/9, Redmi 9A / MT6765). The boot machine runs on a
+    // scripted fake transport, so a wrong frame order, an invented padding byte or a swallowed status word
+    // fails here instead of on a phone.
+
+    string LcHex(byte[] data) => Convert.ToHexString(data).ToLowerInvariant();
+
+    // ---- B2.2: wire codecs --------------------------------------------------------------------------
+    Check(LcHex(MtkBrom.Be(0x11002000u)) == "11002000", "MTK BROM: register args are big-endian (UART base 0x11002000)");
+    Check(LcHex(MtkBrom.Be((ushort)0x0766)) == "0766", "MTK BROM: HW code 0x0766 encodes big-endian");
+    Check(MtkBrom.ParseHwCode(Convert.FromHexString("07660000")) == 0x0766, "MTK BROM: HW-code reply splits code from status");
+    bool hwStatusRefused = false;
+    try { MtkBrom.ParseHwCode(Convert.FromHexString("07660001")); } catch (MtkDaProtocolException) { hwStatusRefused = true; }
+    Check(hwStatusRefused, "MTK BROM: a refused HW-code query stops the boot instead of logging a chipset nobody verified");
+    bool hwShortRefused = false;
+    try { MtkBrom.ParseHwCode(new byte[3]); } catch (MtkDaProtocolException) { hwShortRefused = true; }
+    Check(hwShortRefused, "MTK BROM: an undersized HW-code reply is refused, not read past its end");
+    Check(MtkBrom.ParseTargetConfig(Convert.FromHexString("000000e70000")) == 0xE7, "MTK BROM: target config reads the BE u32 out of the 6-byte reply");
+    bool cfgStatusRefused = false;
+    try { MtkBrom.ParseTargetConfig(Convert.FromHexString("000000e70003")); } catch (MtkDaProtocolException) { cfgStatusRefused = true; }
+    Check(cfgStatusRefused, "MTK BROM: a non-zero status on the config query aborts the boot");
+    bool cfgLenRefused = false;
+    try { MtkBrom.ParseTargetConfig(Convert.FromHexString("000000e7")); } catch (MtkDaProtocolException) { cfgLenRefused = true; }
+    Check(cfgLenRefused, "MTK BROM: a 4-byte config reply is not accepted as 6");
+    Check(MtkBrom.DescribeConfig(0xE7) ==
+            "SBC=True SLA=True DAA=True SWJTAG=True EPP_PARAM=False RootCert=False MemReadAuth=True MemWriteAuth=True CmdC8Blocked=True",
+        "MTK BROM: config 0xE7 decodes to exactly the nine flag lines the working client printed");
+    Check(MtkBrom.DescribeConfig(0) ==
+            "SBC=False SLA=False DAA=False SWJTAG=True EPP_PARAM=False RootCert=True MemReadAuth=False MemWriteAuth=False CmdC8Blocked=True",
+        "MTK BROM: an all-zero config word keeps the three inverted flags honest (no false 'unlocked' comfort)");
+
+    Check(LcHex(MtkDaFrame.Header(0x14)) == "efeeeefe0100000014000000", "MTK DA: header is magic + type 1 + LE length, byte-identical to the capture");
+    Check(LcHex(MtkDaFrame.Command(MtkDaCommand.Read)) == "efeeeefe010000000400000005000100", "MTK DA: READ travels as a 4-byte command frame");
+    Check(LcHex(MtkDaFrame.Ack()) == "efeeeefe010000000400000000000000", "MTK DA: the host ack is a zero u32le inside its own frame");
+    Check(MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeeefe010000000c000000"), out uint declaredLen) && declaredLen == 12,
+        "MTK DA: the declared length is read little-endian (0x0c000000 would be 201 MB)");
+    Check(!MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeeefe0200000004000000"), out _), "MTK DA: a frame whose type is not 1 is not a DA header");
+    Check(!MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeef0e0100000004000000"), out _), "MTK DA: wrong magic is refused");
+    Check(!MtkDaFrame.TryParseHeader(new byte[11], out _), "MTK DA: an 11-byte header is refused");
+    Check(MtkDaFrame.Header(0).Length == MtkDaFrame.HeaderSize && MtkDaFrame.Pack(new byte[4]).Length == 16,
+        "MTK DA: header size 12, and Pack is header + payload");
+
+    byte[] readExtent = MtkOpStruct.Create(0, 0x400);
+    Check(readExtent.Length == 56 &&
+          LcHex(readExtent) == "0100000008000000" + "0000000000000000" + "0004000000000000" + new string('0', 64),
+        "MTK DA: extent struct = region 1, field 8, LE offset, LE length, 32 zero reserved bytes");
+    Check(MtkOpStruct.TryParse(readExtent, out uint extRegion, out uint extField4, out ulong extOffset, out ulong extLength) &&
+          extRegion == 1 && extField4 == 8 && extOffset == 0 && extLength == 0x400, "MTK DA: extent struct round-trips");
+    var tamperedExtent = (byte[])readExtent.Clone(); tamperedExtent[30] = 0xFF;
+    Check(!MtkOpStruct.TryParse(tamperedExtent, out _, out _, out _, out _), "MTK DA: non-zero reserved bytes make an extent struct unparseable");
+    Check(!MtkOpStruct.TryParse(readExtent[..55], out _, out _, out _, out _), "MTK DA: a short extent struct is refused");
+    Check(MtkOpStruct.Create(0ul, 3ul * 1024 * 1024 * 1024).Length == 56,
+        "MTK DA: a 3 GiB extent is representable in the u64 length field — a super partition really is that big");
+    bool zeroExtent = false;
+    try { MtkOpStruct.Create(0x5b280000ul, 0ul); } catch (ArgumentOutOfRangeException) { zeroExtent = true; }
+    Check(zeroExtent, "MTK DA: a zero-length extent is refused — it was never observed and a no-op op would still open the transfer");
+    bool absurdExtent = false;
+    try { MtkOpStruct.Create(0ul, 2ul * 1024 * 1024 * 1024 * 1024); } catch (ArgumentOutOfRangeException) { absurdExtent = true; }
+    Check(absurdExtent, "MTK DA: an extent past the sane width is refused rather than sent as a wrap-around");
+    bool wrappingExtent = false;
+    try { MtkOpStruct.Create(ulong.MaxValue - 100, 4096); } catch (ArgumentOutOfRangeException) { wrappingExtent = true; }
+    Check(wrappingExtent, "MTK DA: an offset+length that wraps the address space is refused");
+    Check(MtkOpStruct.Create(0x1000_0000ul, 0x20ul).Length == 56, "MTK DA: offsets above 4 GiB fit the u64 field (UFS partitions are that big)");
+
+    var limits = MtkLimits.Parse(Convert.FromHexString("0000200000000100"));
+    Check(limits.WriteChunkSize == 0x200000 && limits.TransferPacketSize == 0x10000,
+        "MTK DA: chunk sizes come from the DA itself (2 MiB write chunk, 64 KiB transfer packet)");
+    bool zeroLimitRefused = false;
+    try { MtkLimits.Parse(Convert.FromHexString("0000000000000100")); } catch (MtkDaProtocolException) { zeroLimitRefused = true; }
+    Check(zeroLimitRefused, "MTK DA: a zero write-chunk limit aborts before anything loops on it");
+    bool shortLimitsRefused = false;
+    try { MtkLimits.Parse(new byte[7]); } catch (MtkDaProtocolException) { shortLimitsRefused = true; }
+    Check(shortLimitsRefused, "MTK DA: an undersized limits reply aborts");
+    bool sillyLimitsRefused = false;
+    try { MtkLimits.Parse(Convert.FromHexString("0000000800000100")); } catch (MtkDaProtocolException) { sillyLimitsRefused = true; }
+    Check(sillyLimitsRefused, "MTK DA: a 128 MiB chunk limit is implausible and is refused");
+
+    Check(MtkChecksum.ChunkByteSum(new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 }) == 15, "MTK DA: the write-path word is a plain byte sum, not a CRC");
+    Check(MtkChecksum.ChunkByteSum(Enumerable.Repeat((byte)0xFF, 100).ToArray()) == 25500, "MTK DA: the byte sum keeps counting past 255 instead of wrapping per byte");
+    Check(MtkChecksum.ChunkByteSum(Enumerable.Repeat((byte)0xFF, 66048).ToArray()) == 65024, "MTK DA: the byte sum is truncated to its low 16 bits");
+    Check(MtkChecksum.ChunkByteSum(new byte[] { 0, 1, 2, 3, 4, 5 }, 2, 3) == 9, "MTK DA: a chunk sums only the frame being sent");
+    Check(MtkDaCommand.Read == 0x00010005 && MtkDaCommand.Write == 0x00010004 && MtkDaCommand.Erase == 0x00010003,
+        "MTK DA: read/write/erase ids are the three each capture proved");
+    Check(MtkDaCommand.WriteCommit == 0x00080005 && MtkDaCommand.Preamble == 0x00010009 && MtkDaCommand.Limits == 0x00040007,
+        "MTK DA: commit, preamble and limits ids pinned to the WRITE capture");
+    Check(LcHex(MtkDaCommand.Sync) == "53594e43", "MTK DA: SYNC is ASCII 'SYNC' — the only signal that separates a live DA from a stale one");
+    Check(MtkDaCommand.EraseReportStart == 0x40040004 && MtkDaCommand.EraseReportDone == 0x40040005, "MTK DA: erase report words pinned to the ERASE capture");
+    Check(MtkBrom.GetHwCode == 0xfd && MtkBrom.JumpDa1 == 0xd5 && MtkBrom.SendDa1 == 0xd7 && MtkBrom.WriteReg == 0xd4,
+        "MTK BROM: the four command bytes the boot machine is allowed to replay");
+
+    // ---- B2.3: the boot recipe loader is the fail-closed gate ---------------------------------------
+    string bootFix = Path.Combine(dir, "mtk-boot"); Directory.CreateDirectory(bootFix);
+    byte[] kamakiri = Enumerable.Range(0, 8).Select(i => (byte)i).ToArray();
+    byte[] da1 = Enumerable.Range(0, 8).Select(i => (byte)(0x10 + i)).ToArray();
+    byte[] da2 = { 0xA0, 0xA1, 0xA2, 0xA3 };
+    string Sha256Of(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+    string BlobEntry(string file, byte[] data) =>
+        "{\"file\":\"" + file + "\",\"bytes\":" + data.Length + ",\"sha256\":\"" + Sha256Of(data) + "\"}";
+    string GoodBlobs() => "[" + BlobEntry("kamakiri.bin", kamakiri) + "," + BlobEntry("da1.bin", da1) + "," + BlobEntry("da2.bin", da2) + "]";
+    string Recipe(string brom, string da, string? blobs = null) =>
+        "{\"chipset\":\"MT6765-TEST\",\"hwCode\":\"0x0766\",\"source\":\"regression fixture\",\"note\":\"synthetic\"," +
+        "\"blobs\":" + (blobs ?? GoodBlobs()) + ",\"bromSteps\":" + brom + ",\"daSteps\":" + da + "}";
+    // The recorded BROM walk, shrunk to one example of every step kind the machine has to honour:
+    // echoed commands, a BE status word, a register spray, an unframed payload upload, and the 0xc0 jump ack.
+    string GoodBrom = """
+        [{"t":"tx","hex":"fd"},{"t":"rx","k":"echo","bytes":1},{"t":"rx","k":"token","what":"hw-code","bytes":4},
+         {"t":"tx","hex":"d8"},{"t":"rx","k":"echo","bytes":1},{"t":"rx","k":"len","bytes":6},
+         {"t":"tx","hex":"d4"},{"t":"rx","k":"echo","bytes":1},
+         {"t":"tx","hex":"00201000"},{"t":"rx","k":"echo","bytes":4},
+         {"t":"tx","hex":"00000000"},{"t":"rx","k":"echo","bytes":4},{"t":"rx","k":"zero","bytes":2},
+         {"t":"blob","file":"kamakiri.bin","bytes":8,"chunk":4,"framed":false},
+         {"t":"tx","hex":"d7"},{"t":"rx","k":"echo","bytes":1},
+         {"t":"tx","hex":"00200000"},{"t":"rx","k":"echo","bytes":4},
+         {"t":"tx","hex":"00000008"},{"t":"rx","k":"echo","bytes":4},
+         {"t":"tx","hex":"00000100"},{"t":"rx","k":"echo","bytes":4},{"t":"rx","k":"zero","bytes":2},
+         {"t":"blob","file":"da1.bin","bytes":8,"chunk":4,"framed":false},{"t":"rx","k":"len","bytes":4},
+         {"t":"tx","hex":"d5"},{"t":"rx","k":"echo","bytes":1},
+         {"t":"tx","hex":"00200000"},{"t":"rx","k":"echo","bytes":4},{"t":"rx","k":"zero","bytes":2},
+         {"t":"rx","k":"token","what":"da-alive","bytes":1}]
+        """;
+    // The recorded DA bring-up: host SYNC, the two setup commands and their 20-byte arg, the EMI settings,
+    // the framed DA2 upload, then the DA's own SYNC — the frame that proves it is alive and not a leftover.
+    string GoodDa = """
+        [{"t":"tx","hex":"efeeeefe0100000004000000"},{"t":"tx","hex":"53594e43"},
+         {"t":"tx","hex":"efeeeefe0100000004000000"},{"t":"tx","hex":"00010100"},
+         {"t":"tx","hex":"efeeeefe0100000014000000"},{"t":"tx","hex":"0200000001000000010000000000000000000000"},
+         {"t":"rx","k":"hdr","bytes":12},{"t":"rx","k":"zero","bytes":4},
+         {"t":"tx","hex":"efeeeefe0100000004000000"},{"t":"tx","hex":"0a000100"},
+         {"t":"tx","hex":"efeeeefe0100000004000000"},{"t":"tx","hex":"04000000"},
+         {"t":"tx","hex":"efeeeefe0100000004000000"},
+         {"t":"blob","file":"da2.bin","bytes":4,"chunk":4,"framed":true},
+         {"t":"rx","k":"hdr","bytes":12},{"t":"rx","k":"zero","bytes":4},
+         {"t":"tx","hex":"efeeeefe0100000004000000"},{"t":"tx","hex":"09000100"},
+         {"t":"rx","k":"hdr","bytes":12},{"t":"rx","k":"token","what":"sync","bytes":4}]
+        """;
+    string FixturePath(string name, string json, params (string File, byte[] Data)[] blobs)
+    {
+        string folder = Path.Combine(bootFix, name);
+        Directory.CreateDirectory(folder);
+        foreach (var blob in blobs) File.WriteAllBytes(Path.Combine(folder, blob.File), blob.Data);
+        string path = Path.Combine(folder, name + ".json");
+        File.WriteAllText(path, json);
+        return path;
+    }
+    string LoadFailure(string name, string json, params (string File, byte[] Data)[] blobs)
+    {
+        blobs = blobs.Length == 0 ? new[] { ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2) } : blobs;
+        try { MtkBootProfile.Load(FixturePath(name, json, blobs)); return "(loaded, no refusal)"; }
+        catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+    }
+
+    var goodProfilePath = FixturePath("good", Recipe(GoodBrom, GoodDa),
+        ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2));
+    var bootProfile = MtkBootProfile.Load(goodProfilePath);
+    Check(bootProfile.Chipset == "MT6765-TEST" && bootProfile.HwCode == 0x0766, "MTK recipe: chipset and HW code loaded as recorded");
+    Check(bootProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Tx) == 11 &&
+          bootProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Rx) == 18 &&
+          bootProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Blob) == 2,
+        "MTK recipe: the BROM stage keeps its 11 sends, 18 expected replies and 2 image uploads");
+    Check(bootProfile.DaSteps.Count == 20 && bootProfile.DaSteps.Count(s => s.Expect?.Kind == MtkReplyKind.Sync) == 1,
+        "MTK recipe: the DA stage ends on exactly one SYNC expectation");
+    Check(bootProfile.GetBlob("da1.bin").SequenceEqual(da1) && bootProfile.Blobs.Count == 3,
+        "MTK recipe: blobs come back byte-identical to the hash-pinned registry");
+    Check(MtkBootProfile.FindProfiles(bootFix).Count == 1 &&
+          MtkBootProfile.FindProfiles(Path.Combine(dir, "no-such-folder")).Count == 0,
+        "MTK recipe: profile discovery lists json files and survives a missing directory");
+    Check(MtkBootProfile.DefaultDirectory.EndsWith(Path.Combine("mtk", "boot-profiles")),
+        "MTK recipe: recipes live under mtk/boot-profiles next to the exe");
+    Check(MtkBootProfile.ParseU16("0x0766", "hw") == 0x0766 && MtkBootProfile.ParseU16("0766", "hw") == 0x0766,
+        "MTK recipe: HW code accepts the recorded 0x-prefixed form");
+    bool badU32 = false;
+    try { MtkBootProfile.ParseU32("not-hex", "addr"); } catch (InvalidDataException) { badU32 = true; }
+    Check(badU32, "MTK recipe: a non-hex address is refused instead of becoming 0");
+    bool missingRecipe = false;
+    try { MtkBootProfile.Load(Path.Combine(bootFix, "absent.json")); } catch (FileNotFoundException) { missingRecipe = true; }
+    Check(missingRecipe, "MTK recipe: a recipe file that is not there is an error, not an empty boot");
+
+    Check(LoadFailure("no-hwquery", Recipe(GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"fd\"}", "{\"t\":\"tx\",\"hex\":\"fe\"}"), GoodDa))
+              .Contains("does not open with the HW-code query"),
+        "MTK recipe: a walk that never asks for the HW code cannot prove the device is in BROM — refused");
+    Check(LoadFailure("no-sync", Recipe(GoodBrom, GoodDa.Replace("{\"t\":\"rx\",\"k\":\"token\",\"what\":\"sync\",\"bytes\":4}",
+                                                                  "{\"t\":\"rx\",\"k\":\"zero\",\"bytes\":4}")))
+              .Contains("never waits for the DA's own SYNC"),
+        "MTK recipe: without a SYNC expectation a stale DA in RAM would look like a live one — refused");
+    Check(LoadFailure("bad-reply", Recipe(GoodBrom.Replace("{\"t\":\"rx\",\"k\":\"len\",\"bytes\":6}", "{\"t\":\"rx\",\"k\":\"magic\",\"bytes\":6}"), GoodDa))
+              .Contains("unknown reply kind"), "MTK recipe: an unclassified reply kind is refused");
+    Check(LoadFailure("bad-token", Recipe(GoodBrom.Replace("{\"t\":\"rx\",\"k\":\"token\",\"what\":\"da-alive\",\"bytes\":1}",
+                                                            "{\"t\":\"rx\",\"k\":\"token\",\"what\":\"totally-alive\",\"bytes\":1}"), GoodDa))
+              .Contains("unsupported token"), "MTK recipe: an unknown token is refused");
+    Check(LoadFailure("bad-command", Recipe(GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"d4\"}", "{\"t\":\"tx\",\"hex\":\"c8\"}"), GoodDa))
+              .Contains("never observed on this wire"),
+        "MTK recipe: a BROM command byte that was never seen on the wire is refused (0xC8 is a blocked command on this SoC)");
+    Check(LoadFailure("unframed", Recipe(GoodBrom, """
+        [{"t":"tx","hex":"09000100"},
+         {"t":"blob","file":"da2.bin","bytes":4,"chunk":4,"framed":true},
+         {"t":"rx","k":"hdr","bytes":12},{"t":"rx","k":"token","what":"sync","bytes":4}]
+        """)).Contains("frames a blob upload with no DA header"),
+        "MTK recipe: a framed upload with no declaring header in front of it is refused");
+    Check(LoadFailure("header-lies", Recipe(GoodBrom, """
+        [{"t":"tx","hex":"efeeeefe0100000008000000"},
+         {"t":"blob","file":"da2.bin","bytes":4,"chunk":4,"framed":true},
+         {"t":"rx","k":"hdr","bytes":12},{"t":"rx","k":"token","what":"sync","bytes":4}]
+        """)).Contains("in its header but the recorded image is 4 bytes"),
+        "MTK recipe: a header declaring 8 bytes over a 4-byte image would feed the phone the wrong DA — refused");
+    Check(LoadFailure("unknown-blob", Recipe(GoodBrom.Replace("da1.bin", "da9.bin"), GoodDa))
+              .Contains("which its blob registry does not describe"), "MTK recipe: an upload the registry does not describe is refused");
+    Check(LoadFailure("size-lie", Recipe(GoodBrom.Replace("{\"t\":\"blob\",\"file\":\"da1.bin\",\"bytes\":8", "{\"t\":\"blob\",\"file\":\"da1.bin\",\"bytes\":9"), GoodDa))
+              .Contains("disagrees with itself about the size"), "MTK recipe: a recipe that disagrees with its own registry is refused");
+    Check(LoadFailure("chunk-zero", Recipe(GoodBrom.Replace("{\"t\":\"blob\",\"file\":\"kamakiri.bin\",\"bytes\":8,\"chunk\":4",
+                                                             "{\"t\":\"blob\",\"file\":\"kamakiri.bin\",\"bytes\":8,\"chunk\":0"), GoodDa))
+              .Contains("implausible upload chunk"), "MTK recipe: a zero upload chunk is refused (it would spin the stream loop)");
+    Check(LoadFailure("bad-step", Recipe(GoodBrom.Replace("{\"t\":\"blob\",\"file\":\"kamakiri.bin\"", "{\"t\":\"blorb\",\"file\":\"kamakiri.bin\""), GoodDa))
+              .Contains("unknown step kind"), "MTK recipe: an unknown step kind is refused");
+    Check(LoadFailure("no-field", Recipe(GoodBrom, GoodDa.Replace("{\"t\":\"rx\",\"k\":\"zero\",\"bytes\":4}", "{\"t\":\"rx\",\"k\":\"zero\"}")))
+              .Contains("missing the required numeric field"), "MTK recipe: a reply with no length is refused — the reader would block forever");
+    Check(LoadFailure("bad-hex", Recipe(GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"d8\"}", "{\"t\":\"tx\",\"hex\":\"d8x\"}"), GoodDa))
+              .Contains("malformed hex frame"), "MTK recipe: malformed frame bytes are refused");
+    Check(LoadFailure("empty-da", Recipe(GoodBrom, "[]")).Contains("has no 'daSteps' steps"),
+        "MTK recipe: an empty DA stage is refused instead of 'booted' with nothing loaded");
+    Check(LoadFailure("no-hwcode-field", Recipe(GoodBrom, GoodDa).Replace("\"hwCode\":\"0x0766\",", "")).Contains("missing the required field 'hwCode'"),
+        "MTK recipe: without a recorded HW code the boot has nothing to compare the device against");
+    Check(LoadFailure("short-blob", Recipe(GoodBrom, GoodDa), ("kamakiri.bin", kamakiri), ("da1.bin", da1[..7]), ("da2.bin", da2))
+              .Contains("A truncated DA image bricks phones"), "MTK recipe: a truncated DA image is refused before the port is even opened");
+    Check(LoadFailure("swapped-blob", Recipe(GoodBrom, GoodDa), ("kamakiri.bin", kamakiri), ("da1.bin", da1.Select(b => (byte)(b ^ 1)).ToArray()), ("da2.bin", da2))
+              .Contains("A swapped DA image is not a supported state"), "MTK recipe: a DA image that does not match its recorded sha256 is refused");
+    Check(LoadFailure("missing-blob-file", Recipe(GoodBrom, GoodDa), ("kamakiri.bin", kamakiri), ("da2.bin", da2))
+              .Contains("is not in"), "MTK recipe: a recipe whose image file is absent is refused");
+
+    // ---- B2.3: the boot machine replayed against a scripted device ----------------------------------
+    // Reply order mirrors the recipe: 18 BROM replies then 6 DA replies (three headers and their payloads).
+    string[] recordedReplies =
+    {
+        "fd", "07660000", "d8", "000000e70000", "d4", "00201000", "00000000", "0000",
+        "d7", "00200000", "00000008", "00000100", "0000", "25200000", "d5", "00200000", "0000", "c0",
+        "efeeeefe0100000004000000", "00000000", "efeeeefe0100000004000000", "00000000",
+        "efeeeefe0100000004000000", "53594e43"
+    };
+    var bootLines = new List<string>();
+    var device = new FakeMtkTransport(recordedReplies);
+    var booted = await MtkDaSession.BootAsync(device, bootProfile, bootLines.Add, default, 300, 300, 300);
+    Check(booted.DaIsReady && booted.DeviceHwCode == 0x0766, "MTK boot: the recorded recipe walks BROM to a ready DA with the HW code proven");
+    Check(device.Writes.Count == 29 && device.WrittenBytes == 173,
+        "MTK boot: exactly the recipe's 29 writes / 173 bytes reach the wire — no invented padding, nothing skipped");
+    Check(device.Writes[0].SequenceEqual(new byte[] { 0xfd }), "MTK boot: the first byte sent is the HW-code query, so the face is proven before anything is written");
+    Check(device.Writes[5].SequenceEqual(kamakiri[..4]) && device.Writes[6].SequenceEqual(kamakiri[4..]),
+        "MTK boot: an unframed payload upload is streamed in the recorded chunk size, not one giant write");
+    Check(device.Writes[11].SequenceEqual(da1[..4]) && device.Writes[12].SequenceEqual(da1[4..]),
+        "MTK boot: DA1 is streamed after its size and signature words, as recorded");
+    Check(device.Writes.Count(w => w.Length == 1 && w[0] == 0xd7) == 1 && device.Writes.Count(w => w.SequenceEqual(new byte[] { 0xd5 })) == 1,
+        "MTK boot: DA1 is uploaded once and jumped to once");
+    Check(device.Writes[26].SequenceEqual(da2), "MTK boot: the DA-framed image goes out as its own payload after its header frame");
+    Check(device.Writes[20].SequenceEqual(Convert.FromHexString("0200000001000000010000000000000000000000")),
+        "MTK boot: the 20-byte DA setup argument is sent exactly as recorded");
+    Check(device.Writes[28].SequenceEqual(new byte[] { 0x09, 0x00, 0x01, 0x00 }),
+        "MTK boot: the DA stage closes on the recorded preamble frame (0x00010009)");
+    Check(bootLines.Any(l => l.Contains("DA1 jumped and answered 0xc0")) && bootLines.Any(l => l.Contains("DA SYNC received")),
+        "MTK boot: both success oracles — the 0xc0 ack and the DA's own SYNC — are reported to the operator");
+    Check(bootLines.Any(l => l.Contains("MTK DA ready") && l.Contains("0766")), "MTK boot: the ready line names the chipset and the proven HW code");
+    booted.Dispose();
+    bool notReadyRefused = false;
+    try { booted.WriteCommand(MtkDaCommand.Read); } catch (InvalidOperationException) { notReadyRefused = true; }
+    Check(notReadyRefused, "MTK session: a closed session refuses commands instead of writing into a dead port");
+
+    async Task<string> BootFailure(FakeMtkTransport fake)
+    {
+        try
+        {
+            var session = await MtkDaSession.BootAsync(fake, bootProfile, null, default, 300, 300, 300).ConfigureAwait(false);
+            session.Dispose();
+            return "(booted, no refusal)";
+        }
+        catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+    }
+    var wrongHw = new FakeMtkTransport(recordedReplies) { ReplyOverride = (1, "07670000") };
+    Check((await BootFailure(wrongHw)).Contains("wrong chipset"), "MTK boot: a device reporting MT6768 while the recipe is MT6765 is stopped before the spray");
+    Check(wrongHw.Writes.Count == 1, "MTK boot: the refusal happens on the very first reply, so nothing was written to the wrong SoC");
+    var badEcho = new FakeMtkTransport(recordedReplies) { ReplyOverride = (0, "fe") };
+    Check((await BootFailure(badEcho)).Contains("did not repeat"), "MTK boot: a BROM that does not echo the command byte is not a BROM — stopped");
+    var refusedStatus = new FakeMtkTransport(recordedReplies) { ReplyOverride = (7, "0001") };
+    Check((await BootFailure(refusedStatus)).Contains("recorded boot was accepted"), "MTK boot: a status word that is not zero stops the boot");
+    var noAck = new FakeMtkTransport(recordedReplies) { ReplyOverride = (17, "0000") };
+    Check((await BootFailure(noAck)).Contains("DA1 alive byte"), "MTK boot: without the 0xc0 ack the DA stage is never attempted");
+    var silent = new FakeMtkTransport(recordedReplies[..18]);
+    Check((await BootFailure(silent)).Contains("timed out"), "MTK boot: a device that stops answering is a timeout, not an infinite wait");
+    var fakeSync = new FakeMtkTransport(recordedReplies) { ReplyOverride = (23, "00000000") };
+    Check((await BootFailure(fakeSync)).Contains("tell a live DA from a stale one"), "MTK boot: anything arriving where SYNC was recorded is a refusal");
+    var lyingHeader = new FakeMtkTransport(recordedReplies) { ReplyOverride = (18, "efeeeefe0100000008000000") };
+    Check((await BootFailure(lyingHeader)).Contains("The wire and the recipe disagree"),
+        "MTK boot: a DA header declaring a length the recipe does not expect is refused before the payload is read");
+    var badMagic = new FakeMtkTransport(recordedReplies) { ReplyOverride = (18, "efeeff0e0100000004000000") };
+    Check((await BootFailure(badMagic)).Contains("expected an MTK DA header"), "MTK boot: a non-DA frame where a header was recorded is refused");
+
+    // ==== B3 — the DA command layer on top of the booted session ======================================
+    //
+    // Same scripted device: walk the recorded recipe, then work the DA exactly the way RUN 6 (read), RUN 7 and
+    // RUN 9 (write + erase) and RUN 8 (read-back verify) did. The transfer sizes here are deliberately NOT the
+    // captured 2 MiB / 64 KiB — this fake DA advertises 2048 / 1024, so a chunk or packet size taken from a
+    // constant would pass a capture-sized test and fail right here.
+    const string ZeroWord = "00000000";     // the host ack, and the word before every data frame
+    const string PreFrame = "09000100";     // 0x00010009 preamble
+    const string StorageCmd = "01000400";   // 0x00040001 storage descriptor
+    const string LimitsCmd = "07000400";    // 0x00040007 transfer limits
+    const string ReadCmd = "05000100";      // 0x00010005
+    const string WriteCmd = "04000100";     // 0x00010004
+    const string EraseCmd = "03000100";     // 0x00010003
+    const string CommitCmd = "05000800";    // 0x00080005
+    string DaFrame(string payloadHex)
+    {
+        var len = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(len, (uint)(payloadHex.Length / 2));
+        return "efeeeefe01000000" + Convert.ToHexString(len).ToLowerInvariant() + payloadHex;
+    }
+    string Filler(byte value, int bytes) => string.Concat(Enumerable.Repeat(value.ToString("x2"), bytes));
+    string TruncFrame(string payload) => payload.Length > 32 ? payload[..32] + "…(" + payload.Length / 2 + " B)" : payload;
+    string ExtentStruct(ulong offset, ulong length)
+    {
+        var b = new byte[56];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, 1);                        // eMMC user area
+        BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(4), 8);              // the constant every observed struct carries
+        BinaryPrimitives.WriteUInt64LittleEndian(b.AsSpan(8), offset);
+        BinaryPrimitives.WriteUInt64LittleEndian(b.AsSpan(16), length);
+        return Convert.ToHexString(b).ToLowerInvariant();
+    }
+    string DescriptorPayload(ulong userBytes, uint blockBytes = 512)
+    {
+        var d = new byte[104];
+        BinaryPrimitives.WriteUInt32LittleEndian(d, 1);                        // "EMMC"
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(4), blockBytes);     // 0x200 on the capture
+        BinaryPrimitives.WriteUInt64LittleEndian(d.AsSpan(8), 0x400000);       // boot1
+        BinaryPrimitives.WriteUInt64LittleEndian(d.AsSpan(16), 0x400000);      // boot2
+        BinaryPrimitives.WriteUInt64LittleEndian(d.AsSpan(24), 0x400000);      // RPMB
+        BinaryPrimitives.WriteUInt64LittleEndian(d.AsSpan(64), userBytes);     // user area (0xE8F800000 on the capture)
+        // +72 is the eMMC CID. Left zero on purpose: chip identity does not belong in a test fixture.
+        return Convert.ToHexString(d).ToLowerInvariant();
+    }
+    string Status = DaFrame(ZeroWord);
+    string LimitsReply = DaFrame("00080000" + "00040000");           // chunk 2048 B, transfer packet 1024 B
+    string StorageReply = DaFrame(DescriptorPayload(0xE8F800000ul));
+    ulong LogoAt = 0x5b280000;                                       // the measured byte offset of logo
+    const ulong LogoLen = 0x1000;                                    // 8 blocks: small enough to check frame by frame
+    string LogoStruct = ExtentStruct(LogoAt, LogoLen);
+    IEnumerable<string> StorageQuery() => new[] { Status, Status, StorageReply, Status };
+    IEnumerable<string> LimitsQuery() => new[] { Status, Status, LimitsReply, Status };
+    IEnumerable<string> ReadGroup(params string[] dataPayloads)
+    {
+        // READ accept, extent accepted, the second status both captures put before the first frame, then
+        // data + status per frame with nothing trailing.
+        var replies = new List<string> { Status, Status, Status };
+        foreach (string payload in dataPayloads) { replies.Add(DaFrame(payload)); replies.Add(Status); }
+        return replies;
+    }
+    async Task<(MtkDaSession Session, FakeMtkTransport Device)> BootedDa(List<string>? log, IEnumerable<string> deviceReplies)
+    {
+        var fake = new FakeMtkTransport(recordedReplies);
+        fake.Append(deviceReplies);
+        Action<string>? sink = log == null ? null : new Action<string>(log.Add);
+        var bootedSession = await MtkDaSession.BootAsync(fake, bootProfile, sink, default, 300, 300, 300).ConfigureAwait(false);
+        return (bootedSession, fake);
+    }
+    async Task<string> DaFailure(MtkDaSession daSession, Func<Task> operation)
+    {
+        try { await operation(); return "(succeeded, no refusal)"; }
+        catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+    }
+    List<string> SentFrames(FakeMtkTransport d, int since)
+    {
+        var all = new MemoryStream();
+        for (int i = since; i < d.Writes.Count; i++) all.Write(d.Writes[i], 0, d.Writes[i].Length);
+        byte[] wire = all.ToArray();
+        var frames = new List<string>();
+        int p = 0;
+        while (p < wire.Length)
+        {
+            if (!MtkDaFrame.TryParseHeader(wire.AsSpan(p, Math.Min(MtkDaFrame.HeaderSize, wire.Length - p)), out uint declared) ||
+                p + MtkDaFrame.HeaderSize + (int)declared > wire.Length)
+                throw new Exception("MTK B3: the bytes this session sent are not a clean run of DA frames (offset " + p + " of " + wire.Length + ").");
+            frames.Add(Convert.ToHexString(wire, p + MtkDaFrame.HeaderSize, (int)declared).ToLowerInvariant());
+            p += MtkDaFrame.HeaderSize + (int)declared;
+        }
+        return frames;
+    }
+    void CheckFrames(List<string> sent, string label, params string[] expected)
+    {
+        string? detail;
+        if (sent.Count != expected.Length) detail = "sent " + sent.Count + " frame(s): " + string.Join(" | ", sent.Select(TruncFrame));
+        else
+        {
+            detail = null;
+            for (int i = 0; i < expected.Length; i++)
+                if (sent[i] != expected[i]) { detail = "frame " + i + " is " + TruncFrame(sent[i]) + ", expected " + TruncFrame(expected[i]); break; }
+        }
+        Check(detail == null, label + (detail == null ? " — byte-exact against the capture order" : " — " + detail));
+    }
+
+    // The test's own struct math has to agree with the product's and with the capture, or every golden below
+    // is just a restatement of the code under test.
+    Check(LogoStruct == "0100000008000000" + "0000285b00000000" + "0010000000000000" + new string('0', 64),
+        "MTK B3: the logo extent is region 1 + field 8 + LE u64 offset 0x5b280000 + LE u64 length, 32 reserved zero bytes");
+
+    // The descriptor carries the one number that turns an LBA into a byte offset, so its refusals are checked
+    // at the codec as well: a truncated or implausible reply must never become a device geometry.
+    byte[] goodDescriptor = Convert.FromHexString(DescriptorPayload(0xE8F800000ul));
+    var decoded = MtkStorageInfo.Parse(goodDescriptor);
+    Check(decoded.StorageType == 1 && decoded.Boot1Size == 0x400000 && decoded.RpmbSize == 0x400000 &&
+          decoded.GeneralPurpose1 == 0 && decoded.UserAreaSize == 62537072640ul && decoded.Describe.Contains("58 GiB"),
+        "MTK B3: the descriptor's areas decode in the only slot order that reproduces the working client's print block");
+    bool shortDescriptor = false;
+    try { MtkStorageInfo.Parse(goodDescriptor[..103]); } catch (MtkDaProtocolException) { shortDescriptor = true; }
+    Check(shortDescriptor, "MTK B3: a 103-byte descriptor is refused instead of reading past its end for the user size");
+    bool oddBlock = false;
+    try { MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(0xE8F800000ul, 600))); } catch (MtkDaProtocolException) { oddBlock = true; }
+    Check(oddBlock, "MTK B3: a block size that is not a 512..65536 power of two is refused — every extent maths is derived from it");
+    bool tinyArea = false;
+    try { MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(128))); } catch (MtkDaProtocolException) { tinyArea = true; }
+    Check(tinyArea, "MTK B3: a user area smaller than one block is refused rather than accepted as a device with no storage");
+    var logoFromLba = new MtkDaExtent("logo", 2987008, 2989055, 512);
+    Check(logoFromLba.ByteOffset == LogoAt && logoFromLba.ByteLength == 0x100000,
+        "MTK B3: LBA × the DA's own block size gives byte 0x5b280000 + 1 MiB — the exact extent the write capture used");
+    var probeTable = new MtkDaPartitionTable(512, new[] { logoFromLba });
+    Check(probeTable.TryFind("Logo", out MtkDaExtent probed) && probed.LastLba == 2989055 && !probeTable.TryFind("bootlog", out _),
+        "MTK B3: a partition table matches names case-insensitively and says no to a name it does not hold");
+
+    // ---- B3.1: the two queries the command layer is built on ---------------------------------------
+    var qLines = new List<string>();
+    var (qSes, qDev) = await BootedDa(qLines, LimitsQuery().Concat(StorageQuery()));
+    int afterBoot = qDev.Writes.Count;
+    var limitsQ = await qSes.QueryLimitsAsync(default);
+    var storageQ = await qSes.QueryStorageAsync(default);
+    Check(limitsQ.WriteChunkSize == 2048 && limitsQ.TransferPacketSize == 1024,
+        "MTK B3: chunk and packet sizes come from the DA's own 0x40007 answer, never from what one phone reported");
+    Check(storageQ.BlockSize == 512 && storageQ.UserAreaSize == 0xE8F800000ul && storageQ.IsEmmcUserAddressed,
+        "MTK B3: the 104-byte descriptor decodes into the block size and user area every extent is measured against");
+    CheckFrames(SentFrames(qDev, afterBoot), "MTK B3: each query is the recorded 0x10009 preamble then the command id",
+        PreFrame, LimitsCmd, PreFrame, StorageCmd);
+    int afterQueries = qDev.Writes.Count;
+    Check(ReferenceEquals(await qSes.QueryLimitsAsync(default), limitsQ) && ReferenceEquals(await qSes.QueryStorageAsync(default), storageQ) &&
+          qDev.Writes.Count == afterQueries,
+        "MTK B3: both queries are cached, so the rest of the session costs the port nothing and the DA is not asked twice");
+    Check(qLines.Any(l => l.Contains("DA limits: write chunk 0x800, transfer 0x400")),
+        "MTK B3: the sizes the device advertised are shown to the operator before anything is transferred");
+    var (descSes, descDev) = await BootedDa(null, new[] { Status, Status, DaFrame(DescriptorPayload(0xE8F800000ul)[..206]), Status });
+    Check((await DaFailure(descSes, () => descSes.QueryStorageAsync(default)))
+              .Contains("must be 104 bytes"),
+        "MTK B3: a 103-byte descriptor is refused — extents cannot be addressed from a truncated reply");
+    Check(descSes.Storage == null, "MTK B3: nothing is cached from a refused descriptor, so the next operation cannot run on a half-read geometry");
+    CheckFrames(SentFrames(descDev, 29), "MTK B3: the descriptor query is the recorded preamble + 0x40001 pair", PreFrame, StorageCmd);
+    descSes.Dispose();
+
+    // ---- B3.2: READ is frame-driven ------------------------------------------------------------------
+    var rLines = new List<string>();
+    var (rSes, rDev) = await BootedDa(rLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(Filler(0xA0, 1024), Filler(0xA1, 1024), Filler(0xA2, 1024), Filler(0xA3, 1024))));
+    int readStart = rDev.Writes.Count;
+    var readPercents = new List<int>();
+    byte[] logoDump = await rSes.ReadExtentAsync(LogoAt, LogoLen, readPercents.Add);
+    Check(logoDump.Length == 0x1000 && logoDump[0] == 0xA0 && logoDump[1023] == 0xA0 && logoDump[1024] == 0xA1 && logoDump[4095] == 0xA3,
+        "MTK B3 READ: the four frames are concatenated in arrival order, so a 128-frame dump reassembles byte-exactly");
+    CheckFrames(SentFrames(rDev, readStart), "MTK B3 READ: preamble+limits, READ, the 56-byte extent, then exactly one ack per data frame",
+        PreFrame, StorageCmd, PreFrame, LimitsCmd, ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
+    Check(readPercents.SequenceEqual(new[] { 25, 50, 75, 100 }),
+        "MTK B3 READ: progress advances per frame rather than per byte, so a long read shows real movement instead of stuttering");
+    Check(rLines.Any(l => l.Contains("READ 0x5b280000 + 0x1000 — 4096 byte(s) in 4 frame(s)")),
+        "MTK B3 READ: the operator is told the byte count and the frame count that produced it");
+    int afterRead = rDev.Writes.Count;
+    rDev.Append(ReadGroup(Filler(0x5A, 1024), Filler(0x5A, 1024), Filler(0x5A, 1024), Filler(0x5A, 1024)));
+    byte[] secondRead = await rSes.ReadExtentAsync(LogoAt, LogoLen);
+    Check(secondRead.All(b => b == 0x5A), "MTK B3 READ: a second extent on the same session reads the device, not the previous answer");
+    CheckFrames(SentFrames(rDev, afterRead), "MTK B3 READ: a repeat read sends no preamble and no queries — the cable was touched once",
+        ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
+    rSes.Dispose();
+
+    async Task<(string Error, List<string> Frames)> OperationRefusal(string label, IEnumerable<string> replies, Func<MtkDaSession, Task> operation, string expectedInMessage)
+    {
+        var (ses, dev) = await BootedDa(null, replies);
+        int since = dev.Writes.Count;
+        string error = await DaFailure(ses, () => operation(ses));
+        Check(error.Contains(expectedInMessage), label + (error.Contains(expectedInMessage) ? "" : " — got: " + error));
+        return (error, SentFrames(dev, since));
+    }
+
+    // ---- B3.3: WRITE (0x10004 + per-chunk words + 0x80005) and the read-back that proves it ----------
+    var wLines = new List<string>();
+    byte[] writeImage = Enumerable.Repeat((byte)0x01, 2048).Concat(Enumerable.Repeat((byte)0x02, 2048)).ToArray();
+    IEnumerable<string> WriteReplies(params string[] verifyFrames) => StorageQuery().Concat(LimitsQuery())
+        .Concat(new[] { Status, Status, Status, Status, Status, Status, Status, Status })
+        .Concat(ReadGroup(verifyFrames));
+    var (wSes, wDev) = await BootedDa(wLines, WriteReplies(Filler(0x01, 1024), Filler(0x01, 1024), Filler(0x02, 1024), Filler(0x02, 1024)));
+    int writeStart = wDev.Writes.Count;
+    var writePercents = new List<int>();
+    await wSes.WriteExtentAsync(LogoAt, writeImage, writePercents.Add);
+    List<string> writtenFrames = SentFrames(wDev, writeStart);
+    CheckFrames(writtenFrames, "MTK B3 WRITE: queries, WRITE+extent, (0, byte-sum, chunk) per chunk, commit preamble + 0x80005, then the verify read",
+        PreFrame, StorageCmd, PreFrame, LimitsCmd, WriteCmd, LogoStruct,
+        ZeroWord, "00080000", Filler(0x01, 2048), ZeroWord, "00100000", Filler(0x02, 2048),
+        PreFrame, CommitCmd, ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
+    Check(writtenFrames[8].Length / 2 == 2048 && writtenFrames[11].Length / 2 == 2048,
+        "MTK B3 WRITE: the data frames are the DA's own 2048-byte chunk, so a 4096-byte image is two chunks and not one guess");
+    Check(writtenFrames[7] == "00080000" && writtenFrames[10] == "00100000",
+        "MTK B3 WRITE: each frame is preceded by the byte sum of exactly that chunk (2048, then 4096) — the whole image would be 6144 and the DA would reject the second chunk");
+    Check(writePercents.Count == 6 && writePercents[1] == 100 && writePercents[5] == 100,
+        "MTK B3 WRITE: progress covers the write and then the verify pass, both ending at 100");
+    Check(wLines.Any(l => l.Contains("committed")) && wLines.Any(l => l.Contains("VERIFY OK")),
+        "MTK B3 WRITE: success is reported as committed-then-verified, never as a status word alone");
+    int afterWrite = wDev.Writes.Count;
+    wDev.Append(Enumerable.Repeat(Status, 8));   // accept, extent, chunk 1, chunk 2, final, commit preamble, commit, commit close
+    await wSes.WriteExtentAsync(LogoAt, writeImage, null, verify: false);
+    CheckFrames(SentFrames(wDev, afterWrite), "MTK B3 WRITE: verify:false sends the identical write and stops at the commit — the read-back is the only difference",
+        WriteCmd, LogoStruct, ZeroWord, "00080000", Filler(0x01, 2048), ZeroWord, "00100000", Filler(0x02, 2048), PreFrame, CommitCmd);
+    wSes.Dispose();
+
+    var (badVSes, badVDev) = await BootedDa(null, WriteReplies(Filler(0x01, 1024), Filler(0x01, 1024),
+        "ff" + Filler(0x02, 1023), Filler(0x02, 1023)));
+    string verifyFailure = await DaFailure(badVSes, () => badVSes.WriteExtentAsync(LogoAt, writeImage));
+    Check(verifyFailure.Contains("MtkDataVerifyException") && verifyFailure.Contains("Verify failed at byte 2048"),
+        "MTK B3 VERIFY: a flipped byte at the head of the second chunk is named by offset, not reported as a flash success");
+    Check(verifyFailure.Contains("real corruption"), "MTK B3 VERIFY: the operator is told the DA accepted the write and the bytes are still wrong");
+    List<string> verifyFailFrames = SentFrames(badVDev, 29);
+    Check(verifyFailFrames.Contains(CommitCmd) && verifyFailFrames.Contains(ReadCmd),
+        "MTK B3 VERIFY: the refusal lands after the commit, on the read-back — the write itself went exactly as measured");
+    badVSes.Dispose();
+
+    var (nvSes, nvDev) = await BootedDa(null, Array.Empty<string>());
+    Check((await DaFailure(nvSes, () => nvSes.WriteExtentAsync(LogoAt, Array.Empty<byte>())))
+              .Contains("zero-length write"), "MTK B3 WRITE: an empty image is refused before the port is opened for it");
+    string shortImage = Path.Combine(dir, "short-logo.bin");
+    File.WriteAllBytes(shortImage, writeImage);
+    Check((await DaFailure(nvSes, () => nvSes.WriteExtentFromFileAsync(LogoAt, shortImage, 5000)))
+              .Contains("from a file that is 4096 long"),
+        "MTK B3 WRITE: asking for more bytes than the image holds is refused up front, not padded into the next partition");
+    Check((await DaFailure(nvSes, () => nvSes.WriteExtentFromFileAsync(LogoAt, Path.Combine(dir, "no-such-image.bin"))))
+              .Contains("Write image is missing"), "MTK B3 WRITE: a missing image is a named file, not a protocol timeout");
+    Check(SentFrames(nvDev, 29).Count == 0,
+        "MTK B3 WRITE: all three image refusals happened on the host — the DA was never even asked for its geometry");
+    nvSes.Dispose();
+
+    // The file paths are the ones the UI will actually use: a partition dump goes to disk, and a scatter-sized
+    // image is streamed from a file rather than allocated.
+    var fLines = new List<string>();
+    var (fSes, fDev) = await BootedDa(fLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(Filler(0xA0, 1024), Filler(0xA1, 1024), Filler(0xA2, 1024), Filler(0xA3, 1024)))
+        .Concat(Enumerable.Repeat(Status, 8))
+        .Concat(ReadGroup(Filler(0x01, 1024), Filler(0x01, 1024), Filler(0x02, 1024), Filler(0x02, 1024))));
+    string dumpPath = Path.Combine(dir, "logo-dump.bin");
+    var dumpPercents = new List<int>();
+    int fileReadStart = fDev.Writes.Count;
+    await fSes.ReadExtentToFileAsync(LogoAt, LogoLen, dumpPath, dumpPercents.Add);
+    Check(new FileInfo(dumpPath).Length == 0x1000 && File.ReadAllBytes(dumpPath)[1024] == 0xA1,
+        "MTK B3 READ: a partition dump lands on disk complete and in the DA's own frame order");
+    Check(dumpPercents.SequenceEqual(new[] { 25, 50, 75, 100 }),
+        "MTK B3 READ: a file-backed read reports progress from the wire, so the UI bar means real bytes on disk");
+    Check(Directory.GetFiles(dir, "logo-dump.bin.*.part").Length == 0,
+        "MTK B3 READ: the scratch name is moved away once the extent is complete — no half-dump is left beside the real one");
+    CheckFrames(SentFrames(fDev, fileReadStart), "MTK B3 READ: dumping to a file sends the same frames as dumping to memory",
+        PreFrame, StorageCmd, PreFrame, LimitsCmd, ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
+
+    // The image is streamed from the file rather than allocated, which is what lets a scatter-sized super be
+    // written without turning it into an out-of-memory crash mid-flash.
+    int fileWriteStart = fDev.Writes.Count;
+    await fSes.WriteExtentFromFileAsync(LogoAt, shortImage, writeImage.Length);
+    CheckFrames(SentFrames(fDev, fileWriteStart), "MTK B3 WRITE: a file-sourced image puts the identical chunk frames on the wire as a buffer write, queries and all",
+        WriteCmd, LogoStruct, ZeroWord, "00080000", Filler(0x01, 2048), ZeroWord, "00100000", Filler(0x02, 2048),
+        PreFrame, CommitCmd, ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
+    Check(fLines.Any(l => l.Contains("VERIFY OK")) && fLines.Any(l => l.Contains("committed")),
+        "MTK B3 WRITE: the file path verifies exactly like the buffer path — the read-back is not skipped because the image came off disk");
+    fSes.Dispose();
+
+    // A dump that dies halfway must leave nothing behind: a short logo dump on a bench is how a bad restore starts.
+    var (halfSes, halfDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(Filler(0xA0, 1024))));
+    string halfPath = Path.Combine(dir, "half-dump.bin");
+    Check((await DaFailure(halfSes, () => halfSes.ReadExtentToFileAsync(LogoAt, LogoLen, halfPath)))
+              .Contains("timed out"), "MTK B3 READ: a DA that stops mid-extent is a timeout, not a short file");
+    Check(!File.Exists(halfPath) && Directory.GetFiles(dir, "half-dump.bin.*").Length == 0,
+        "MTK B3 READ: an interrupted dump leaves no destination and no partial file — the operator never restores from a quarter of a partition");
+    halfSes.Dispose();
+
+    // ---- B3.4: ERASE (0x10003) goes bare and answers with report words -------------------------------
+    var eLines = new List<string>();
+    var (eSes, eDev) = await BootedDa(eLines, StorageQuery().Concat(new[]
+    { Status, Status, DaFrame("04000440"), DaFrame("64000000"), DaFrame("05000440") }));
+    await eSes.EraseExtentAsync(LogoAt, LogoLen);
+    CheckFrames(SentFrames(eDev, 29), "MTK B3 ERASE: the extent goes bare — no preamble, no limits query — and one ack sits between the percent word and the end marker",
+        PreFrame, StorageCmd, EraseCmd, LogoStruct, ZeroWord);
+    Check(!SentFrames(eDev, 29).Contains(LimitsCmd),
+        "MTK B3 ERASE: the measured cycle never asked for transfer limits, so nothing was guessed into the group");
+    Check(eLines.Any(l => l.Contains("the DA reported completion (3 word(s)")) &&
+          eLines.Any(l => l.Contains("without proving zeroes")),
+        "MTK B3 ERASE: completion is reported as the DA's own words, with the honest caveat that an accepted erase is not measured zeros");
+    var (e2Ses, e2Dev) = await BootedDa(null, StorageQuery().Concat(new[]
+    { Status, Status, DaFrame("04000440"), DaFrame("64000000"), DaFrame("32000000"), DaFrame("05000440") }));
+    await e2Ses.EraseExtentAsync(LogoAt, LogoLen);
+    Check(SentFrames(e2Dev, 29).Count(f => f == ZeroWord) == 1,
+        "MTK B3 ERASE: two progress words, one ack — the measured position, because guessing extra acks could interleave into the next command");
+    var (e3Ses, e3Dev) = await BootedDa(null, StorageQuery().Concat(new[]
+    { Status, Status, DaFrame("04000440"), DaFrame("00f00000") }));
+    string eraseRefusal = await DaFailure(e3Ses, () => e3Ses.EraseExtentAsync(LogoAt, LogoLen));
+    Check(eraseRefusal.Contains("unexpected report word 0x0000f000"),
+        "MTK B3 ERASE: a report word outside the four measured shapes stops the loop instead of being reinterpreted mid-erase");
+    CheckFrames(SentFrames(e3Dev, 29), "MTK B3 ERASE: the refusal happens before any ack, so nothing was invented on the wire",
+        PreFrame, StorageCmd, EraseCmd, LogoStruct);
+    eSes.Dispose(); e2Ses.Dispose(); e3Ses.Dispose();
+
+    // ---- B3.5: the live GPT, read once and cached ----------------------------------------------------
+    byte[] liveHeader = GptHeader(2, 3, 128);
+    var liveEntries = new byte[512];
+    GptEntry("logo", 2987008, 2989055).CopyTo(liveEntries, 0);        // 2987008 * 512 = 0x5b280000, the measured extent
+    GptEntry("tee1", 34, 2081).CopyTo(liveEntries, 128);
+    GptEntry("flashinfo", 6, 33).CopyTo(liveEntries, 256);
+    var gLines = new List<string>();
+    var (gSes, gDev) = await BootedDa(gLines, StorageQuery()
+        .Concat(LimitsQuery()).Concat(ReadGroup(LcHex(liveHeader)))
+        .Concat(ReadGroup(LcHex(liveEntries))));
+    int gptStart = gDev.Writes.Count;
+    MtkDaPartitionTable table = await gSes.ReadPartitionTableAsync();
+    Check(table.Extents.Count == 3 && table.BlockSize == 512,
+        "MTK B3 GPT: the device's own table parses into its three partitions, in the DA's reported block size");
+    CheckFrames(SentFrames(gDev, gptStart), "MTK B3 GPT: header at LBA 1, entries at the header's own EntryLba, one ack each, and the queries are not repeated between the two reads",
+        PreFrame, StorageCmd, PreFrame, LimitsCmd, ReadCmd, ExtentStruct(512, 512), ZeroWord,
+        ReadCmd, ExtentStruct(1024, 512), ZeroWord);
+    Check(gLines.Any(l => l.Contains("Live GPT: 3 partition(s), block 512 B")), "MTK B3 GPT: the table is announced once, which is what a live session is for");
+    MtkDaExtent logoExtent = await gSes.RequirePartitionAsync("logo", default);
+    Check(logoExtent.ByteOffset == LogoAt && logoExtent.ByteLength == 0x100000 && logoExtent.SectorCount == 2048,
+        "MTK B3 GPT: LBA 2987008 resolves to byte 0x5b280000 + 1 MiB — the exact extent the write capture used");
+    Check(logoExtent.Describe.Contains("0x5b280000") && logoExtent.Describe.Contains("1 MiB"),
+        "MTK B3 GPT: an extent prints in the units the DA addresses, so the operator can check it against a scatter file");
+    Check(gSes.Partitions.TryFind("LOGO", out MtkDaExtent anyCase) && anyCase.FirstLba == 2987008,
+        "MTK B3 GPT: partition names are matched the way the scatter path matches them, case-insensitively");
+    int afterGpt = gDev.Writes.Count;
+    Check((await DaFailure(gSes, () => gSes.RequirePartitionAsync("nope", default))).Contains("has no partition named 'nope'"),
+        "MTK B3 GPT: a name the device does not have is refused by name, with the entry count that proves it was checked");
+    Check((await DaFailure(gSes, () => gSes.ErasePartitionAsync("flashinfo", default)))
+              .Contains("never erased through a live session"),
+        "MTK B3 GPT: flashinfo is table/identity — the same list the scatter path refuses, enforced before the erase is framed");
+    Check((await DaFailure(gSes, () => gSes.WritePartitionAsync("flashinfo", shortImage, null, true, default)))
+              .Contains("never written through a live session"),
+        "MTK B3 GPT: a name on the never-program list is refused for writes too, even when the device really has that partition");
+    string tooBigImage = Path.Combine(dir, "too-big.bin");
+    File.WriteAllBytes(tooBigImage, new byte[1024 * 1024 + 512]);
+    Check((await DaFailure(gSes, () => gSes.WritePartitionAsync("logo", tooBigImage, null, true, default)))
+              .Contains("would run into the next partition"),
+        "MTK B3 WRITE: an image one block longer than the live partition is refused — an overrun silently rewrites its neighbour");
+    Check(gDev.Writes.Count == afterGpt,
+        "MTK B3 GPT: all four refusals were table- and size-based, so the cached table cost the port nothing");
+    gSes.Dispose();
+
+    // ---- B3.6: the guards that must fire before the extent reaches the device ------------------------
+    var (oSes, oDev) = await BootedDa(null, StorageQuery());
+    int oStart = oDev.Writes.Count;
+    Check((await DaFailure(oSes, () => oSes.WriteExtentAsync(LogoAt, new byte[1000])))
+              .Contains("Length 0x3e8 is not a multiple of the device block size 512"),
+        "MTK B3 WRITE: an extent that is not whole blocks is refused instead of being silently rounded by the device");
+    Check(!SentFrames(oDev, oStart).Contains(WriteCmd), "MTK B3 WRITE: the refusal happens on the extent check, so no WRITE command was ever framed");
+    oSes.Dispose();
+    var (aSes, aDev) = await BootedDa(null, StorageQuery());
+    int aStart = aDev.Writes.Count;
+    Check((await DaFailure(aSes, () => aSes.ReadExtentAsync(LogoAt + 1, LogoLen)))
+              .Contains("is not a multiple of the device block size 512"),
+        "MTK B3 READ: an offset inside a block is refused — the DA addresses blocks, and a rounded read would dump the wrong partition");
+    Check(!SentFrames(aDev, aStart).Contains(ReadCmd), "MTK B3 READ: the alignment refusal sent no READ command, only the descriptor query it needed to check");
+    aSes.Dispose();
+    var (cSes, cDev) = await BootedDa(null, StorageQuery());
+    Check((await DaFailure(cSes, () => cSes.ReadExtentAsync(0xE8F800000ul - 512, 1024)))
+              .Contains("runs past the end of the user area"),
+        "MTK B3: an extent that crosses the user area the DA reported is refused — past it are hardware partitions");
+    cSes.Dispose();
+    var (zSes, zDev) = await BootedDa(null, Array.Empty<string>());
+    Check((await DaFailure(zSes, () => zSes.ReadExtentAsync(LogoAt, 0))).Contains("zero-length extent"),
+        "MTK B3: a zero-length extent was never observed, so it is refused instead of opening a transfer that reads forever");
+    Check((await DaFailure(zSes, () => zSes.ReadExtentAsync(0, 128 * 1024 * 1024))).Contains("does not belong in memory"),
+        "MTK B3: a 128 MiB read asks for a file, not a buffer — a partition dump must not become an allocation");
+    Check(SentFrames(zDev, 29).Count == 0, "MTK B3: both refusals happened before a single frame went to the device");
+    zSes.Dispose();
+    Check((await DaFailure(zSes, () => zSes.ReadExtentAsync(LogoAt, LogoLen))).Contains("The DA is not ready"),
+        "MTK B3: a disposed session sends nothing, whatever the UI asks it to do");
+
+    // ---- B3.7: a DA that disagrees mid-extent --------------------------------------------------------
+    var (_, x1Frames) = await OperationRefusal(
+        "MTK B3 READ: a frame bigger than the transfer size the DA itself advertised is desynchronisation, and is stopped before it is acked",
+        StorageQuery().Concat(LimitsQuery()).Concat(ReadGroup(Filler(0x77, 2048))),
+        s => s.ReadExtentAsync(LogoAt, LogoLen), "above the DA's own advertised transfer size");
+    Check(!x1Frames.Contains(ZeroWord), "MTK B3 READ: the oversized frame is refused before its ack, so the device is not told to continue");
+    var (_, x2Frames) = await OperationRefusal(
+        "MTK B3 READ: the device over-delivering past the extent is refused, not appended to a dump that is already complete",
+        StorageQuery().Concat(LimitsQuery()).Concat(ReadGroup(Filler(0x77, 8192))),
+        s => s.ReadExtentAsync(LogoAt, LogoLen), "only 4096 remain of the requested extent");
+    Check(!x2Frames.Contains(ZeroWord), "MTK B3 READ: an over-long frame is refused before its ack too");
+    await OperationRefusal(
+        "MTK B3 READ: an empty frame with bytes still outstanding is a refusal, not a zero-filled hole in a partition dump",
+        StorageQuery().Concat(LimitsQuery()).Concat(ReadGroup("")),
+        s => s.ReadExtentAsync(LogoAt, LogoLen), "carries no data");
+    await OperationRefusal(
+        "MTK B3 READ: a DA that accepts the command and then says nothing is a timeout, not an infinite wait",
+        StorageQuery().Concat(LimitsQuery()).Concat(new[] { Status, Status }),
+        s => s.ReadExtentAsync(LogoAt, LogoLen), "timed out");
+    var (_, x5Frames) = await OperationRefusal(
+        "MTK B3 READ: a non-zero status on the READ command stops the operation immediately",
+        StorageQuery().Concat(LimitsQuery()).Concat(new[] { DaFrame("01000000"), Status, Status }),
+        s => s.ReadExtentAsync(LogoAt, LogoLen), "the DA refused (status");
+    Check(x5Frames.Count == 5 && x5Frames[4] == ReadCmd,
+        "MTK B3 READ: a refused READ stops right after the command frame — the 56-byte extent never goes out");
+    var (_, x6Frames) = await OperationRefusal(
+        "MTK B3 ERASE: a refused erase stops on the command status, before the extent struct is ever framed",
+        StorageQuery().Concat(new[] { DaFrame("01000000") }),
+        s => s.EraseExtentAsync(LogoAt, LogoLen), "the DA refused");
+    Check(x6Frames.Count == 3 && x6Frames[2] == EraseCmd && !x6Frames.Contains(LogoStruct),
+        "MTK B3 ERASE: nothing that could wipe a partition was framed after the refusal");
+
+    // ---- B3.8: one port, one operation ---------------------------------------------------------------
+    var (mSes, mDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(Filler(0xA0, 1024), Filler(0xA1, 1024), Filler(0xA2, 1024), Filler(0xA3, 1024))));
+    mDev.HoldBack = 1;   // the status after the last ack has not arrived, so this read is really mid-flight
+    var firstOp = mSes.ReadExtentAsync(LogoAt, LogoLen);
+    bool busyRefused = false;
+    string busyMessage = "";
+    try { await mSes.ReadExtentAsync(LogoAt, LogoLen); }
+    catch (InvalidOperationException ex) { busyRefused = true; busyMessage = ex.Message; }
+    Check(busyRefused && busyMessage.Contains("read 0x5b280000"),
+        "MTK B3: a second extent while a read is in flight is refused by name — two writers on one COM port would interleave frames into both");
+    Check(SentFrames(mDev, 29).Count(f => f == ReadCmd) == 1,
+        "MTK B3: the refused operation framed nothing at all, so the DA is still mid-way through the first read");
+    mDev.HoldBack = 0;
+    Check((await firstOp).Length == 0x1000, "MTK B3: the read that was already in flight completed untouched once its status arrived");
+    mSes.Dispose();
+
     Console.WriteLine($"{passed} regression checks passed.");
+
+
 }
 finally { Directory.Delete(dir, recursive: true); }
 
@@ -1101,4 +1878,69 @@ internal sealed class SyncProgress<T> : IProgress<T>
 {
     public List<T> V { get; } = new();
     public void Report(T value) { lock (V) V.Add(value); }
+}
+
+/// <summary>
+/// A scripted MTK device for the boot-recipe replay and the B3 command layer: it answers with the recorded
+/// reply frames in order and records every byte the session sends. Overriding one reply is how the boot's
+/// fail-closed paths (wrong HW code, refused status, missing SYNC) get exercised without a phone, and
+/// <see cref="Append"/> scripts what the DA answers after the boot — which is the only honest way to test
+/// either half, because on real hardware each of those mistakes is a brick instead of an assertion.
+/// </summary>
+internal sealed class FakeMtkTransport : IMtkTransport
+{
+    private readonly List<string> _replies;
+    private readonly Queue<byte[]> _staged = new();
+    private int _next;
+
+    public List<byte[]> Writes { get; } = new();
+    public long WrittenBytes { get; private set; }
+
+    /// <summary>Replace one reply (by index) with different bytes, to simulate a device that disagrees.</summary>
+    public (int Index, string Hex)? ReplyOverride { get; set; }
+
+    /// <summary>How many of the scripted replies to keep back, so an operation can be left mid-flight on purpose.</summary>
+    public int HoldBack { get; set; }
+
+    public FakeMtkTransport(string[] replies) => _replies = replies.ToList();
+
+    /// <summary>Script what the device answers next, once the boot has consumed its recorded replies.</summary>
+    public void Append(IEnumerable<string> more) => _replies.AddRange(more);
+
+    public string Description => "FAKE-COM";
+
+    private void StageNext()
+    {
+        // HoldBack withholds the tail of the script, which is how a test keeps one operation genuinely in
+        // flight: this transport answers instantly, so without it every "async" call finishes synchronously.
+        if (_staged.Count > 0 || _next >= _replies.Count - HoldBack) return;
+        string hex = _replies[_next];
+        if (ReplyOverride is { } over && over.Index == _next) hex = over.Hex;
+        _next++;
+        _staged.Enqueue(Convert.FromHexString(hex));
+    }
+
+    public int BytesAvailable
+    {
+        get { StageNext(); return _staged.Count == 0 ? 0 : _staged.Peek().Length; }
+    }
+
+    public int Read(byte[] buffer, int offset, int count)
+    {
+        StageNext();
+        if (_staged.Count == 0) return 0;
+        byte[] head = _staged.Dequeue();
+        int take = Math.Min(count, head.Length);
+        Array.Copy(head, 0, buffer, offset, take);
+        if (take < head.Length) _staged.Enqueue(head[take..]);
+        return take;
+    }
+
+    public void Write(byte[] data, int offset, int count)
+    {
+        Writes.Add(data.AsSpan(offset, count).ToArray());
+        WrittenBytes += count;
+    }
+
+    public void Dispose() { /* nothing to release; the recorder keeps what it caught */ }
 }

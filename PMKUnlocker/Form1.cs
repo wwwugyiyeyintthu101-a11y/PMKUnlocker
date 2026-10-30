@@ -6789,6 +6789,8 @@ namespace PMKUnlocker
                 lbChip.ForeColor = Color.LightGreen;
                 Log("[OK] " + tag + " auto-detect: " + lbChip.Text, Color.LightGreen);
                 WarnUnknownModel(mdl);
+                // MTK SoC token ကို DA catalog နဲ့ ချိတ် — Read Info/Detect ကနေ BROM မတိုင်ခင် loader သိထားအောင်
+                NoteMediaTekChipFromAdb(soc, "");
             }
             else
             {
@@ -7302,6 +7304,8 @@ namespace PMKUnlocker
                     LogPair("MIUI / Build     : ", (string.IsNullOrWhiteSpace(miuiVer) ? "-" : miuiVer) + "  " + incremental, lbl, sysCol);
                 LogPair("Build ID / Type  : ", buildId + " (" + buildType + ")", lbl, sysCol);
                 LogPair("SoC / CPU Arch   : ", soc + " / " + cpuAbi, lbl, sysCol);
+                // MTK ဆို ဒီ SoC token ကနေ DA catalog ကို ကြိုတင် ချိတ် — BROM session မှာ CPU: မဖတ်ရတော့ဘူး
+                NoteMediaTekChipFromAdb(soc, board);
                 LogPair("Region / Locale  : ", (string.IsNullOrWhiteSpace(region) ? "-" : region) + " / " + (string.IsNullOrWhiteSpace(locale) ? "-" : locale), lbl, sysCol);
                 LogPair("RAM              : ", string.IsNullOrWhiteSpace(ram) ? "-" : ram, lbl, hwCol);
                 LogPair("Storage /data    : ", string.IsNullOrWhiteSpace(storage) ? "-" : storage, lbl, hwCol);

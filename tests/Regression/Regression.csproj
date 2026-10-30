@@ -8,6 +8,13 @@
   <ItemGroup>
     <Compile Include="../../PMKUnlocker/MediaTek/MtkClientProtocol.cs" Link="MediaTek/MtkClientProtocol.cs" />
     <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCatalog.cs" Link="MediaTek/MtkDaCatalog.cs" />
+    <!-- Native MTK DA session (Phase 1.75 Path B). The wire codecs, recipe loader, boot machine and the B3
+         read/write/erase command layer are hardware-free assertable; MtkDaTransport.cs is NOT linked here
+         because it drags System.IO.Ports and System.Management into a net8.0 console test. -->
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkWire.cs" Link="MediaTek/MtkWire.cs" />
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkBootProfile.cs" Link="MediaTek/MtkBootProfile.cs" />
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaSession.cs" Link="MediaTek/MtkDaSession.cs" />
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCommands.cs" Link="MediaTek/MtkDaCommands.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
