@@ -31,6 +31,8 @@ public partial class Form1
     private Button btnNativeBoot, btnNativeClose, btnNativeGeometry, btnNativeDump, btnNativeRestore, btnNativeErase;
     // B4 UI wiring — the same session surfaced on the INFO tab (Boot/Eject + badge) and the FLASH grid (per-partition actions)
     private Button btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject;
+    // B5.2 — the seccfg lock STATE, read over the live session (read-only: no measured unlock payload)
+    private Button btnInfoNativeSeccfg;
     private Label lblNativeBadge;
     private DataGridViewButtonColumn colNativeRead, colNativeWrite, colNativeErase;
     private bool nativeBusy;
@@ -204,6 +206,14 @@ public partial class Form1
 
         TabPage infoTab = mtkModes.TabPages[0];
         Panel grpNativeInfo = CreateGroupPanel("BOOT DEVICE (NATIVE)", UiX(0), UiY(2), 3, btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject);
+
+        // B5.2 — the seccfg lock STATE, read over the live session. Its own group on the next row: the LIVE badge
+        // already owns the right-hand columns of the BOOT DEVICE row, and a fourth button there would sit under it.
+        btnInfoNativeSeccfg = Create3DButton("🔐 Seccfg State", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
+        btnInfoNativeSeccfg.Click += async (_, _) => await NativeGuarded("seccfg state", NativeSeccfgStateAsync);
+        if (toolTipMain != null)
+            Tip(btnInfoNativeSeccfg, "READ the seccfg config block head over the live session (the extent the device's own GPT names seccfg) and print the bootloader lock state: 0x00 = LOCKED, 0x03 = UNLOCKED, anything else shown raw. Read-only by construction — no WRITE or ERASE frame is sent, and the unlock payload has never been measured, so this tool does not lock or unlock through a DA session.");
+        Panel grpSeccfgInfo = CreateGroupPanel("SECCFG (NATIVE)", UiX(0), UiY(4), 1, btnInfoNativeSeccfg);
         lblNativeBadge = new Label
         {
             Location = new Point(UiX(0) + 332, UiY(2) + 34),
@@ -216,6 +226,7 @@ public partial class Form1
         if (toolTipMain != null)
             Tip(lblNativeBadge, "Live native DA session state. While it reads LIVE, the mtkclient operations (FLASH, Unlock, Backup) are refused — Eject Device first; two clients on one BROM corrupt both sessions.");
         infoTab.Controls.Add(grpNativeInfo);
+        infoTab.Controls.Add(grpSeccfgInfo);
         infoTab.Controls.Add(lblNativeBadge);
     }
 
@@ -402,6 +413,7 @@ public partial class Form1
             btnInfoNativeBoot.Enabled = !booted && !nativeBusy;
             btnInfoNativeReboot.Enabled = booted && !nativeBusy;
             btnInfoNativeEject.Enabled = booted && !nativeBusy;
+            btnInfoNativeSeccfg.Enabled = booted && !nativeBusy;
         }
         SetNativeBadge(booted);
         SetNativeGridActionLook();
@@ -557,6 +569,28 @@ public partial class Form1
         RequireNativeSession();
         await nativeDa.RebootAsync(nativeCancel.Token).ConfigureAwait(false);
         nativeCloseRequested = true;
+    }
+
+    /// <summary>
+    /// The read-only seccfg state query. The session logs the decoded block itself; what is added here is the
+    /// operator's verdict in the tool's own words, and the honest limit under it: this reads a state, it does
+    /// not change one. Locking and unlocking stay unimplemented because no unlock payload has ever been
+    /// captured — the RUN 48 unit answered "Device is already unlocked" and sent nothing to write.
+    /// </summary>
+    private async Task NativeSeccfgStateAsync()
+    {
+        RequireNativeSession();
+        MtkSeccfgConfig config = await nativeDa.ReadSeccfgConfigAsync(nativeCancel.Token).ConfigureAwait(false);
+        if (config.IsUnlocked)
+            NativeSay("[OK] Native DA: bootloader lock state = UNLOCKED (seccfg v" + config.Version + ", state word 0x" +
+                config.LockState.ToString("x8") + ").");
+        else
+            NativeSay("[!] Native DA: bootloader lock state = " + config.LockStateName + " (seccfg v" + config.Version +
+                ", state word 0x" + config.LockState.ToString("x8") + ")." +
+                (config.LockState == MtkSeccfg.StateLocked ? "" : " — an unexpected value, so it is shown raw rather than named."));
+        if (!config.MarkerExpected)
+            NativeSay("[!] Native DA: the block's second marker is '" + config.Marker + "', not the measured 'EEEE' — the state is printed as decoded, but this is not the config layout this tool was built against.");
+        NativeSay("[*] Native DA: that is a read of the state only. This tool does not lock or unlock seccfg over a DA session — the unlock payload has never been measured, and a guessed one silently changes a lock policy instead of failing.");
     }
 
     private void NativeClose()

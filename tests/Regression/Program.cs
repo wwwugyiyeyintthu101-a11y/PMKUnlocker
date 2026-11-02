@@ -2629,6 +2629,181 @@ try
     Check(!rb2Ses.DaIsReady, "MTK B3 RESET: the silent run spends the session too — the stub was written, whatever the reply said");
     rb2Ses.Dispose();
 
+    // ---- B5.1: the seccfg wire, measured from the RUN 48 oracle session -------------------------------
+    // RUN 48 ran "da seccfg unlock;reset" on the already-unlocked Redmi 9A, so the oracle sent the STATE half
+    // and nothing of the unlock write (stdout: "Device is already unlocked"). The state half is recorded here,
+    // byte for byte, straight from the oracle's own TX lines — every one of them is the 0x10005 read our RUN 6/8
+    // fixtures already proved, over extents seccfg actually asks for (all 16 measured structs equal
+    // MtkOpStruct.Create(offset, length) exactly):
+    //   0x0+0x400 config block, 0x200+0x400, then 512-byte probes stepping offset 0x400→0x1800 at len 0x200,
+    //   a full 0x0+0x4200 config read, and 0x46800000+0x800000 — an 8 MiB extent the DA served in
+    //   128 x 0x10000 frames.
+    // The GPT pass explains the low-offset reads (that 0x0+0x4200 read answers all zeros), and the hwtype check
+    // that runs beside them is the DA-extension register protocol, now measured on both directions:
+    //   register WRITE = 09000100 (preamble) / status / 04000f00 (0x000F0004) / status /
+    //                    20a00010 (the register address 0x1000a020 as a 4-byte LE frame) / <value LE> / two status
+    //                    — the oracle prints "TX: 0x1000a020 -> 0x0" beside it;
+    //   register READ  = the same preamble + 02000f00 (0x000F0002), then the address frame (50a00010 = 0x1000a050)
+    //                    and a count frame (01000000), answered by a 4-byte data frame (67bb2b97) and a status —
+    //                    "RX: 0x1000a050 -> 0x972bbb67".
+    // Registers 0x1000a020..0x1000a03c are written zero, 0x1000a004 = 2, 0x1000a008 is polled (0x1, 0x2, 0x80008000,
+    // 0xc0008000) and 0x1000a050.. return hashes. That is the DA-side HACC/AES verify chain, which a read-only state
+    // query does not need — B5.2 reads the config block through the proven 0x10005 path and touches no register.
+    // (An earlier pass read 20a00010 as a 0x10008 upload argument; the fuller walk of lines 22176–27760 shows it is
+    // the register-address frame of a 0x000F0004 write. Corrected here so the ledger matches the capture.)
+    // The unlock WRITE half is not measured — this unit was unlocked, so no unlock bytes exist to transcribe;
+    // it stays unimplemented until a locked unit is captured. Never guess an id.
+    string cfgStruct = ExtentStruct(0x0, 0x400);
+    Check(cfgStruct == "0100000008000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "MTK B5 SECCFG: the config-block struct our codec builds is byte-identical to the RUN 48 oracle's first read frame — region 1, field 8, u64 offset, u64 length");
+    Check(ExtentStruct(0x600, 0x200) == "0100000008000000000600000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "MTK B5 SECCFG: a mid-sweep probe frame matches the oracle byte for byte - the struct layout survives offsets the GPT never uses");
+    Check(ExtentStruct(0x0, 0x4200) == "0100000008000000000000000000000000420000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "MTK B5 SECCFG: the full-config read (0x0 + 0x4200) is byte-exact - the oracle reads the config block whole, not by sector");
+    Check(ExtentStruct(0x46800000, 0x800000) == "0100000008000000000080460000000000008000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "MTK B5 SECCFG: the 8-MiB seccfg config extent (0x46800000 + 0x800000) is expressible and byte-exact - the read the 128-frame loop served");
+
+    var scLines = new List<string>();
+    var (scSes, scDev) = await BootedDa(scLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(Filler(0x77, 0x400))));
+    int scStart = scDev.Writes.Count;
+    byte[] cfgBlock = await scSes.ReadExtentAsync(0x0, 0x400);
+    CheckFrames(SentFrames(scDev, scStart), "MTK B5 SECCFG: reading the config block goes out as the measured oracle shape — geometry, limits, 0x10005, the 0x0+0x400 struct, one ack per frame",
+        PreFrame, StorageCmd, PreFrame, LimitsCmd, ReadCmd, cfgStruct, ZeroWord);
+    Check(cfgBlock.Length == 0x400 && cfgBlock.All(b => b == 0x77),
+        "MTK B5 SECCFG: the config block comes back whole — the same frame-driven reader that dumped logo serves a seccfg extent");
+    scSes.Dispose();
+
+    // ---- B5.2: the config block decodes into a lock state, and only into that -------------------------
+    // The 64 bytes below are RUN 48's own answer, verbatim: the head of the first 0x10000 frame of the
+    // 0x46800000 + 0x800000 read (stdout line 19621), printed beside the oracle's two verdicts —
+    // "Detected V4 Lockstate" and "Device is already unlocked". Nothing in this block is reconstructed; the
+    // zero runs and the one other non-zero word are the capture's own, and the sha256 pins all 1024 bytes.
+    const string SeccfgMeasuredHead =
+        "4d4d4d4d040000003c00000003000000000000000000000045454545ace82370" +
+        "da27d32c6c068424b679a2239ba49310dc43f62bf5d171e6e1d1361200000000";
+    string SeccfgMeasuredBlock = SeccfgMeasuredHead + Filler(0, 0x1C0) + "9079092200000001" + Filler(0, 0x1F8);
+    Check(SeccfgMeasuredBlock.Length == 0x400 * 2,
+        "MTK B5.2: the fixture block is the measured 0x400 the oracle asked for, assembled from the capture's own runs");
+    byte[] seccfgBlockBytes = Convert.FromHexString(SeccfgMeasuredBlock);
+    Check(Sha256Of(seccfgBlockBytes) ==
+              "de5596b4cea5987939e256717f2dadd55047a7cac11a97eb812f67c573f2ae4c",
+        "MTK B5.2: the config block fixture hashes to the RUN 48 capture — a hand-edited lock-state test would test nothing, so the hash is the gate");
+    Check(MtkSeccfg.HeadReadLength(512) == 0x400 && MtkSeccfg.HeadReadLength(1024) == 0x400 &&
+              MtkSeccfg.HeadReadLength(4096) == 0x1000 && MtkSeccfg.HeadReadLength(2048) % 2048 == 0,
+        "MTK B5.2: the head the DA is asked for is the measured 0x400 rounded up to whole blocks — the session refuses a length that is not, so this is the only shape that can be sent");
+
+    MtkSeccfgConfig cfgUnlocked = MtkSeccfg.Parse(seccfgBlockBytes, 0x46800000, 0x400);
+    Check(cfgUnlocked.Version == 4 && cfgUnlocked.HeaderField == 0x3C && cfgUnlocked.Checksum == 0x7023E8ACu &&
+              cfgUnlocked.Marker == "EEEE" && cfgUnlocked.MarkerExpected,
+        "MTK B5.2: the measured block decodes to v4, header 0x3c, checksum 0x7023e8ac and the EEEE marker — the words the oracle printed its own verdicts beside");
+    Check(cfgUnlocked.LockState == 3 && cfgUnlocked.IsUnlocked && cfgUnlocked.LockStateName == "UNLOCKED",
+        "MTK B5.2: state 0x03 is UNLOCKED — the same unit the oracle called \"Device is already unlocked\"");
+    Check(cfgUnlocked.Describe.Contains("UNLOCKED") && cfgUnlocked.Describe.Contains("v4") &&
+              cfgUnlocked.Describe.Contains("0x46800000") && cfgUnlocked.Describe.Contains("checksum 0x7023e8ac"),
+        "MTK B5.2: the line the operator sees names the version, the extent it was read from and the state — the numbers a scatter or a capture can be checked against");
+    Check(!cfgUnlocked.Describe.Contains("da27d32c") && !cfgUnlocked.Describe.Contains("45454545") &&
+              !cfgUnlocked.Describe.Contains("4d4d4d4d"),
+        "MTK B5.2: no raw block bytes reach Describe — the 28 bytes at +0x20 are bound to this phone, and this product keeps device identity out of its records and its logs");
+
+    string cfgLocked = SeccfgMeasuredHead[..24] + "00000000" + SeccfgMeasuredHead[32..];
+    Check(MtkSeccfg.Parse(Convert.FromHexString(cfgLocked)).LockStateName == "LOCKED" &&
+              !MtkSeccfg.Parse(Convert.FromHexString(cfgLocked)).IsUnlocked,
+        "MTK B5.2: the same block with the state word at 0x00 reads LOCKED — the tool's prior empirical rule, applied in both directions");
+    string cfgOddState = SeccfgMeasuredHead[..24] + "02000000" + SeccfgMeasuredHead[32..];
+    Check(MtkSeccfg.Parse(Convert.FromHexString(cfgOddState)).LockStateName == "unknown (raw 0x00000002)",
+        "MTK B5.2: a state word this decoder has no measured meaning for is reported as its raw number, not renamed to a guess");
+    Check(MtkSeccfg.Parse(Convert.FromHexString(SeccfgMeasuredHead)).ReadLength == 0 &&
+              MtkSeccfg.Parse(Convert.FromHexString("4d4d4d4d040000003c00000003000000" + new string('0', 2048 - 32))).LockState == 3,
+        "MTK B5.2: only the first 0x20 bytes are decoded, so a head read of any whole-block length parses — and an unattributed read stays out of the record");
+    string SeccfgDecodeError(Func<MtkSeccfgConfig> decode)
+    {
+        try { decode(); return "(parsed, so nothing was refused)"; }
+        catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+    }
+    Check(SeccfgDecodeError(() => MtkSeccfg.Parse(new byte[0x1F])).Contains("shorter than 0x20"),
+        "MTK B5.2: a block that does not reach the state word is refused instead of reporting a state it never read");
+    string cfgNoMagic = "4d4d4d4e" + SeccfgMeasuredHead[8..];
+    Check(SeccfgDecodeError(() => MtkSeccfg.Parse(Convert.FromHexString(cfgNoMagic))).Contains("magic mismatch") &&
+              SeccfgDecodeError(() => MtkSeccfg.Parse(Convert.FromHexString(cfgNoMagic))).Contains("4d4d4d4e"),
+        "MTK B5.2: a block whose magic is not MMMM is refused with the bytes it actually started with — a wrong extent is not a lock state");
+    Check(SeccfgDecodeError(() => MtkSeccfg.Parse(new byte[0x20])).Contains("00000000") &&
+              SeccfgDecodeError(() => MtkSeccfg.Parse(new byte[0x20])).Contains("magic mismatch"),
+        "MTK B5.2: an all-zero block is refused as a magic mismatch rather than read as LOCKED — a zeroed extent and a locked bootloader must never print the same word");
+    string headLengthError = "(no refusal)";
+    try { MtkSeccfg.HeadReadLength(0); } catch (Exception ex) { headLengthError = ex.GetType().Name + ": " + ex.Message; }
+    Check(headLengthError.Contains("zero block size"),
+        "MTK B5.2: a descriptor that reports a zero block size cannot size a head read, and is refused instead of dividing by it");
+
+    // The live-session half: the same read on a device whose own GPT names seccfg, and the refusals around it.
+    // The table is built through the harness's own GPT helpers, so the extent under test is the device's own
+    // first/last LBA pair — 2310144..2326527, which is what printgpt listed for seccfg on this unit.
+    (byte[] Header, byte[] Entries) SeccfgTable(params (string Name, long First, long Last)[] parts)
+    {
+        byte[] header = GptHeader(2, parts.Length, 128);
+        byte[] entries = new byte[((parts.Length * 128 + 511) / 512) * 512];   // whole blocks, as the session reads them
+        for (int i = 0; i < parts.Length; i++)
+            GptEntry(parts[i].Name, parts[i].First, parts[i].Last).CopyTo(entries, i * 128);
+        return (header, entries);
+    }
+    var (scTab, scEnt) = SeccfgTable(("logo", 2987008, 2989055), ("seccfg", 2310144, 2326527));
+    var stLines = new List<string>();
+    var (stSes, stDev) = await BootedDa(stLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(scTab))).Concat(ReadGroup(LcHex(scEnt))));
+    MtkDaExtent scExtent = await stSes.RequirePartitionAsync("seccfg", default);
+    Check(scExtent.ByteOffset == 0x46800000 && scExtent.ByteLength == 0x800000,
+        "MTK B5.2: LBA 2310144 resolves to byte 0x46800000 + 0x800000 — the extent printgpt listed and the oracle read, derived from the device's own table");
+    int stStart = stDev.Writes.Count;
+    stDev.Append(ReadGroup(SeccfgMeasuredBlock));
+    MtkSeccfgConfig liveCfg = await stSes.ReadSeccfgConfigAsync();
+    CheckFrames(SentFrames(stDev, stStart),
+        "MTK B5.2: the state query is one proven READ over the config head — table, geometry and limits are all cached, so the cable carries nothing else",
+        ReadCmd, ExtentStruct(0x46800000, 0x400), ZeroWord);
+    Check(!SentFrames(stDev, stStart).Contains(WriteCmd) && !SentFrames(stDev, stStart).Contains(EraseCmd) &&
+              !SentFrames(stDev, stStart).Contains(UploadCmd) && !SentFrames(stDev, stStart).Contains(CommitCmd),
+        "MTK B5.2: reading the state sends no WRITE, no ERASE and no upload frame — this path cannot change a lock policy, whatever a button called seccfg might suggest");
+    Check(liveCfg.LockState == 3 && liveCfg.ReadOffset == 0x46800000 && liveCfg.ReadLength == 0x400,
+        "MTK B5.2: the decoded state carries the extent it was read from, so the record says where the number came from");
+    Check(stLines.Any(l => l.Contains("seccfg:") && l.Contains("UNLOCKED")),
+        "MTK B5.2: the session logs the verdict once, on the same line that names the partition and the block");
+    stSes.Dispose();
+    Check((await DaFailure(stSes, () => stSes.ReadSeccfgConfigAsync())).Contains("The DA is not ready"),
+        "MTK B5.2: a closed session reads no seccfg either — the same spent-session rule every other command obeys");
+
+    var (noTab, noEnt) = SeccfgTable(("logo", 2987008, 2989055));
+    var (onlySes, onlyDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(noTab))).Concat(ReadGroup(LcHex(noEnt))));
+    await onlySes.ReadPartitionTableAsync();   // the table is what the name check needs — pay for it once, up front
+    int onlyStart = onlyDev.Writes.Count;
+    Check((await DaFailure(onlySes, () => onlySes.ReadSeccfgConfigAsync())).Contains("has no partition named 'seccfg'"),
+        "MTK B5.2: a device whose own table has no seccfg is refused by name, with the entry count that proves the table was read");
+    Check(SentFrames(onlyDev, onlyStart).Count == 0,
+        "MTK B5.2: with the table cached, the name refusal costs the port not one frame — a refusal is a decision, not a transaction");
+    onlySes.Dispose();
+
+    var (tinyTab, tinyEnt) = SeccfgTable(("seccfg", 2310144, 2310144));   // one block: no room for the config block
+    var (tnSes, tnDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(tinyTab))).Concat(ReadGroup(LcHex(tinyEnt))));
+    await tnSes.ReadPartitionTableAsync();
+    int tnStart = tnDev.Writes.Count;
+    Check((await DaFailure(tnSes, () => tnSes.ReadSeccfgConfigAsync())).Contains("under the 1024 byte(s)"),
+        "MTK B5.2: a seccfg partition smaller than the config block is refused rather than read short — a truncated head is a layout this decoder has not seen");
+    Check(SentFrames(tnDev, tnStart).Count == 0,
+        "MTK B5.2: the too-small refusal sent no frame at all, so the device was never asked for bytes it does not have");
+    tnSes.Dispose();
+
+    // A DA that answers the head with something else is refused by the decoder, not reinterpreted.
+    var (badTab, badEnt) = SeccfgTable(("seccfg", 2310144, 2326527));
+    var (badSes, badDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(badTab))).Concat(ReadGroup(LcHex(badEnt))).Concat(ReadGroup(Filler(0x11, 0x400))));
+    await badSes.ReadPartitionTableAsync();
+    int badStart = badDev.Writes.Count;
+    Check((await DaFailure(badSes, () => badSes.ReadSeccfgConfigAsync())).Contains("magic mismatch"),
+        "MTK B5.2: a device that hands back a block without the MMMM magic is answered with a refusal naming the bytes — the state is not guessed from noise");
+    Check(SentFrames(badDev, badStart).Contains(ReadCmd),
+        "MTK B5.2: the bad-magic refusal happens after the read the device was entitled to serve — the read went out, the interpretation stopped");
+    badSes.Dispose();
+
     // ---- B3.5: the live GPT, read once and cached ----------------------------------------------------
     byte[] liveHeader = GptHeader(2, 3, 128);
     var liveEntries = new byte[512];

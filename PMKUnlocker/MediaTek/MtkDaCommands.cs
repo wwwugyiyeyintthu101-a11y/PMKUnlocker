@@ -13,6 +13,8 @@ namespace PMKUnlocker.MediaTek;
 //   WRITE  — RUN 7 and RUN 9 (byte-identical; RUN 8 proved the written bytes landed)
 //   ERASE  — RUN 9 (accepted, "Successfully formatted", partition restored from the same boot)
 //   REBOOT — RUN 48 (bare 0x10008 upload of a 56-byte TOPRGU watchdog stub to 0x4fff0000; the phone resets itself)
+//   SECCFG — RUN 48's state half (B5.2): the same 0x10005 READ over the head of the extent the live GPT names
+//            seccfg, decoded by <see cref="MtkSeccfg"/>. Read-only — see the note on that method.
 // Frame-accurate transcripts: %TEMP%\mtk-da-spike\capture\{logoverify-read,logo-write,erase3}-frames.txt
 // and the write-up in capture\framing-spec.md. CLEAN ROOM: mtkclient is GPL-3.0 and no source of it was
 // read for this file — the record is the bytes that a working client put on the wire and the log lines it
@@ -552,6 +554,41 @@ internal sealed partial class MtkDaSession
         GuardProgramName(name, "erased");
         Say("[*] " + extent.Describe);
         await EraseExtentAsync(extent.ByteOffset, extent.ByteLength, ct).ConfigureAwait(false);
+    }
+
+    // ---- seccfg: the lock state, read-only ------------------------------------------------------------
+
+    /// <summary>
+    /// Read the seccfg config block head and decode the bootloader lock state. This is the RUN 48 state half
+    /// replayed on our own proven reader: the oracle's seccfg reads are all plain 0x10005 READs over raw
+    /// offsets (B5.1 pinned every one of the 16 measured structs against <see cref="MtkOpStruct.Create"/>),
+    /// and the config block it got back starts at the head of the extent the device's own GPT names
+    /// <c>seccfg</c> — so there is no new wire knowledge in here, only a name resolved through the live table
+    /// and the proven read path. The extent head is read instead of the whole partition because a 8 MiB
+    /// config dump is not a state word and would go to a file, not to the screen.
+    ///
+    /// READ-ONLY BY CONSTRUCTION: nothing here frames a WRITE, an ERASE or a register poke. The unlock half
+    /// of the oracle's flow was never measured — RUN 48 ran on a unit that answered "Device is already
+    /// unlocked" and sent no unlock payload — so locking and unlocking stay unimplemented until a locked
+    /// unit is captured. Guessing that payload does not fail loudly; it changes a lock policy.
+    /// </summary>
+    internal async Task<MtkSeccfgConfig> ReadSeccfgConfigAsync(CancellationToken ct = default)
+    {
+        RequireReady();
+        // Resolved before the read so the GPT is still the only thing cached here, and so a device without a
+        // seccfg partition is refused by name before the port carries a data request.
+        MtkDaExtent seccfg = await RequirePartitionAsync(MtkSeccfg.PartitionName, ct).ConfigureAwait(false);
+        uint block = (await QueryStorageAsync(ct).ConfigureAwait(false)).BlockSize;
+        uint headLength = MtkSeccfg.HeadReadLength(block);
+        if (headLength > seccfg.ByteLength)
+            throw new InvalidOperationException("seccfg is " + seccfg.ByteLength + " byte(s) on this device, under the " +
+                headLength + " byte(s) the config block needs at its block size of " + block + ". A head that does not " +
+                "fit is not a seccfg layout this decoder knows, so the state is not being claimed.");
+        Say("[*] " + seccfg.Describe + " — reading the config block head (0x" + headLength.ToString("x") + " B)...");
+        byte[] head = await ReadExtentToBufferAsync(seccfg.ByteOffset, headLength, ct).ConfigureAwait(false);
+        MtkSeccfgConfig config = MtkSeccfg.Parse(head, seccfg.ByteOffset, headLength);
+        Say("[+] seccfg: " + config.Describe);
+        return config;
     }
 
     /// <summary>
