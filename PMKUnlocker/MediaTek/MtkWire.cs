@@ -426,3 +426,46 @@ internal static class MtkChecksum
 
     internal static uint ChunkByteSum(ReadOnlySpan<byte> data) => ChunkByteSum(data, 0, data.Length);
 }
+
+/// <summary>
+/// The DA-extension reboot, byte for byte as RUN 48 measured it (2026-11-02, Redmi 9A / MT6765): a bare
+/// 0x10008 upload — no 0x10009 preamble, no limits query — whose payload is a 56-byte ARM stub written to
+/// 0x4fff0000, the same scratch address the boot recipe's DA-extension upload already used. The stub is
+/// the TOPRGU watchdog reset: r0 = 0x10007000 (TOPRGU base), the WDT_MODE key 0x22000024 stored twice
+/// around a 0xfffff-cycle delay, then WDT_SWRST 0x1209 stored at [r0,#0x14], DSB, spin — and nothing in
+/// it addresses memory outside the watchdog block. Provenance:
+/// capture\r48-reboot-20261102-143959.pcap.mtk.out.txt lines 27753-27771 (the TX bytes) and the
+/// extraction in tools\r48-extract.py. CLEAN ROOM: observed wire bytes, not mtkclient sources.
+/// </summary>
+internal static class MtkDaReset
+{
+    /// <summary>The scratch address the measured reset wrote its stub to.</summary>
+    internal const uint ExtBase = 0x4FFF0000;
+
+    /// <summary>
+    /// The 56 bytes that went on the wire (sha256 1a99a3f095fc93fe32ba1929491606867c397e8035e4874f957869f87f285d13),
+    /// decoded: E3070000/E3410000 r0 = 0x10007000 · E3001024/E3421200 r1 = 0x22000024 (the WDT_MODE key) ·
+    /// E3012209 r2 = 0x1209 (WDT_SWRST) · E5801000 STR r1,[r0] · E30F3FFF/E340300F/E2533001/1AFFFFFD r3
+    /// counted down from 0xFFFFF (the settle delay) · E5801000 again · E5802014 STR r2,[r0,#0x14] — the
+    /// reset itself · F57FF04F DSB · EAFFFFFB B . (spin).
+    /// </summary>
+    internal static readonly byte[] ToprguStub =
+    {
+        0x00, 0x00, 0x07, 0xE3, 0x00, 0x00, 0x41, 0xE3, 0x24, 0x10, 0x00, 0xE3, 0x00, 0x12, 0x42, 0xE3,
+        0x09, 0x22, 0x01, 0xE3, 0x00, 0x10, 0x80, 0xE5, 0xFF, 0x3F, 0x0F, 0xE3, 0x0F, 0x30, 0x40, 0xE3,
+        0x01, 0x30, 0x53, 0xE2, 0xFD, 0xFF, 0xFF, 0x1A, 0x00, 0x10, 0x80, 0xE5, 0x14, 0x20, 0x80, 0xE5,
+        0x4F, 0xF0, 0x7F, 0xF5, 0xFB, 0xFF, 0xFF, 0xEA
+    };
+
+    /// <summary>
+    /// The 16-byte argument frame the measured run sent after the 0x10008 accept: u32le address, a zero
+    /// word, u32le length, a zero word — the same {u64 addr, u64 len} shape the boot's ext upload carried.
+    /// </summary>
+    internal static byte[] UploadArgs(uint address, uint length)
+    {
+        var b = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, address);
+        BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(8), length);
+        return b;
+    }
+}

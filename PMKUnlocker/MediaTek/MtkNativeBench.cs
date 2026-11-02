@@ -592,9 +592,25 @@ internal static class MtkNativeBench
     }
 
     /// <summary>
-    /// The dump destination: a fresh timestamped file inside the native folder, verified to still be inside it
-    /// after the path is resolved. A dump that could be pointed at a system path is not a dump, it is a write.
+    /// Whether a dump file was read from a partition, judged by the filename token the dumper itself minted
+    /// (SafePartitionToken + timestamp). A grid write may reuse a session dump only when the name proves it —
+    /// writing an image of unknown origin to a live extent is not a restore, it is a gamble.
     /// </summary>
+    internal static bool DumpMatchesPartition(string dumpPath, string partitionName)
+    {
+        if (string.IsNullOrWhiteSpace(dumpPath) || string.IsNullOrWhiteSpace(partitionName)) return false;
+        try
+        {
+            string token = SafePartitionToken(partitionName);
+            return Path.GetFileNameWithoutExtension(dumpPath)
+                .StartsWith(token + "-", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    /// <summary>
+    /// The dump destination: a fresh timestamped file inside the native folder, verified to still be inside it
+    /// after the path is resolved. A dump that could be pointed at a system path is not a dump, it is a write.</summary>
     internal static string DumpPathFor(string dataDirectory, string partitionName, DateTime stamp)
     {
         string token = SafePartitionToken(partitionName);
@@ -651,6 +667,10 @@ internal static class MtkNativeBench
             "erase" => "Erase " + extent.Name + "?\n\n" + where +
                 "\n\nThe DA accepts an erase with report words only. Physical zeroing is not proven by this tool, " +
                 "so dump the partition first if you need it back.",
+            "write" => "Write " + extent.Name + " from\n" + imagePath +
+                "\n\nWriting to: " + where +
+                "\n\nThe image is written as raw bytes and only the written length is read back and compared. " +
+                "An image larger than the extent is refused before the port is touched; a smaller one leaves the rest of the extent untouched.",
             _ => throw new ArgumentException("Unknown native operation '" + operation + "'.", nameof(operation))
         };
     }

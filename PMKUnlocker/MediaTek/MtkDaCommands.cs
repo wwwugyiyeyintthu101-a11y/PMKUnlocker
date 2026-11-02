@@ -12,6 +12,7 @@ namespace PMKUnlocker.MediaTek;
 //   READ   — RUN 6 (15 GPT reads) and RUN 8 (one 8 MiB read-back, 128 frames of 65536 B)
 //   WRITE  — RUN 7 and RUN 9 (byte-identical; RUN 8 proved the written bytes landed)
 //   ERASE  — RUN 9 (accepted, "Successfully formatted", partition restored from the same boot)
+//   REBOOT — RUN 48 (bare 0x10008 upload of a 56-byte TOPRGU watchdog stub to 0x4fff0000; the phone resets itself)
 // Frame-accurate transcripts: %TEMP%\mtk-da-spike\capture\{logoverify-read,logo-write,erase3}-frames.txt
 // and the write-up in capture\framing-spec.md. CLEAN ROOM: mtkclient is GPL-3.0 and no source of it was
 // read for this file — the record is the bytes that a working client put on the wire and the log lines it
@@ -26,7 +27,9 @@ namespace PMKUnlocker.MediaTek;
 //     bare and answers with report words instead of data. The struct is shared, the framing around it is not.
 //   * No status-code table. In four captures the DA never once refused a command, so the error vocabulary
 //     is unobserved: failures here are timeouts, unexpected frame lengths, and unexpected words.
-//   * No eject/reset. Not measured at the DA stage, so B4 still uses the existing engine for rebooting.
+//   * No generic "eject to system" flow control. The one reboot here is RUN 48's measured TOPRGU reset,
+//     and it says nothing about the DA state afterwards — the session is declared spent the moment the
+//     stub is out, rather than guessed back into service.
 //
 // ONE RULE THE UI MUST NOT LOSE: a write is not success until it has been read back. mtkclient printed its
 // success line from status words alone and never re-read the partition. The verify below is the product's
@@ -411,6 +414,53 @@ internal sealed partial class MtkDaSession
             }
             Say("[+] ERASE 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x") + " — the DA reported completion (" +
                 words + " word(s)). Note: the DA accepts an erase without proving zeroes; verify by reading if it matters.");
+        }
+        finally { LeaveOperation(); }
+    }
+
+    // ---- the DA-extension reboot --------------------------------------------------------------------
+
+    /// <summary>
+    /// Reboot the phone through the DA extension's TOPRGU watchdog stub — RUN 48's measured sequence,
+    /// byte for byte: a bare 0x10008 upload (no 0x10009 preamble, no 0x40007 limits query), the 16-byte
+    /// address/length args, then the 56-byte stub as one data frame. The extension itself needs nothing
+    /// sent first: the boot recipe uploads it to 0x4fff0000 as its final DA steps, so a ready session
+    /// already carries the machinery this rides on.
+    ///
+    /// The reply is allowed to be silence. The measured run was answered status 0 and then the port died
+    /// (USBError(5) on the oracle's next read) while it still printed success — once the WDT_SWRST store
+    /// is on the wire, a dead or quiet pipe is the expected shape, not a failure. Only a live refusal
+    /// (a non-zero status word the DA was alive enough to frame) is raised, and even that cannot unsend
+    /// the stub: the session is spent on every post-write path.
+    /// </summary>
+    internal async Task RebootAsync(CancellationToken ct = default)
+    {
+        RequireReady();
+        EnterOperation("DA-extension reboot (TOPRGU stub at 0x" + MtkDaReset.ExtBase.ToString("x") + ")");
+        try
+        {
+            WriteCommand(MtkDaCommand.Upload);   // measured bare: no 0x10009 preamble, no limits query
+            await ReadStatusAsync("RESET accept", ct).ConfigureAwait(false);
+            WriteFrame(MtkDaReset.UploadArgs(MtkDaReset.ExtBase, (uint)MtkDaReset.ToprguStub.Length));
+            WriteDataFrame(MtkDaReset.ToprguStub, 0, MtkDaReset.ToprguStub.Length);
+            try
+            {
+                await ReadStatusAsync("RESET stub", ct).ConfigureAwait(false);
+                Say("[+] Reset command was sent — the DA answered status 0 and the phone is rebooting. Unplug the USB cable.");
+            }
+            catch (MtkDaProtocolException ex)
+            {
+                // The measured post-stub shape: status 0, then the port died; silence reads the same from our
+                // side. The detail is logged, not raised — after the stub is out the phone is resetting
+                // whatever the pipe says, and an exception here would call a fired reset a failure.
+                Say("[+] Reset command was sent — the stub is on the wire but the port " +
+                    (ex.TransportFailure ? "died" : "went quiet") + " before the reply. The phone is rebooting; unplug the USB cable. (" +
+                    ex.Message.Trim() + ")");
+            }
+            finally
+            {
+                DaIsReady = false;   // the stub is out — the session serves no further command on any post-write path
+            }
         }
         finally { LeaveOperation(); }
     }

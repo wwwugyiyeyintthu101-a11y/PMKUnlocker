@@ -1,6 +1,7 @@
 #nullable disable
 using System.Diagnostics;
 using PMKUnlocker.MediaTek;
+using PMKUnlocker.MtkFirmware;
 
 namespace PMKUnlocker;
 
@@ -28,6 +29,10 @@ public partial class Form1
     private Label lblNativeState;
     private Label lblNativeProgress;
     private Button btnNativeBoot, btnNativeClose, btnNativeGeometry, btnNativeDump, btnNativeRestore, btnNativeErase;
+    // B4 UI wiring — the same session surfaced on the INFO tab (Boot/Eject + badge) and the FLASH grid (per-partition actions)
+    private Button btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject;
+    private Label lblNativeBadge;
+    private DataGridViewButtonColumn colNativeRead, colNativeWrite, colNativeErase;
     private bool nativeBusy;
     private bool nativeBenchLogBroken;
     private bool nativeCloseRequested;
@@ -166,7 +171,179 @@ public partial class Form1
             grpSession, grpData, lblPartition, txtNativePartition, lblProfileTag, cmbNativeProfile, cmbNativeTransport,
             lblNativeState, lblNativeProgress, lblNativeHint
         });
+        BuildNativeInfoGroup();
+        BuildNativeFlashActions();
         SetNativeButtonsLive();
+    }
+
+    // ================= B4 — UI WIRING: the session on the INFO and FLASH tabs =================
+    //
+    // The NATIVE tab is the bench; these are the product controls. The rule is the same fail-closed-by-absence as
+    // the tab itself: no recipe installed means no Boot Device button and no grid actions, nothing to guess. And the
+    // rule the ROADMAP names: every write path refuses while the session is not confirmed live — a grid click with
+    // no session is a logged refusal, never a boot, and the mtkclient workflows refuse the reverse way, because a
+    // live session owns the only BROM face and two clients on one BROM corrupt both (RUN 15).
+
+    /// <summary>Boot Device / Reboot Device / Eject Device plus the live-session badge, on the MTK INFO tab under SERVICE.</summary>
+    private void BuildNativeInfoGroup()
+    {
+        btnInfoNativeBoot = Create3DButton("🔌 Boot Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
+        btnInfoNativeBoot.Click += async (_, _) => await NativeGuarded("boot", NativeBootAsync);
+        if (toolTipMain != null)
+            Tip(btnInfoNativeBoot, "Boot the DA once through the recorded recipe (power off, hold BOTH volume keys, plug). After this, Read/Write/Erase on the FLASH grid run over the live session with no replug.");
+
+        btnInfoNativeReboot = Create3DButton("🔁 Reboot Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Green);
+        btnInfoNativeReboot.Click += async (_, _) => await NativeGuarded("reboot", NativeRebootAsync);
+        if (toolTipMain != null)
+            Tip(btnInfoNativeReboot, "Send the measured TOPRGU watchdog reset through the live session (RUN 48's recipe — no bare stock reset id exists, this rides the DA extension the boot already loaded). The session ends and the phone leaves DA mode; on the RUN 49 unit it landed in power off — press the Power button to boot. Unplug the cable after.");
+
+        btnInfoNativeEject = Create3DButton("⏏ Eject Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Orange);
+        btnInfoNativeEject.Click += (_, _) => NativeClose();
+        if (toolTipMain != null)
+            Tip(btnInfoNativeEject, "Release the live session and the pipe it holds. The mtkclient operations need this ejected — they cannot share the phone with a live session.");
+
+        TabPage infoTab = mtkModes.TabPages[0];
+        Panel grpNativeInfo = CreateGroupPanel("BOOT DEVICE (NATIVE)", UiX(0), UiY(2), 3, btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject);
+        lblNativeBadge = new Label
+        {
+            Location = new Point(UiX(0) + 332, UiY(2) + 34),
+            Size = new Size(506, 20),
+            Text = "Session: not booted",
+            ForeColor = Color.Gray,
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            AutoEllipsis = true
+        };
+        if (toolTipMain != null)
+            Tip(lblNativeBadge, "Live native DA session state. While it reads LIVE, the mtkclient operations (FLASH, Unlock, Backup) are refused — Eject Device first; two clients on one BROM corrupt both sessions.");
+        infoTab.Controls.Add(grpNativeInfo);
+        infoTab.Controls.Add(lblNativeBadge);
+    }
+
+    /// <summary>Per-partition Read / Write / Erase columns on the FLASH grid, wired to the live session.</summary>
+    private void BuildNativeFlashActions()
+    {
+        colNativeRead = new DataGridViewButtonColumn { Name = "nativeRead", HeaderText = "Read", Text = "Read", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, Width = 46, AutoSizeMode = DataGridViewAutoSizeColumnMode.None };
+        colNativeWrite = new DataGridViewButtonColumn { Name = "nativeWrite", HeaderText = "Write", Text = "Write", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, Width = 50, AutoSizeMode = DataGridViewAutoSizeColumnMode.None };
+        colNativeErase = new DataGridViewButtonColumn { Name = "nativeErase", HeaderText = "Erase", Text = "Erase", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, Width = 48, AutoSizeMode = DataGridViewAutoSizeColumnMode.None };
+        foreach (DataGridViewButtonColumn col in new[] { colNativeRead, colNativeWrite, colNativeErase })
+        {
+            col.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
+            col.DefaultCellStyle.SelectionBackColor = Color.FromArgb(28, 31, 38);
+            mediaTekGrid.Columns.Add(col);
+        }
+        mediaTekGrid.CellContentClick += NativeGridCellClick;
+        SetNativeGridActionLook();
+    }
+
+    /// <summary>One click on a grid action. Read sets the NATIVE tab's partition box so both surfaces act on the same name.</summary>
+    private async void NativeGridCellClick(object sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= mediaTekGrid.Rows.Count) return;
+        string column = mediaTekGrid.Columns[e.ColumnIndex].Name;
+        if (column is not ("nativeRead" or "nativeWrite" or "nativeErase")) return;
+        if (mediaTekGrid.Rows[e.RowIndex].Cells["partition"].Value is not string name || string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            if (column == "nativeRead")
+            {
+                txtNativePartition.Text = name;
+                await NativeGuarded("dump " + name, NativeDumpAsync);
+            }
+            else if (column == "nativeWrite")
+                await NativeGuarded("write " + name, () => NativeGridWriteAsync(name, mediaTekGrid.Rows[e.RowIndex]));
+            else
+                await NativeGuarded("erase " + name, () => NativeGridEraseAsync(name));
+        }
+        catch (Exception ex) { Log("[FAIL] Native DA " + name + ": " + ex.Message, Color.Red); }
+    }
+
+    /// <summary>
+    /// Grid Write over the live session. The image must be one the tool can vouch for: a scatter image that exists
+    /// on disk, or the dump this session itself read from the same partition. Sparse images are refused outright —
+    /// the native session writes raw bytes, and a sparse container written raw is corruption.
+    /// </summary>
+    private async Task NativeGridWriteAsync(string name, DataGridViewRow row)
+    {
+        RequireNativeSession();
+        string image = null;
+        if (row?.Tag is ScatterEntry entry && entry.ImageExists && !string.IsNullOrEmpty(entry.ResolvedPath))
+            image = entry.ResolvedPath;
+        else if (MtkNativeBench.DumpMatchesPartition(nativeLastDump, name) && File.Exists(nativeLastDump))
+            image = nativeLastDump;
+        if (image == null)
+            throw new InvalidOperationException("No image to write to " + name + " — load a scatter whose image file exists, or Read (dump) the partition in this session first. Nothing was sent to the device.");
+        if (ReviewSafety.IsAndroidSparse(image))
+            throw new InvalidDataException(image + " is a sparse image and the native session writes raw bytes only — flash it through FLASH SELECTED instead. Nothing was sent to the device.");
+        MtkDaExtent extent = await NativeConfirmProgramAsync(name, "write", image);
+        if (extent == null) return;
+        await nativeDa.WritePartitionAsync(extent.Name, image, p => NativeProgress("write " + extent.Name, p),
+            verify: true, ct: nativeCancel.Token).ConfigureAwait(false);
+        NativeSay("[OK] Native DA: " + extent.Name + " written from " + Path.GetFileName(image) + " and read back identical.");
+    }
+
+    /// <summary>ERASE one named partition over the live session — the NATIVE tab textbox and the FLASH grid share it.</summary>
+    private async Task NativeGridEraseAsync(string name)
+    {
+        RequireNativeSession();
+        MtkDaExtent extent = await NativeConfirmProgramAsync(name, "erase", null);
+        if (extent == null) return;
+        await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
+        NativeSay("[OK] Native DA: " + extent.Name + " erase accepted by the DA. Dump it again if you need to see what it looks like now.");
+    }
+
+    /// <summary>
+    /// The chain every destructive native op shares: resolve the extent against the live GPT, refuse the
+    /// never-program list, then ask with the exact byte extent. Returns null when the operator declines.
+    /// </summary>
+    private async Task<MtkDaExtent> NativeConfirmProgramAsync(string name, string verb, string imagePath)
+    {
+        MtkDaExtent extent = await nativeDa.RequirePartitionAsync(name, nativeCancel.Token);
+        if (!MtkNativeBench.ProgramAllowed(extent.Name, out string reason)) throw new IOException(reason);
+        if (MessageBox.Show(this, MtkNativeBench.ConfirmText(verb, extent, imagePath),
+                "Native DA " + verb, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            NativeSay("[*] Native DA: " + verb + " declined by the operator — nothing was sent.");
+            return null;
+        }
+        return extent;
+    }
+
+    /// <summary>The badge and the grid action columns follow the session state, on every transition the bench already had.</summary>
+    private void SetNativeBadge(bool booted)
+    {
+        if (lblNativeBadge == null || lblNativeBadge.IsDisposed) return;
+        if (booted)
+        {
+            lblNativeBadge.Text = "Session: LIVE — " + nativeDa.TransportDescription + ", HW 0x" + nativeDa.DeviceHwCode.ToString("X4") +
+                " — FLASH grid Read/Write/Erase run over this session";
+            lblNativeBadge.ForeColor = Color.LightGreen;
+        }
+        else if (nativeBusy)
+        {
+            lblNativeBadge.Text = "Session: booting — the phone answers nothing else until the recipe finishes";
+            lblNativeBadge.ForeColor = Color.Cyan;
+        }
+        else
+        {
+            lblNativeBadge.Text = "Session: not booted — Boot Device replays the recorded recipe once, then the FLASH grid works without replug";
+            lblNativeBadge.ForeColor = Color.Gray;
+        }
+    }
+
+    /// <summary>The grid action cells read as the state they are in: colored while live, dimmed while the session is down.</summary>
+    private void SetNativeGridActionLook()
+    {
+        if (colNativeRead == null) return;
+        bool booted = nativeDa != null;
+        Color read = booted ? Color.FromArgb(140, 230, 140) : Color.DimGray;
+        Color write = booted ? Color.FromArgb(255, 180, 80) : Color.DimGray;
+        Color erase = booted ? Color.FromArgb(240, 100, 100) : Color.DimGray;
+        colNativeRead.DefaultCellStyle.ForeColor = read;
+        colNativeWrite.DefaultCellStyle.ForeColor = write;
+        colNativeErase.DefaultCellStyle.ForeColor = erase;
+        colNativeRead.DefaultCellStyle.SelectionForeColor = read;
+        colNativeWrite.DefaultCellStyle.SelectionForeColor = write;
+        colNativeErase.DefaultCellStyle.SelectionForeColor = erase;
     }
 
     // ---- the plumbing -------------------------------------------------------------------------------
@@ -220,6 +397,14 @@ public partial class Form1
         foreach (Button b in new[] { btnNativeGeometry, btnNativeDump, btnNativeRestore, btnNativeErase })
             b.Enabled = booted && !nativeBusy;
         if (lblNativeState != null && !booted) lblNativeState.Text = MtkNativeBench.StatusLine(false, "", 0, 0);
+        if (btnInfoNativeBoot != null)
+        {
+            btnInfoNativeBoot.Enabled = !booted && !nativeBusy;
+            btnInfoNativeReboot.Enabled = booted && !nativeBusy;
+            btnInfoNativeEject.Enabled = booted && !nativeBusy;
+        }
+        SetNativeBadge(booted);
+        SetNativeGridActionLook();
     }
 
     private async Task NativeBootAsync()
@@ -306,15 +491,31 @@ public partial class Form1
     private async Task NativeGeometryAsync()
     {
         RequireNativeSession();
-        var storage = await nativeDa.QueryStorageAsync(nativeCancel.Token).ConfigureAwait(false);
-        var limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token).ConfigureAwait(false);
+        var storage = await nativeDa.QueryStorageAsync(nativeCancel.Token);
+        var limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token);
         NativeSay("[+] DA geometry: " + storage.Describe);
         NativeSay("[+] DA transfer: write chunk 0x" + limits.WriteChunkSize.ToString("x") + ", frame 0x" + limits.TransferPacketSize.ToString("x"));
-        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token).ConfigureAwait(false);
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
         lblNativeState.Text = MtkNativeBench.StatusLine(true, nativeDa.TransportDescription, nativeDa.DeviceHwCode, table.Extents.Count);
         foreach (MtkDaExtent extent in table.Extents.Take(12))
             NativeSay("    " + extent.Describe);
         if (table.Extents.Count > 12) NativeSay("    … " + (table.Extents.Count - 12) + " more (all resolvable by name)");
+        FillFlashGridFromNativeTable(table);
+    }
+
+    /// <summary>
+    /// The FLASH grid's per-partition columns need rows to act on, and while a native session is live the mtkclient
+    /// printgpt fill is refused — so the live table fills it itself, in the same Live-GPT shape that path uses.
+    /// </summary>
+    private void FillFlashGridFromNativeTable(MtkDaPartitionTable table)
+    {
+        mediaTekPackage = null;
+        mediaTekScatter.Clear();
+        mediaTekGrid.Rows.Clear();
+        foreach (MtkDaExtent extent in table.Extents)
+            mediaTekGrid.Rows.Add(false, extent.Name, "", "0x" + extent.ByteOffset.ToString("x"),
+                FormatBytesLong((long)extent.ByteLength), "Live GPT");
+        RefreshMediaTekSummary();
     }
 
     private async Task NativeDumpAsync()
@@ -333,15 +534,8 @@ public partial class Form1
         RequireNativeSession();
         if (string.IsNullOrWhiteSpace(nativeLastDump) || !File.Exists(nativeLastDump))
             throw new InvalidOperationException("There is no dump from this session to restore. Dump the partition first — this harness only ever writes back bytes it read itself.");
-        string name = txtNativePartition.Text.Trim();
-        MtkDaExtent extent = await nativeDa.RequirePartitionAsync(name, nativeCancel.Token).ConfigureAwait(false);
-        if (!MtkNativeBench.ProgramAllowed(extent.Name, out string reason)) throw new IOException(reason);
-        if (MessageBox.Show(this, MtkNativeBench.ConfirmText("restore", extent, nativeLastDump),
-                "Native DA restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-        {
-            NativeSay("[*] Native DA: restore declined by the operator — nothing was sent.");
-            return;
-        }
+        MtkDaExtent extent = await NativeConfirmProgramAsync(txtNativePartition.Text.Trim(), "restore", nativeLastDump);
+        if (extent == null) return;
         await nativeDa.WritePartitionAsync(extent.Name, nativeLastDump, p => NativeProgress("restore " + extent.Name, p),
             verify: true, ct: nativeCancel.Token).ConfigureAwait(false);
         NativeSay("[OK] Native DA: " + extent.Name + " restored and read back identical.");
@@ -350,17 +544,19 @@ public partial class Form1
     private async Task NativeEraseAsync()
     {
         RequireNativeSession();
-        string name = txtNativePartition.Text.Trim();
-        MtkDaExtent extent = await nativeDa.RequirePartitionAsync(name, nativeCancel.Token).ConfigureAwait(false);
-        if (!MtkNativeBench.ProgramAllowed(extent.Name, out string reason)) throw new IOException(reason);
-        if (MessageBox.Show(this, MtkNativeBench.ConfirmText("erase", extent, null),
-                "Native DA erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-        {
-            NativeSay("[*] Native DA: erase declined by the operator — nothing was sent.");
-            return;
-        }
-        await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
-        NativeSay("[OK] Native DA: " + extent.Name + " erase accepted by the DA. Dump it again if you need to see what it looks like now.");
+        await NativeGridEraseAsync(txtNativePartition.Text.Trim());
+    }
+
+    /// <summary>
+    /// The measured DA-extension reboot. The session is spent the moment the stub is out — the phone is on
+    /// its way down — so the close is requested for <see cref="NativeGuarded"/>'s finally rather than made
+    /// mid-operation, where it would read as the cancellation of a live run.
+    /// </summary>
+    private async Task NativeRebootAsync()
+    {
+        RequireNativeSession();
+        await nativeDa.RebootAsync(nativeCancel.Token).ConfigureAwait(false);
+        nativeCloseRequested = true;
     }
 
     private void NativeClose()

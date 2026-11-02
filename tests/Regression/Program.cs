@@ -2294,6 +2294,7 @@ try
     const string ReadCmd = "05000100";      // 0x00010005
     const string WriteCmd = "04000100";     // 0x00010004
     const string EraseCmd = "03000100";     // 0x00010003
+    const string UploadCmd = "08000100";    // 0x00010008 — the upload the boot's ext image and the reset stub share
     const string CommitCmd = "05000800";    // 0x00080005
     string DaFrame(string payloadHex)
     {
@@ -2591,6 +2592,43 @@ try
         PreFrame, StorageCmd, EraseCmd, LogoStruct);
     eSes.Dispose(); e2Ses.Dispose(); e3Ses.Dispose();
 
+    // ---- B4.42: the DA-extension reboot, replayed against the RUN 48 measurement ---------------------
+    string stubHex = Convert.ToHexString(MtkDaReset.ToprguStub).ToLowerInvariant();
+    Check(MtkDaReset.ExtBase == 0x4FFF0000 && MtkDaReset.ToprguStub.Length == 56,
+        "MTK RESET: the stub goes to the scratch address the boot's own ext upload used, and it is exactly the 56 bytes RUN 48 carried");
+    Check(Convert.ToHexString(SHA256.HashData(MtkDaReset.ToprguStub)).ToLowerInvariant() == "1a99a3f095fc93fe32ba1929491606867c397e8035e4874f957869f87f285d13",
+        "MTK RESET: the stub is byte-identical to the captured payload — a hand-edited watchdog write is a brick, so the hash is the gate");
+    Check(Convert.ToHexString(MtkDaReset.UploadArgs(0x4FFF0000, 56)).ToLowerInvariant() == "0000ff4f000000003800000000000000",
+        "MTK RESET: the argument frame is {u32le addr, 0, u32le len, 0} — the same upload shape the boot's ext upload carried, zero words included");
+    Check(stubHex.AsSpan(88).StartsWith("142080e5") && stubHex.AsSpan(96).StartsWith("4ff07ff5"),
+        "MTK RESET: the captured bytes really are the WDT_SWRST store at [r0,#0x14] and the DSB before the spin — the reset meaning sits in the bytes, not the name");
+
+    var rbLines = new List<string>();
+    var (rbSes, rbDev) = await BootedDa(rbLines, new[] { Status, Status });
+    int rbStart = rbDev.Writes.Count;
+    await rbSes.RebootAsync();
+    CheckFrames(SentFrames(rbDev, rbStart), "MTK B3 RESET: the measured cycle is bare — 0x10008, the 16-byte args, the 56-byte stub frame — with no preamble and no limits query",
+        UploadCmd, "0000ff4f000000003800000000000000", stubHex);
+    Check(rbLines.Any(l => l.Contains("Reset command was sent") && l.Contains("status 0")),
+        "MTK B3 RESET: the accepted run is reported in the oracle's own words — sent, accepted, phone rebooting");
+    Check(!rbSes.DaIsReady, "MTK B3 RESET: a fired reboot spends the session — the phone is on its way down, so no further command can be served");
+    Check((await DaFailure(rbSes, () => rbSes.ReadExtentAsync(LogoAt, LogoLen))).Contains("The DA is not ready"),
+        "MTK B3 RESET: a rebooted session refuses the next operation outright instead of writing into a phone that is rebooting");
+    rbSes.Dispose();
+
+    // The oracle itself was answered status 0 and then got a dead port, and still called the reset sent —
+    // silence after the stub is the same shape from our side, not a failure.
+    var rb2Lines = new List<string>();
+    var (rb2Ses, rb2Dev) = await BootedDa(rb2Lines, new[] { Status });
+    int rb2Start = rb2Dev.Writes.Count;
+    await rb2Ses.RebootAsync();
+    CheckFrames(SentFrames(rb2Dev, rb2Start), "MTK B3 RESET: the silent-phone run still sends the identical three frames and stops — nothing else is guessed onto the wire",
+        UploadCmd, "0000ff4f000000003800000000000000", stubHex);
+    Check(rb2Lines.Any(l => l.Contains("Reset command was sent") && l.Contains("quiet")),
+        "MTK B3 RESET: silence after the stub is logged as the measured success shape, not raised as a timeout");
+    Check(!rb2Ses.DaIsReady, "MTK B3 RESET: the silent run spends the session too — the stub was written, whatever the reply said");
+    rb2Ses.Dispose();
+
     // ---- B3.5: the live GPT, read once and cached ----------------------------------------------------
     byte[] liveHeader = GptHeader(2, 3, 128);
     var liveEntries = new byte[512];
@@ -2810,6 +2848,20 @@ try
     Check(MtkNativeBench.DescribeBusAfterRefusal(null, null, null).Contains("is gone") &&
           MtkNativeBench.DescribeBusAfterRefusal("com3", "0003", new List<MtkNativeBench.MtkBusNode> { new("0003", "COM3") }).Contains("did not move"),
         "MTK B4: the phrasing survives a missing port, a missing snapshot and lower-case input instead of throwing at the moment of a refusal");
+
+    // B4 UI wiring — the session surfaced on INFO and FLASH. The logic that guards a grid click has to hold the same
+    // words the bench dialogs use, so the checks read the exact strings the operator will see.
+    string writeText = MtkNativeBench.ConfirmText("write", new MtkDaExtent("logo", 2987008, 2989055, 512), @"C:\fw\logo.bin");
+    Check(writeText.Contains("0x5b280000") && writeText.Contains("logo.bin") && writeText.Contains("read back") &&
+          writeText.Contains("raw bytes"),
+        "MTK B4: the grid write confirmation names the extent, the image and the raw-bytes honesty — a smaller image leaves the rest of the extent untouched");
+    Check(MtkNativeBench.DumpMatchesPartition(@"C:\d\logo-20261030-140506.img", "logo") &&
+          !MtkNativeBench.DumpMatchesPartition(@"C:\d\seccfg-20261030-140506.img", "logo") &&
+          !MtkNativeBench.DumpMatchesPartition(@"C:\d\logo-20261030-140506.img", "seccfg"),
+        "MTK B4: a session dump is matched to its partition by the token the dumper minted — a grid write may reuse only a dump of the same name");
+    Check(!MtkNativeBench.DumpMatchesPartition(null, "logo") && !MtkNativeBench.DumpMatchesPartition(@"C:\d\x.img", "") &&
+          !MtkNativeBench.DumpMatchesPartition(@"C:\d\x.img", "!!!"),
+        "MTK B4: a missing or unusable partition name matches nothing — the grid write falls through to the explicit no-image refusal, never to a guess");
 
     Console.WriteLine($"{passed} regression checks passed.");
 

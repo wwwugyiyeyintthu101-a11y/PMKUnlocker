@@ -711,6 +711,12 @@ public partial class Form1
     }
     private async Task RunMediaTekWorkflowAsync(Func<Task> operation)
     {
+        // A live native session owns the phone's only BROM face; mtkclient attaches at enumeration and cannot share
+        // it — two clients on one BROM corrupt both sessions, and a takeover mid-session answers 0xfe to every byte
+        // (RUN 15). The reverse direction (a native boot beside a running workflow) is refused in NativeBootAsync.
+        if (nativeDa != null)
+            throw new InvalidOperationException("A native DA session is live on this phone — press Eject Device first. " +
+                "Two clients on one BROM corrupt both sessions, and a takeover mid-session answers 0xfe to every byte (RUN 15).");
         await RunFlashWorkflowAsync(async () =>
         {
             mediaTekEngine = new MtkClientEngine();
