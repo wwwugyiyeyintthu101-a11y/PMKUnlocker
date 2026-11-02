@@ -1327,6 +1327,14 @@ try
                                                                   "{\"t\":\"rx\",\"k\":\"zero\",\"bytes\":4}")))
               .Contains("never waits for the DA's own SYNC"),
         "MTK recipe: without a SYNC expectation a stale DA in RAM would look like a live one — refused");
+    Check(LoadFailure("bare-sync", Recipe(GoodBrom, GoodDa.Replace("{\"t\":\"rx\",\"k\":\"token\",\"what\":\"sync\",\"bytes\":4}",
+                                                                   "{\"t\":\"rx\",\"k\":\"sync\",\"bytes\":4}")))
+              .Contains("(loaded, no refusal)"),
+        "MTK recipe: the shorthand the capture script actually writes for SYNC is accepted — the recorded MT6765 recipe loads exactly as measured, not a rewritten copy of it");
+    Check(LoadFailure("bare-sync-size", Recipe(GoodBrom, GoodDa.Replace("{\"t\":\"rx\",\"k\":\"token\",\"what\":\"sync\",\"bytes\":4}",
+                                                                         "{\"t\":\"rx\",\"k\":\"sync\",\"bytes\":5}")))
+              .Contains("unsupported token"),
+        "MTK recipe: a bare SYNC with a length the wire never showed is still refused — the shorthand loosens the spelling, never the gate");
     Check(LoadFailure("bad-reply", Recipe(GoodBrom.Replace("{\"t\":\"rx\",\"k\":\"len\",\"bytes\":6}", "{\"t\":\"rx\",\"k\":\"magic\",\"bytes\":6}"), GoodDa))
               .Contains("unknown reply kind"), "MTK recipe: an unclassified reply kind is refused");
     Check(LoadFailure("bad-token", Recipe(GoodBrom.Replace("{\"t\":\"rx\",\"k\":\"token\",\"what\":\"da-alive\",\"bytes\":1}",
@@ -1371,6 +1379,40 @@ try
     Check(LoadFailure("missing-blob-file", Recipe(GoodBrom, GoodDa), ("kamakiri.bin", kamakiri), ("da2.bin", da2))
               .Contains("is not in"), "MTK recipe: a recipe whose image file is absent is refused");
 
+    // ---- B4.32: endpoint-zero control steps (RUN 38, 2026-11-01) -------------------------------------
+    // The passive wire capture named the traffic every bulk-only log missed: before each pre-download `da`
+    // the accepted boot sends a CDC SET_LINE_CODING the device accepts and a vendor descriptor read it stalls.
+    string AckProbe = "{\"t\":\"ctrl\",\"k\":\"ctrl-ack\",\"hex\":\"2120000000000c0000100e000000080091c20000\",\"bytes\":12}";
+    string StallProbe = "{\"t\":\"ctrl\",\"k\":\"ctrl-stall\",\"hex\":\"8006ff0200000900\",\"bytes\":9}";
+    string BromWithCtrl = GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"d4\"},{\"t\":\"rx\",\"k\":\"echo\",\"bytes\":1}",
+        "{\"t\":\"tx\",\"hex\":\"d4\"},{\"t\":\"rx\",\"k\":\"echo\",\"bytes\":1}," + AckProbe + "," + StallProbe);
+    var ctrlProfile = MtkBootProfile.Load(FixturePath("ctrl-good", Recipe(BromWithCtrl, GoodDa),
+        ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2)));
+    Check(ctrlProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Ctrl) == 2 &&
+          ctrlProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Ctrl && s.Expect?.Kind == MtkReplyKind.CtrlAck) == 1 &&
+          ctrlProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Ctrl && s.Expect?.Kind == MtkReplyKind.CtrlStall) == 1,
+        "MTK recipe: endpoint-zero control steps load as their own kind — an accepted SET_LINE_CODING and a stalled descriptor read");
+    Check(ctrlProfile.BromSteps.Single(s => s.Kind == MtkStepKind.Ctrl && s.Expect?.Kind == MtkReplyKind.CtrlAck)
+              .Payload.SequenceEqual(Convert.FromHexString("2120000000000c0000100e000000080091c20000")),
+        "MTK recipe: the accepted probe keeps its whole data stage in the frame, byte for byte as RUN 38 recorded it");
+    Check(LoadFailure("ctrl-ack-in", Recipe(BromWithCtrl.Replace(AckProbe, AckProbe.Replace("\"hex\":\"2120", "\"hex\":\"8120")), GoodDa))
+              .Contains("not the measured shape"),
+        "MTK recipe: an accepted control transfer with a device-to-host request type is not what the wire showed — refused");
+    Check(LoadFailure("ctrl-ack-short", Recipe(BromWithCtrl.Replace(AckProbe,
+              AckProbe.Replace("\"hex\":\"2120000000000c0000100e000000080091c20000\"", "\"hex\":\"2120000000000c0000100e000000080091c2\"")), GoodDa))
+              .Contains("not the measured shape"),
+        "MTK recipe: an accepted control transfer whose data stage is shorter than its wLength is refused");
+    Check(LoadFailure("ctrl-stall-out", Recipe(BromWithCtrl.Replace(StallProbe, StallProbe.Replace("\"hex\":\"8006", "\"hex\":\"0006")), GoodDa))
+              .Contains("not the measured shape"),
+        "MTK recipe: a refused control read with a host-to-device request type is refused");
+    Check(LoadFailure("ctrl-stall-data", Recipe(BromWithCtrl.Replace(StallProbe,
+              "{\"t\":\"ctrl\",\"k\":\"ctrl-stall\",\"hex\":\"8006ff0200000900ff\",\"bytes\":9}"), GoodDa))
+              .Contains("not the measured shape"),
+        "MTK recipe: a refused control read that carries data bytes is not the recorded shape — refused");
+    Check(LoadFailure("ctrl-len-lie", Recipe(BromWithCtrl.Replace(AckProbe, AckProbe.Replace("\"bytes\":12}", "\"bytes\":10}")), GoodDa))
+              .Contains("disagrees with itself about a control transfer's length"),
+        "MTK recipe: a control step that disagrees with its own setup packet's wLength is refused");
+
     // ---- B2.3: the boot machine replayed against a scripted device ----------------------------------
     // Reply order mirrors the recipe: 18 BROM replies then 6 DA replies (three headers and their payloads).
     string[] recordedReplies =
@@ -1406,11 +1448,147 @@ try
     try { booted.WriteCommand(MtkDaCommand.Read); } catch (InvalidOperationException) { notReadyRefused = true; }
     Check(notReadyRefused, "MTK session: a closed session refuses commands instead of writing into a dead port");
 
-    async Task<string> BootFailure(FakeMtkTransport fake)
+    // The control probes ride the same recorded bulk walk: they add no bulk replies and no bulk writes, so the
+    // reply script and the write census are unchanged — only endpoint zero is spoken to, twice.
+    var ctrlDevice = new FakeMtkTransport(recordedReplies);
+    var ctrlPipe = new FakeCtrlTransport(ctrlDevice);
+    var ctrlBooted = await MtkDaSession.BootAsync(ctrlPipe, ctrlProfile, bootLines.Add, default, 300, 300, 300);
+    Check(ctrlBooted.DaIsReady, "MTK boot: control probes replay through the pipe and the boot still reaches a ready DA");
+    Check(ctrlPipe.ControlFrames.SequenceEqual(new[] { "2120000000000C00", "8006FF0200000900" }) &&
+          ctrlPipe.ControlData[0].SequenceEqual(Convert.FromHexString("00100e000000080091c20000")) &&
+          ctrlPipe.ControlData[1].Length == 9,
+        "MTK boot: the probes go out as whole setup+data frames in the recorded order — a 12-byte line coding and a 9-byte descriptor ask");
+    Check(ctrlDevice.Writes.Count == 29 && ctrlDevice.WrittenBytes == 173,
+        "MTK boot: the control probes add no bulk writes — the recorded 29 writes / 173 bytes are unchanged");
+    ctrlBooted.Dispose();
+    var ctrlNoSupport = new FakeMtkTransport(recordedReplies);
+    string noCtrlError = null;
+    try
+    {
+        var noSupportSession = await MtkDaSession.BootAsync(ctrlNoSupport, ctrlProfile, null, default, 300, 300, 300);
+        noSupportSession.Dispose();
+    }
+    catch (Exception ex) { noCtrlError = ex.Message; }
+    Check(noCtrlError != null && noCtrlError.Contains("cannot send one"),
+        "MTK boot: a pipe that cannot send endpoint-zero transfers refuses a control-step recipe instead of skipping the probes");
+    Check(ctrlNoSupport.Writes.Count == 3,
+        "MTK boot: that refusal stops after the three recorded writes and nothing more, so the phone keeps its state");
+
+    // ---- B4.33: the payload's re-open (RUN 39, 2026-11-01) --------------------------------------------
+    // RUN 39's first hardware boot with the probes answered 0000 + 64281000 and the kamakiri payload ran
+    // (magic a1a2a3a4 at step 165), then died on the first post-payload d1 echo. The RUN 38 capture
+    // (f450–f471) shows why: after the magic the working client silently re-opens the serial session —
+    // a 7-byte SET_LINE_CODING (no vendor extension), a data-less CDC SET_CONTROL_LINE_STATE (DTR on)
+    // and the four-pair greet again — because the payload re-inits the BROM's USB stack.
+    string LineCoding7 = "{\"t\":\"ctrl\",\"k\":\"ctrl-ack\",\"hex\":\"212000000000070000100e00000008\",\"bytes\":7}";
+    string DtrAck = "{\"t\":\"ctrl\",\"k\":\"ctrl-ack\",\"hex\":\"2122020000000000\",\"bytes\":0}";
+    string GreetPairs = "{\"t\":\"tx\",\"hex\":\"a0\"},{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":1}," +
+                        "{\"t\":\"tx\",\"hex\":\"0a\"},{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":1}," +
+                        "{\"t\":\"tx\",\"hex\":\"50\"},{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":1}," +
+                        "{\"t\":\"tx\",\"hex\":\"05\"},{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":1}";
+    string BromWithReopen = GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"d4\"},{\"t\":\"rx\",\"k\":\"echo\",\"bytes\":1}",
+        "{\"t\":\"tx\",\"hex\":\"d4\"},{\"t\":\"rx\",\"k\":\"echo\",\"bytes\":1}," + LineCoding7 + "," + DtrAck + "," + GreetPairs);
+    var reopenProfile = MtkBootProfile.Load(FixturePath("reopen-good", Recipe(BromWithReopen, GoodDa),
+        ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2)));
+    Check(reopenProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Ctrl) == 2 &&
+          reopenProfile.BromSteps.Count(s => s.Kind == MtkStepKind.Rx && s.Expect?.Kind == MtkReplyKind.Complement) == 4,
+        "MTK recipe: the payload's re-open loads — a 7-byte line coding, a data-less DTR write and four greet pairs");
+    Check(reopenProfile.BromSteps.Single(s => s.Expect?.Kind == MtkReplyKind.CtrlAck && s.Payload.Length == 8)
+              .Payload.SequenceEqual(Convert.FromHexString("2122020000000000")),
+        "MTK recipe: the data-less SET_CONTROL_LINE_STATE (DTR on) is kept byte for byte as the capture recorded it");
+    Check(LoadFailure("ctrl-ack-zerodata", Recipe(BromWithReopen.Replace(DtrAck,
+              "{\"t\":\"ctrl\",\"k\":\"ctrl-ack\",\"hex\":\"2122020000000000ff\",\"bytes\":0}"), GoodDa))
+              .Contains("not the measured shape"),
+        "MTK recipe: an accepted control write carrying data bytes it does not declare is not the recorded shape — refused");
+    Check(LoadFailure("complement-two", Recipe(BromWithReopen.Replace("{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":1}",
+              "{\"t\":\"rx\",\"k\":\"complement\",\"bytes\":2}"), GoodDa))
+              .Contains("exactly one byte"),
+        "MTK recipe: a handshake complement that is not one byte is refused — the greet answers a single byte");
+    string[] reopenReplies = recordedReplies.Take(5).Concat(new[] { "5f", "f5", "af", "fa" })
+                                  .Concat(recordedReplies.Skip(5)).ToArray();
+    var reopenPipe = new FakeCtrlTransport(new FakeMtkTransport(reopenReplies));
+    var reopenBooted = await MtkDaSession.BootAsync(reopenPipe, reopenProfile, bootLines.Add, default, 300, 300, 300);
+    Check(reopenBooted.DaIsReady,
+        "MTK boot: the re-open replays — line coding, DTR, the greet again — and the boot still reaches a ready DA");
+    Check(reopenPipe.ControlFrames.SequenceEqual(new[] { "2120000000000700", "2122020000000000" }) &&
+          reopenPipe.ControlData[0].SequenceEqual(Convert.FromHexString("00100e00000008")) &&
+          reopenPipe.ControlData[1].Length == 0,
+        "MTK boot: the re-open's control pair goes out whole — a 7-byte line coding with no extension and an empty DTR write");
+    Check(reopenPipe.Inner.Writes.Count == 33 && reopenPipe.Inner.WrittenBytes == 177,
+        "MTK boot: the re-open adds exactly the four greet bytes to the wire — 33 writes / 177 bytes, nothing else");
+    string[] wrongComplement = recordedReplies.Take(5).Concat(new[] { "5e", "f5", "af", "fa" })
+                                   .Concat(recordedReplies.Skip(5)).ToArray();
+    string greetError = null;
+    try
+    {
+        var wrongGreet = await MtkDaSession.BootAsync(new FakeCtrlTransport(new FakeMtkTransport(wrongComplement)), reopenProfile, null, default, 300, 300, 300);
+        wrongGreet.Dispose();
+    }
+    catch (Exception ex) { greetError = ex.Message; }
+    Check(greetError != null && greetError.Contains("handshake complement"),
+        "MTK boot: a greet byte that is not the complement of what was sent is refused, not absorbed");
+
+    // RUN 40 replayed on the re-open recipe itself: the device stalls the re-open's first SET_LINE_CODING
+    // (libusb -9, the payload still re-initialising its USB stack), the step is re-asked, and the boot moves on.
+    var reopenRetry = new FakeCtrlTransport(new FakeMtkTransport(reopenReplies));
+    reopenRetry.ControlScript.Enqueue(-9);
+    reopenRetry.ControlScript.Enqueue(-9);
+    var reopenRetryBooted = await MtkDaSession.BootAsync(reopenRetry, reopenProfile, bootLines.Add, default, 300, 300, 300);
+    Check(reopenRetryBooted.DaIsReady &&
+          reopenRetry.ControlFrames.Count == 4 &&
+          reopenRetry.ControlFrames[0] == "2120000000000700" &&
+          reopenRetry.ControlFrames[2] == "2120000000000700" &&
+          reopenRetry.ControlData[2].SequenceEqual(Convert.FromHexString("00100e00000008")) &&
+          reopenRetry.ControlFrames[3] == "2122020000000000" &&
+          reopenRetry.ControlData[3].Length == 0,
+        "MTK boot: the re-open's stalled line coding is asked a third time and accepted, then DTR follows — the same frames, the recorded order");
+    Check(reopenRetry.Inner.Writes.Count == 33 && reopenRetry.Inner.WrittenBytes == 177,
+        "MTK boot: the retries add no bulk writes — the re-open census stays 33 writes / 177 bytes");
+    reopenRetryBooted.Dispose();
+    string reopenExhausted = null;
+    try
+    {
+        var exhaustedPipe = new FakeCtrlTransport(new FakeMtkTransport(reopenReplies));
+        for (int i = 0; i < 30; i++) exhaustedPipe.ControlScript.Enqueue(-9);
+        var exhausted = await MtkDaSession.BootAsync(exhaustedPipe, reopenProfile, null, default, 300, 300, 300);
+        exhausted.Dispose();
+    }
+    catch (Exception ex) { reopenExhausted = ex.Message; }
+    Check(reopenExhausted != null && reopenExhausted.Contains("Refused 20 ask(s) in a row"),
+        "MTK boot: a re-open the device refuses through the whole budget ends the boot with the ask count named");
+
+    async Task<string> CtrlFailure(int[] controlResults)
+    {
+        var fake = new FakeCtrlTransport(new FakeMtkTransport(recordedReplies));
+        foreach (int rc in controlResults) fake.ControlScript.Enqueue(rc);
+        try
+        {
+            var probeSession = await MtkDaSession.BootAsync(fake, ctrlProfile, null, default, 300, 300, 300);
+            probeSession.Dispose();
+            return "(booted, no refusal)";
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+    // RUN 40 (2026-11-01 17:19): the device stalled the re-open's first SET_LINE_CODING (libusb -9) while the
+    // payload was still re-initialising its USB stack — a stall on a control endpoint clears at the next SETUP,
+    // so an accepted-transfer step is re-asked inside a budget. Two stalls are absorbed; a refusal through the
+    // whole budget still stops the boot.
+    Check((await CtrlFailure(new[] { -9, -9 })) == "(booted, no refusal)",
+        "MTK boot: a SET_LINE_CODING the device stalls twice is re-asked and the boot reaches a ready DA — RUN 40's refusal is a race, not a state");
+    Check((await CtrlFailure(Enumerable.Repeat(-9, 30).ToArray())).Contains("was not accepted the way the recorded boot had it") &&
+          (await CtrlFailure(Enumerable.Repeat(-9, 30).ToArray())).Contains("Refused 20 ask(s) in a row"),
+        "MTK boot: a SET_LINE_CODING the device stalls through the whole retry budget stops the boot — a dead CDC function is not absorbed");
+    Check((await CtrlFailure(new[] { 12, 9 })).Contains("is recorded as refused"),
+        "MTK boot: a descriptor read that comes back with bytes is not the recorded stall — the boot stops rather than trust a foreign answer");
+
+    async Task<string> BootFailure(FakeMtkTransport fake, IMtkDaStageHandoff? handoff = null,
+        int proofAttempts = 25, int proofRetryDelayMs = 800, IMtkBromRecovery? recovery = null,
+        bool bromHandshake = false)
     {
         try
         {
-            var session = await MtkDaSession.BootAsync(fake, bootProfile, null, default, 300, 300, 300).ConfigureAwait(false);
+            var session = await MtkDaSession.BootAsync(fake, bootProfile, null, default, 300, 300, 300, handoff,
+                proofAttempts, proofRetryDelayMs, recovery, bromHandshake: bromHandshake).ConfigureAwait(false);
             session.Dispose();
             return "(booted, no refusal)";
         }
@@ -1421,8 +1599,63 @@ try
     Check(wrongHw.Writes.Count == 1, "MTK boot: the refusal happens on the very first reply, so nothing was written to the wrong SoC");
     var badEcho = new FakeMtkTransport(recordedReplies) { ReplyOverride = (0, "fe") };
     Check((await BootFailure(badEcho)).Contains("did not repeat"), "MTK boot: a BROM that does not echo the command byte is not a BROM — stopped");
+    var wrongEchoButRightCode = new FakeMtkTransport(recordedReplies) { ReplyOverride = (0, "fe07660000") };
+    string wrongEchoText = await BootFailure(wrongEchoButRightCode);
+    Check(wrongEchoText.Contains("did not repeat") && wrongEchoText.Contains("0x07660000"),
+        "MTK boot: a refused echo also reports the bytes still arriving — a phone in the wrong mode and a port with the wrong settings have to be told apart from one log line");
+    var silentTail = new FakeMtkTransport(recordedReplies) { HoldBack = recordedReplies.Length };
+    Check((await BootFailure(silentTail, null, 3, 10)).Contains("Still on the wire: nothing"),
+        "MTK boot: a device that never answers is reported as silence, not as an unexplained refusal");
+
+    // RUN 10 and RUN 11 refused identically from inside the session (one byte, then silence), and the bytes could
+    // not tell "the phone is sitting here refusing us" from "the phone left this face two seconds ago". The bus
+    // can, so a refusal now asks Windows what is still there — see MtkNativeBench.DescribeBusAfterRefusal.
+    var wrongEchoLeftBus = new FakeMtkTransport(recordedReplies)
+    {
+        ReplyOverride = (0, "fe"),
+        BusNote = "COM3 is gone; what is left on the bus has no COM port at all (0e8d:20FF) — the phone re-enumerated"
+    };
+    string leftBusText = await BootFailure(wrongEchoLeftBus);
+    Check(leftBusText.Contains("Still on the bus: COM3 is gone") && leftBusText.Contains("0e8d:20FF"),
+        "MTK boot: a refused echo also reports that the phone left the face — a wrong-mode phone and a wrong-settings port are different repairs");
+    var timeoutStillThere = new FakeMtkTransport(recordedReplies)
+    {
+        HoldBack = recordedReplies.Length,
+        BusNote = "COM3 is still enumerated as 0e8d:0003 — the phone did not move"
+    };
+    string stillThereText = await BootFailure(timeoutStillThere);
+    Check(stillThereText.Contains("timed out") && stillThereText.Contains("Still on the bus: COM3 is still enumerated"),
+        "MTK boot: a timeout carries the same bus answer, so silence from a phone that stayed is not read as a disappearance");
+    var busQueryBroken = new FakeMtkTransport(recordedReplies) { ReplyOverride = (0, "fe"), BusThrows = true };
+    string brokenBusText = await BootFailure(busQueryBroken);
+    Check(brokenBusText.Contains("did not repeat") && brokenBusText.Contains("Still on the bus: unknown"),
+        "MTK boot: a bus re-check that throws never replaces the real refusal — it reports that it could not look");
+    var busSilent = new FakeMtkTransport(recordedReplies) { ReplyOverride = (0, "fe"), BusNote = "  " };
+    Check((await BootFailure(busSilent)).Contains("Still on the bus: the bus reported nothing"),
+        "MTK boot: an empty bus answer is admitted as nothing reported, not phrased as if the phone had been seen");
     var refusedStatus = new FakeMtkTransport(recordedReplies) { ReplyOverride = (7, "0001") };
     Check((await BootFailure(refusedStatus)).Contains("recorded boot was accepted"), "MTK boot: a status word that is not zero stops the boot");
+    Check((await BootFailure(new FakeMtkTransport(recordedReplies) { ReplyOverride = (7, "0001") }))
+              .Contains("Still on the wire:"),
+        "MTK B4.14: a refused status says what was still on the wire — a phone that answered and went quiet is a different shape from one that is still talking");
+    // RUN 29 (2026-11-01): every native boot refuses at the same status word, 0x1D1A, and the question the panel
+    // asks is whether the phone answered that as a BROM or as a DA it had already jumped into. The status refusal
+    // was the only failure that did not look at the bus, so the run that decides that question could not answer it.
+    var refusedStatusMoved = new FakeMtkTransport(recordedReplies)
+    {
+        ReplyOverride = (7, "1d1a"),
+        BusNote = "0e8d:0003 is gone; the bus now carries 0e8d:2001 — the phone re-enumerated mid-boot rather than waiting in BROM"
+    };
+    string refusedMovedText = await BootFailure(refusedStatusMoved);
+    Check(refusedMovedText.Contains("non-zero status 0x1D1A") && refusedMovedText.Contains("Still on the bus: 0e8d:0003 is gone"),
+        "MTK B4.21: a refused status word names the face the phone is on now — BROM-stayed and DA-jumped are different failures and only the bus can tell them");
+    var refusedStatusStayed = new FakeMtkTransport(recordedReplies)
+    {
+        ReplyOverride = (7, "1d1a"),
+        BusNote = "the bus still carries 0e8d:0003 — the phone did not move"
+    };
+    Check((await BootFailure(refusedStatusStayed)).Contains("Still on the bus: the bus still carries 0e8d:0003"),
+        "MTK B4.21: a refused status from a phone that stayed on the BROM face says it stayed, so the refusal is read as a refusal and not as a disappearance");
     var noAck = new FakeMtkTransport(recordedReplies) { ReplyOverride = (17, "0000") };
     Check((await BootFailure(noAck)).Contains("DA1 alive byte"), "MTK boot: without the 0xc0 ack the DA stage is never attempted");
     var silent = new FakeMtkTransport(recordedReplies[..18]);
@@ -1434,6 +1667,619 @@ try
         "MTK boot: a DA header declaring a length the recipe does not expect is refused before the payload is read");
     var badMagic = new FakeMtkTransport(recordedReplies) { ReplyOverride = (18, "efeeff0e0100000004000000") };
     Check((await BootFailure(badMagic)).Contains("expected an MTK DA header"), "MTK boot: a non-DA frame where a header was recorded is refused");
+
+    // ==== B4.5 — the raw-USB pipe and the BROM→DA face handoff ========================================
+    //
+    // The same-window A/B (2026-10-30) settled the transport question with evidence instead of theory: the client
+    // that demonstrably boots this phone talks to the device's bulk endpoints and never opens a COM port, while our
+    // serial pipe was refused 0xfd → 0xfe on a face that B4.4 proved was still enumerated as 0e8d:0003. And a
+    // successful boot does not stay on one node — the phone re-enumerates (measured: started on 0E8D:0003, the DA
+    // answered as 0E8D:2001 with a different COM number), so the DA stage of the recipe cannot run on the handle the
+    // BROM stage opened. Everything assertable about that lives in these pure helpers; the pipes themselves are the
+    // un-linked transports.
+    var cdcComm = new MtkNativeBench.MtkBulkPair(0, 0x02, 0x00, 0x84);   // the measured CDC communication interface: interrupt endpoint only
+    var cdcData = new MtkNativeBench.MtkBulkPair(1, 0x0A, 0x01, 0x81);   // the measured CDC data interface: bulk OUT 0x01 / bulk IN 0x81
+    Check(MtkNativeBench.ChooseBulkPair(new[] { cdcComm, cdcData }) == cdcData,
+        "MTK raw USB: a CDC composite is claimed on the data interface — writing to the communication interface is a silent dead end");
+    var vendorPair = new MtkNativeBench.MtkBulkPair(0, 0xFF, 0x02, 0x82);
+    Check(MtkNativeBench.ChooseBulkPair(new[] { vendorPair }) == vendorPair,
+        "MTK raw USB: a face that is not a CDC composite still gets its one real bulk pair, because the rule is the endpoints, not the class");
+    Check(MtkNativeBench.ChooseBulkPair(new[] { new MtkNativeBench.MtkBulkPair(0, 0x0A, 0x01, 0x00) }) == null &&
+          MtkNativeBench.ChooseBulkPair(Array.Empty<MtkNativeBench.MtkBulkPair>()) == null &&
+          MtkNativeBench.ChooseBulkPair(null) == null,
+        "MTK raw USB: a half-present endpoint pair is refused rather than guessed — a session on 0x00 never answers");
+
+    // A run is only evidence if a later run can tell what differed, so the two knobs no capture has ever measured
+    // (DTR/RTS) and the greeting the pipe heard before we spoke have to survive into the log line.
+    string serialLine = MtkNativeBench.DescribeSerialOpen("com3", "0E8D:0003", false, false, new byte[] { 0xfe });
+    Check(serialLine == "COM3 0e8d:0003 [serial, DTR off/RTS off, pre-write wire: FE]",
+        "MTK pipe log: the serial description names the port, the control lines and what the face volunteered first");
+    Check(MtkNativeBench.DescribeSerialOpen(null, "0003", true, true, null).Contains("? 0e8d:0003 [serial, DTR on/RTS on, pre-write wire: nothing") &&
+          MtkNativeBench.DescribeSerialOpen("COM3", "0003", false, false, new byte[0]).Contains("DTR off/RTS off"),
+        "MTK pipe log: a missing port is admitted as '?', and DTR/RTS are reported on both edges — 115200/DTR-on has never been tried on this phone");
+    string usbLine = MtkNativeBench.DescribeUsbOpen(0x0E8D, 0x0003, cdcData, null);
+    Check(usbLine == "usb 0E8D:0003 [raw bulk, iface 1 class 0x0A, OUT 0x01 / IN 0x81, no COM driver in the way, pre-write wire: nothing]",
+        "MTK pipe log: the raw-USB description carries the claimed interface and both endpoint addresses, so a refusal says which endpoint was actually written");
+
+    Check(MtkNativeBench.DescribeBusAfterRefusalUsb("0003", new[] { "0E8D:0003" }).Contains("the bus still carries 0e8d:0003"),
+        "MTK raw USB refusal: a phone that stayed in BROM is reported as staying — the answer it gave is the answer it gives");
+    Check(MtkNativeBench.DescribeBusAfterRefusalUsb("0003", Array.Empty<string>()).Contains("no MediaTek device is on the bus at all"),
+        "MTK raw USB refusal: a bare bus means the phone left download mode, not that our command was wrong");
+    string usbMoved = MtkNativeBench.DescribeBusAfterRefusalUsb("0003", new[] { " 0E8D:2001 ", "2001", "20FF" });
+    Check(usbMoved.Contains("0e8d:0003 is gone; the bus now carries 0e8d:2001, 0e8d:20FF") && !usbMoved.Contains("2001, 0e8d:2001"),
+        "MTK raw USB refusal: re-enumeration is told apart from disappearance, with padding, the 0E8D prefix and duplicate faces normalised away");
+    Check(MtkNativeBench.DescribeBusAfterRefusalUsb("0E8D:0003", new[] { " 0003 " }).Contains("the bus still carries 0e8d:0003"),
+        "MTK raw USB refusal: a face written with its VID prefix or stray spaces is still recognised as the face we started on");
+    Check(MtkNativeBench.DescribeBusAfterRefusalUsb(null, null).Contains("no MediaTek device is on the bus at all"),
+        "MTK raw USB refusal: a refusal with no recorded face still produces a readable bus answer instead of throwing");
+
+    // ---- B4.8: a claim race is retried on a fresh handle, and a competing client is refused by name ----------
+    //
+    // RUN 15 (2026-10-31 10:03) could not claim the node on the first open and the old fallback selected the
+    // configuration to break the tie. Every 0xfd after that came back 0xfe, and the working client never selects a
+    // configuration at all — so the tie is now broken by closing and re-opening, which sends the phone nothing.
+    string claimNote = MtkNativeBench.UsbClaimRetryNote(1, TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(12),
+        "libusb -12: Resource busy; device configuration 1, driver WinUsb");
+    Check(claimNote != null && claimNote.Contains("claim attempt 1") && claimNote.Contains("nothing has been sent") &&
+          !claimNote.Contains("SET_CONFIGURATION") && !claimNote.Contains("re-initialis"),
+        "MTK raw USB: a claim race is retried with a note that says nothing reached the phone — the configuration is never selected");
+    Check(MtkNativeBench.UsbClaimRetryNote(1, TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(12), "x") == null &&
+          MtkNativeBench.UsbClaimRetryNote(3, TimeSpan.FromSeconds(13), TimeSpan.FromSeconds(12), "x") == null,
+        "MTK raw USB: the retry budget is bounded — a spent budget hands the refusal back instead of retrying forever");
+    bool attemptZeroRefused = false;
+    try { MtkNativeBench.UsbClaimRetryNote(0, TimeSpan.Zero, TimeSpan.FromSeconds(12), null); }
+    catch (ArgumentOutOfRangeException) { attemptZeroRefused = true; }
+    Check(attemptZeroRefused, "MTK raw USB: attempts are numbered from 1, and a caller that forgets cannot silently look like a retry");
+
+    // A second MediaTek client is the mechanism that makes a node unclaimable: it polls for the face and takes it
+    // first. RUN 15's takeover is exactly the two-master state this refuses before any byte is sent.
+    Check(MtkNativeBench.CompetingClient(new[] { "explorer", "mtk", "notepad" }) == "mtk.exe" &&
+          MtkNativeBench.CompetingClient(new[] { "MTKClient.EXE" }) == "mtkclient.exe" &&
+          MtkNativeBench.CompetingClient(new[] { "explorer", "PMKUnlocker" }) == null &&
+          MtkNativeBench.CompetingClient(null) == null,
+        "MTK raw USB: a running mtkclient/SP Flash Tool-style client is named before a native boot, and an unrelated process list never blocks it");
+
+    // ---- B4.9: the face is opened through libusb-1.0, and the log names the backend that did it ------------
+    //
+    // RUN 16 (2026-10-31 10:14) got as far as "driver LibUsb" and then 28 failed claims of interface 1 —
+    // DeviceIoControl 0x222054 → ERROR_BAD_COMMAND — because LibUsbDotNet had opened the node through its legacy
+    // libusb-win32 backend, which cannot claim a CDC data interface on this machine. mtkclient claims the same
+    // interface through libusb-1.0, so B4.9 moves the open there; these strings are the only part of that decision
+    // the offline suite can hold still, and a run that refuses has to say which backend it refused on.
+    string viaLibUsb = MtkNativeBench.UsbOpenVia("0E8D:0003 (MediaTek USB Port_V1633)",
+        "the libusb-1.0 session, " + MtkNativeBench.UsbBackendText(0));
+    Check(viaLibUsb.StartsWith(" MTK USB — opened 0E8D:0003") && viaLibUsb.Contains("libusb-1.0") &&
+          viaLibUsb.Contains("UsbDk backend engaged") &&
+          !viaLibUsb.Contains("SET_CONFIGURATION") && !viaLibUsb.Contains("re-initialis"),
+        "MTK raw USB: a successful open names the face and the libusb-1.0/UsbDk backend that took it — RUN 16's legacy path can be told apart at a glance");
+    Check(MtkNativeBench.UsbOpenVia(null, null).Contains("opened the face through an unnamed backend") &&
+          MtkNativeBench.UsbOpenVia("  ", "  ").Trim().Length > 0,
+        "MTK raw USB: a missing face or backend still yields a readable line instead of throwing");
+
+    // ---- B4.10: the session is switched to UsbDk before it is enumerated, and the switch is reported --------
+    //
+    // RUN 17 (2026-10-31 10:35) opened 0E8D:0003 through libusb-1.0 and then failed the claim with libusb -3
+    // ACCESS: the bundled 1.0.22 defaults to WinUSB, which cannot take an interface usbser already owns (COM3 was
+    // on the same phone). A probe on the same DLL measured libusb_set_option(ctx, USE_USBDK) -> 0 followed by a
+    // successful claim of a kbdhid-owned interface. The rc is the whole difference between a phone refusal and a
+    // backend that never switched, so both the verdict and the error vocabulary are pinned here.
+    string usbDkOn = MtkNativeBench.UsbBackendText(0);
+    Check(usbDkOn.Contains("UsbDk backend engaged") && usbDkOn.Contains("libusb_set_option -> 0") &&
+          usbDkOn.Contains("interface another driver holds"),
+        "MTK raw USB: rc 0 from set_option is reported as the UsbDk route that can claim a driver-held interface");
+    string usbDkFailed = MtkNativeBench.UsbBackendText(-5);
+    Check(usbDkFailed.Contains("WinUSB backend only") && usbDkFailed.Contains("-5") &&
+          usbDkFailed.Contains("not the phone"),
+        "MTK raw USB: a failed switch is reported as the WinUSB route — RUN 17's ErrorAccess is named as the backend, not the phone");
+    Check(MtkNativeBench.UsbBackendText(int.MinValue).Contains("no backend switch was attempted") &&
+          MtkNativeBench.UsbBackendText(int.MinValue).Contains("RUN 17"),
+        "MTK raw USB: a session that was never switched says so instead of printing a meaningless rc");
+    Check(MtkNativeBench.UsbErrorText(0) == "success" &&
+          MtkNativeBench.UsbErrorText(-3).Contains("Access denied") &&
+          MtkNativeBench.UsbErrorText(-3).Contains("RUN 17") &&
+          MtkNativeBench.UsbErrorText(-7).Contains("timeout") &&
+          MtkNativeBench.UsbErrorText(-6).Contains("resource busy"),
+        "MTK raw USB: libusb's error numbers are translated — RUN 17's -3 ACCESS and the busy/-7 cases a claim race produces are readable without a header file");
+    Check(MtkNativeBench.UsbErrorText(-99).Contains("-99"),
+        "MTK raw USB: an unmapped libusb code keeps its number instead of being given an invented meaning");
+
+    // The handoff itself: the recipe splits across two faces, and every way it can fail has to leave the phone
+    // exactly where the jump put it, with no DA frame ever sent into the BROM handle.
+    var bromFace = new FakeMtkTransport(recordedReplies[..18]) { Description = "FAKE-USB 0E8D:0003" };
+    var daFace = new FakeMtkTransport(recordedReplies[18..]) { Description = "FAKE-USB 0E8D:2001" };
+    int bromStageWrites = 0;
+    var splitLines = new List<string>();
+    var splitBooted = await MtkDaSession.BootAsync(bromFace, bootProfile, splitLines.Add, default,
+        300, 300, 300, new FakeStageHandoff(() => daFace));
+    bromStageWrites = bromFace.Writes.Count;
+    Check(splitBooted.DaIsReady && splitBooted.DeviceHwCode == 0x0766,
+        "MTK boot: the recipe completes when the DA stage runs on the face the phone came back as, not on the BROM pipe");
+    Check(bromFace.Disposed && splitBooted.TransportDescription == "FAKE-USB 0E8D:2001",
+        "MTK boot: the BROM handle is released once the new face is live, and the session reports the pipe it is now on");
+    Check(bromStageWrites > 0 && daFace.Writes.Count == 29 - bromStageWrites &&
+          bromFace.Writes.Concat(daFace.Writes).SelectMany(w => w).Count() == 173,
+        "MTK boot: split across two faces the recipe is still exactly 29 writes / 173 bytes — the handoff neither skips nor duplicates a step");
+    bool IsDaFrame(byte[] w) => w.Length >= 4 && w[0] == 0xEF && w[1] == 0xEE && w[2] == 0xEE && w[3] == 0xFE;
+    Check(bromFace.Writes.All(w => !IsDaFrame(w)) && daFace.Writes.Any(IsDaFrame),
+        "MTK boot: no DA frame is ever written into the BROM pipe — a half-applied recipe is what this session exists to prevent");
+    Check(splitLines.Any(l => l.Contains("the BROM jumped")) &&
+          splitLines.Any(l => l.Contains("DA face is live on FAKE-USB 0E8D:2001")),
+        "MTK boot: the operator sees both halves of the handoff — that the phone was waited for, and which face answered");
+    splitBooted.Dispose();
+
+    var handoffMissing = new FakeMtkTransport(recordedReplies[..18]);
+    string faceNeverCame = await BootFailure(handoffMissing,
+        new FakeStageHandoff(() => throw new IOException("the DA face never appeared")));
+    Check(faceNeverCame.Contains("The BROM stage completed and the DA face could not be opened") &&
+          faceNeverCame.Contains("before any DA frame was sent"),
+        "MTK boot: a DA face that never arrives stops the boot with the jump state named, and no half-recipe follows it");
+    Check(handoffMissing.Writes.Count == bromStageWrites,
+        "MTK boot: the failed handoff leaves the BROM pipe with exactly the BROM-stage writes — the refusal does not resend the recipe");
+    Check((await BootFailure(new FakeMtkTransport(recordedReplies[..18]), new FakeStageHandoff(() => null)))
+              .Contains("returned no transport"),
+        "MTK boot: a handoff that answers with no pipe is refused outright instead of being written into");
+    string handoffRefused = await BootFailure(new FakeMtkTransport(recordedReplies[..18]),
+        new FakeStageHandoff(() => throw new MtkDaProtocolException("No single MediaTek DA face appeared within 30 s")));
+    Check(handoffRefused.StartsWith("MtkDaProtocolException") && handoffRefused.Contains("No single MediaTek DA face"),
+        "MTK boot: the handoff's own refusal reaches the operator verbatim — a message that already explains itself is never re-wrapped");
+
+    // RUN 12 (2026-10-30 17:25) put the same byte on the same endpoint pair the working client had used and got
+    // 0xfe back again. One byte and then silence is also what a command that landed before the BROM was listening
+    // looks like, and the two are indistinguishable from one answer — so the read-only proof is asked again, for
+    // as long as a start-up takes. RUN 14 (2026-10-31 09:53) measured that window: three asks inside two seconds
+    // all drew 0xfe, and mtkclient — started a second later on the same plug — walked the phone into DA1.
+    var proofLate = new FakeMtkTransport(new[] { "fe", "" }.Concat(recordedReplies).ToArray());
+    var proofLateLines = new List<string>();
+    var proofLateBooted = await MtkDaSession.BootAsync(proofLate, bootProfile, proofLateLines.Add, default,
+        300, 300, 300, null, 25, 10);
+    Check(proofLateBooted.DaIsReady && proofLateBooted.DeviceHwCode == 0x0766,
+        "MTK boot: a face that proves itself on the second ask still boots — a BROM that was not listening yet is not a wrong mode");
+    Check(proofLate.Writes.Count == 30 && proofLate.WrittenBytes == 174 &&
+          proofLate.Writes[0].SequenceEqual(new byte[] { 0xFD }) && proofLate.Writes[1].SequenceEqual(new byte[] { 0xFD }) &&
+          proofLate.Writes[2].SequenceEqual(new byte[] { 0xD8 }),
+        "MTK boot: the retry re-sends exactly the one proof byte — no other step is ever repeated and nothing else goes out early");
+    Check(proofLateLines.Any(l => l.Contains("attempt 1 of 25 answered 0xFE instead of repeating 0xFD") &&
+                                  l.Contains("nothing has been written to the phone")) &&
+          proofLateLines.Any(l => l.Contains("repeated 0xFD on attempt 2 of 25")),
+        "MTK boot: both halves of the retry are in the log — that the first answer was wrong, and which ask proved the face");
+    proofLateBooted.Dispose();
+
+    // The window has to cover a start-up, not two seconds: RUN 14's phone answered wrongly for a whole handful of
+    // handshakes before mtkclient got through. So success on the twentieth ask must still boot, and it must be
+    // reported as such rather than silently accepted.
+    var proofSlow = new FakeMtkTransport(
+        Enumerable.Repeat(new[] { "fe", "" }, 19).SelectMany(x => x).Concat(recordedReplies).ToArray());
+    var proofSlowLines = new List<string>();
+    var proofSlowBooted = await MtkDaSession.BootAsync(proofSlow, bootProfile, proofSlowLines.Add, default,
+        300, 300, 300, null, 25, 10);
+    Check(proofSlowBooted.DaIsReady && proofSlow.Writes.Count == 19 + 29 &&
+          proofSlow.Writes.Take(19).All(w => w.SequenceEqual(new byte[] { 0xFD })),
+        "MTK boot: a face that only starts echoing on the twentieth ask inside the start-up window still boots");
+    Check(proofSlowLines.Any(l => l.Contains("attempt 19 of 25") ) &&
+          proofSlowLines.Any(l => l.Contains("repeated 0xFD on attempt 20 of 25")),
+        "MTK boot: the long retry admits every wrong ask and names the one that worked — the operator sees how late the BROM woke up");
+    proofSlowBooted.Dispose();
+
+    var proofNever = new FakeMtkTransport(
+        Enumerable.Repeat(new[] { "fe", "" }, 25).SelectMany(x => x).ToArray());
+    string proofNeverText = await BootFailure(proofNever, null, 25, 10);
+    Check(proofNeverText.Contains("did not repeat") && proofNever.Writes.Count == 25,
+        "MTK boot: a face that never echoes is refused with the recorded message after the whole window, one byte per ask");
+
+    // B4.11: silence is the same "not answering yet" state as a wrong byte — RUN 14's mtkclient also spent a
+    // "Handshake failed" before it got through, and a BROM whose USB handler is not up answers nothing at all.
+    var proofSilent = new FakeMtkTransport(recordedReplies) { HoldBack = recordedReplies.Length };
+    string proofSilentText = await BootFailure(proofSilent, null, 3, 10);
+    Check(proofSilent.Writes.Count == 3 && proofSilentText.Contains("timed out"),
+        "MTK boot: silence during the proof is asked again inside the window — a silent BROM is a BROM that has not woken up yet");
+    var proofSilentThenAwake = new FakeMtkTransport(new[] { "", "", "" }.Concat(recordedReplies).ToArray());
+    var proofSilentAwakeLines = new List<string>();
+    var proofSilentAwake = await MtkDaSession.BootAsync(proofSilentThenAwake, bootProfile, proofSilentAwakeLines.Add,
+        default, 300, 300, 300, null, 25, 10);
+    Check(proofSilentAwake.DaIsReady && proofSilentThenAwake.Writes.Count == 31,
+        "MTK boot: a face that is silent for three asks and then echoes still boots, and the recipe is not nudged out of order for it");
+    Check(proofSilentAwakeLines.Any(l => l.Contains("answered nothing instead of repeating 0xFD")),
+        "MTK boot: a silent ask is logged as silence by the proof, not as a wrong answer");
+    proofSilentAwake.Dispose();
+
+    // ==== B4.11 — the proof survives a dead pipe (RUN 18) ==============================================
+    //
+    // RUN 18 (2026-10-31 10:57) answered 0xFE six times and then the seventh write died: `libusb -9 pipe error,
+    // 0/1 byte(s) accepted`, and the boot was refused "with the recipe half-applied" although only the one read-only
+    // byte had ever been sent. The working client's own recovery is to close the node and re-detect it between
+    // handshake retries, so with a recovery seam every failed ask now gets a freshly claimed pipe.
+    var pipeDied = new FakeMtkTransport(recordedReplies) { FailWriteAt = 1 };
+    var reclaimed = new FakeMtkTransport(recordedReplies) { Description = "FAKE-USB 0E8D:0003 reclaimed" };
+    var pipeDiedLines = new List<string>();
+    var recovery = new FakeBromRecovery(() => reclaimed);
+    var pipeDiedBooted = await MtkDaSession.BootAsync(pipeDied, bootProfile, pipeDiedLines.Add, default,
+        300, 300, 300, null, 25, 10, recovery);
+    Check(pipeDiedBooted.DaIsReady && pipeDiedBooted.DeviceHwCode == 0x0766 && recovery.Calls == 1 &&
+          pipeDied.Disposed && pipeDiedBooted.TransportDescription == "FAKE-USB 0E8D:0003 reclaimed",
+        "MTK boot: a pipe that dies under the first proof byte is reclaimed once and the boot continues on it — RUN 18's failure is a retry, not the end");
+    Check(pipeDied.Writes.Count == 0 && reclaimed.Writes.Count == 29 &&
+          reclaimed.Writes[0].SequenceEqual(new byte[] { 0xFD }),
+        "MTK boot: a byte that never left the host is not counted as sent, and the fresh pipe starts at the one read-only byte — no step is skipped or replayed out of order");
+    Check(pipeDiedLines.Any(l => l.Contains("could not even deliver the byte") && l.Contains("libusb -9 pipe error")) &&
+          pipeDiedLines.Any(l => l.Contains("the face is back on FAKE-USB 0E8D:0003 reclaimed")) &&
+          pipeDiedLines.Any(l => l.Contains("repeated 0xFD on attempt 2 of 25")),
+        "MTK boot: the operator sees the pipe die, the reclaim succeed, and which ask finally proved the face");
+    pipeDiedBooted.Dispose();
+
+    var wrongFirst = new FakeMtkTransport(new[] { "fe", "" });
+    var afterReclaim = new FakeMtkTransport(recordedReplies) { Description = "FAKE-USB 0E8D:0003 second claim" };
+    var wrongFirstLines = new List<string>();
+    var wrongFirstRecovery = new FakeBromRecovery(() => afterReclaim);
+    var wrongFirstBooted = await MtkDaSession.BootAsync(wrongFirst, bootProfile, wrongFirstLines.Add, default,
+        300, 300, 300, null, 25, 10, wrongFirstRecovery);
+    Check(wrongFirstBooted.DaIsReady && wrongFirstRecovery.Calls == 1 && wrongFirst.Writes.Count == 1 &&
+          afterReclaim.Writes.Count == 29,
+        "MTK boot: a wrong one-byte answer is retried on a freshly claimed pipe, the way the working client closes and re-detects between its own handshake retries");
+    Check(wrongFirstLines.Any(l => l.Contains("answered 0xFE instead of repeating 0xFD") &&
+                                   l.Contains("on a freshly claimed pipe")),
+        "MTK boot: the retry line says the pipe is reclaimed first, so a later reader can tell this from a plain re-write");
+    wrongFirstBooted.Dispose();
+
+    var faceStayedAway = new FakeMtkTransport(recordedReplies) { FailWriteAt = 1 };
+    string faceStayedAwayText = await BootFailure(faceStayedAway, null, 25, 10, new FakeBromRecovery(() => null));
+    Check(faceStayedAwayText.Contains("libusb -9 pipe error") && faceStayedAwayText.Contains("did not come back") &&
+          faceStayedAwayText.Contains("Nothing else was written") && faceStayedAwayText.Contains("hold BOTH volume keys"),
+        "MTK boot: a face that does not come back after the pipe died stops the boot with the measured cause, what was sent, and the recovery step — not a generic half-recipe warning");
+    Check(faceStayedAway.Writes.Count == 0 && faceStayedAway.Disposed,
+        "MTK boot: the refusal closes the dead pipe and leaves the recipe at zero delivered bytes");
+
+    var reclaimThrew = new FakeMtkTransport(recordedReplies) { FailWriteAt = 1 };
+    string reclaimThrewText = await BootFailure(reclaimThrew, null, 25, 10,
+        new FakeBromRecovery(() => throw new MtkDaProtocolException("0E8D:0003 could not be used over raw USB: the data interface 1 is still held")));
+    Check(reclaimThrewText.Contains("did not come back") && reclaimThrewText.Contains("still held"),
+        "MTK boot: a face that returns but cannot be claimed is refused with the claim's own reason instead of a silent stop");
+
+    Check(MtkNativeBench.TransportFailureBrief(
+              "Writing 1 byte(s) to usb 0E8D:0003 [raw bulk] failed (libusb -9 pipe error, 0/1 byte(s) accepted). The device may have left BROM; the boot was stopped with the recipe half-applied.")
+          == "(libusb -9 pipe error, 0/1 byte(s) accepted)",
+        "MTK B4.11: the retry line quotes only the measured cause of a pipe failure, not the half-recipe warning that does not apply mid-proof");
+    Check(MtkNativeBench.TransportFailureBrief("Something went wrong. Nothing was sent.") == "Something went wrong." &&
+          MtkNativeBench.TransportFailureBrief("") == "(no detail was recorded)",
+        "MTK B4.11: a message with no 'failed (...)' clause is quoted up to its first sentence rather than truncated or invented");
+
+    // ==== B4.12 — the measured BROM USB handshake (run P, 2026-10-31) ================================
+    //
+    // Run P finally answered why RUN 10..19 all got 0xfd -> 0xfe: a face on 0E8D:0003 that has not exchanged
+    // A0/0A/50/05 (each answered by its bitwise complement) replies to EVERY byte with (b + 1) & 0xFF and executes
+    // nothing — 0xFD -> 0xFE, 0x00 -> 0x01, 0x7F -> 0x80. mtkclient's 197 "Handshake failed, retrying..." lines were
+    // that same state, not a refused command. The handshake is a hardware-pipe step in front of the recipe's own
+    // 0xFD query; these checks pin the bytes, their order, and what a face that refuses them costs.
+    Check(MtkBrom.HandshakeTranscript() == "A0->5F 0A->F5 50->AF 05->FA" &&
+          MtkBrom.HandshakeSequence.SequenceEqual(new byte[] { 0xA0, 0x0A, 0x50, 0x05 }),
+        "MTK B4.12: the handshake is exactly the four pairs run P recorded on the Redmi 9A — A0->5F 0A->F5 50->AF 05->FA");
+    Check(MtkBrom.HandshakeReply(0x00) == 0xFF && MtkBrom.HandshakeReply(0xFF) == 0x00 &&
+          MtkBrom.HandshakeReply(0xFD) == 0x02,
+        "MTK B4.12: the expected answer is the bitwise complement for every byte, wrap cases included");
+
+    var handshaken = new FakeMtkTransport(new[] { "5f", "f5", "af", "fa" }.Concat(recordedReplies).ToArray());
+    var handshakeLines = new List<string>();
+    var handshakeBooted = await MtkDaSession.BootAsync(handshaken, bootProfile, handshakeLines.Add, default,
+        300, 300, 300, bromHandshake: true);
+    Check(handshakeBooted.DaIsReady && handshakeBooted.DeviceHwCode == 0x0766 && handshaken.Writes.Count == 33 &&
+          handshaken.WrittenBytes == 177,
+        "MTK boot: a hardware pipe runs the four handshake bytes and then the unchanged 29-write / 173-byte recipe");
+    Check(handshaken.Writes.Take(4).Select(w => w[0]).SequenceEqual(new byte[] { 0xA0, 0x0A, 0x50, 0x05 }) &&
+          handshaken.Writes[4].SequenceEqual(new byte[] { 0xFD }),
+        "MTK boot: the handshake is four separate one-byte writes in the measured order, and the HW-code query follows only after the last complement arrived");
+    Check(handshakeLines.Any(l => l.Contains("BROM handshake complete: A0->5F 0A->F5 50->AF 05->FA")),
+        "MTK boot: the completed handshake is in the log with its transcript, so a later run can compare the wire byte for byte");
+    handshakeBooted.Dispose();
+
+    // A preloader face shares the VID/PID and even answers the first pair; pair 2 is where it stops being a BROM.
+    // Every attempt after that must be refused before a command byte — and the refusal has to name the pair.
+    var preloaderFace = new FakeMtkTransport(new[] { "5f", "f6", "5f", "f6", "5f", "f6" });
+    var preloaderLines = new List<string>();
+    string preloaderText;
+    try
+    {
+        var preloaderSession = await MtkDaSession.BootAsync(preloaderFace, bootProfile, preloaderLines.Add, default,
+            300, 300, 300, null, 3, 10, null, bromHandshake: true);
+        preloaderSession.Dispose();
+        preloaderText = "(booted, no refusal)";
+    }
+    catch (Exception ex) { preloaderText = ex.GetType().Name + ": " + ex.Message; }
+    Check(preloaderText.Contains("pair 2 of 4") && preloaderText.Contains("expected its complement 0xF5") &&
+          preloaderText.Contains("got 0xF6"),
+        "MTK boot: a face that answers 0xA0 with its complement but not 0x0A is not a BROM — refused at pair 2 with the measured expectation named");
+    Check(preloaderFace.Writes.Count == 6 && preloaderFace.Writes.All(w => w.Length == 1 && w[0] != 0xFD),
+        "MTK boot: a failed handshake never lets the HW-code query out — each attempt stops at the pair that broke it");
+    Check(preloaderLines.Any(l => l.Contains("was refused during the BROM handshake (0xF6 where a complement was due)") &&
+                                  l.Contains("no command has run on the phone")),
+        "MTK boot: the retry line says the face refused the handshake and that no command has run — not that 0xFD was wrong");
+
+    // The handshake belongs to the pipe, not to each attempt: a face that handshakes and then answers 0xFD with the
+    // pre-handshake 0xFE must have the query returned, never the four greeting bytes again (nothing measures what a
+    // second handshake does to a BROM that is already listening).
+    var greetedOnce = new FakeMtkTransport(new[] { "5f", "f5", "af", "fa", "fe", "" }.Concat(recordedReplies).ToArray());
+    var greetedOnceLines = new List<string>();
+    var greetedOnceBooted = await MtkDaSession.BootAsync(greetedOnce, bootProfile, greetedOnceLines.Add, default,
+        300, 300, 300, null, 25, 10, null, bromHandshake: true);
+    Check(greetedOnceBooted.DaIsReady && greetedOnce.Writes.Count == 34 && greetedOnce.WrittenBytes == 178 &&
+          greetedOnce.Writes[4].SequenceEqual(new byte[] { 0xFD }) && greetedOnce.Writes[5].SequenceEqual(new byte[] { 0xFD }) &&
+          greetedOnce.Writes[6].SequenceEqual(new byte[] { 0xD8 }),
+        "MTK boot: after one completed handshake the retry re-sends only the 0xFD query — the greeting is per pipe, never per attempt");
+    Check(greetedOnceLines.Any(l => l.Contains("repeated 0xFD on attempt 2 of 25")) &&
+          greetedOnceLines.Count(l => l.Contains("BROM handshake complete")) == 1,
+        "MTK boot: the handshake is reported once even when the query had to be asked twice");
+    greetedOnceBooted.Dispose();
+
+    // A pipe reclaimed mid-handshake is a new face: it has to be greeted again, and the boot still has to finish.
+    var handshakeDied = new FakeMtkTransport(new[] { "5f" }) { FailWriteAt = 2 };
+    var regreeted = new FakeMtkTransport(new[] { "5f", "f5", "af", "fa" }.Concat(recordedReplies).ToArray())
+        { Description = "FAKE-USB 0E8D:0003 re-greeted" };
+    var regreetLines = new List<string>();
+    var regreetBooted = await MtkDaSession.BootAsync(handshakeDied, bootProfile, regreetLines.Add, default,
+        300, 300, 300, null, 25, 10, new FakeBromRecovery(() => regreeted), bromHandshake: true);
+    Check(regreetBooted.DaIsReady && regreeted.Writes.Count == 33 &&
+          regreeted.Writes.Take(4).Select(w => w[0]).SequenceEqual(new byte[] { 0xA0, 0x0A, 0x50, 0x05 }),
+        "MTK boot: a pipe that dies mid-handshake is reclaimed and greeted again from the start — the DA still comes up");
+    Check(regreetLines.Any(l => l.Contains("could not deliver the BROM handshake (libusb -9 pipe error")) &&
+          regreetLines.Any(l => l.Contains("the face is back on FAKE-USB 0E8D:0003 re-greeted")),
+        "MTK boot: the operator sees the handshake die on a pipe, the reclaim, and the boot continuing there");
+    regreetBooted.Dispose();
+
+    // RUN 20 (2026-10-31 14:04) measured the one handshake shape that is not a refusal: a BROM that is ALREADY
+    // past the greet answers the greeting byte with itself (0xA0 -> 0xA0), because that is the echo a greeted BROM
+    // gives a command. The greet lives in the phone, not in our pipe, so a second Boot DA against a phone that was
+    // booted once sees exactly that — and refusing it refused a phone that was ready to take the query.
+    var alreadyGreeted = new FakeMtkTransport(new[] { "a0" }.Concat(recordedReplies).ToArray());
+    var greetedLines = new List<string>();
+    var greetedBooted = await MtkDaSession.BootAsync(alreadyGreeted, bootProfile, greetedLines.Add, default,
+        300, 300, 300, null, 25, 10, null, bromHandshake: true);
+    Check(greetedBooted.DaIsReady && alreadyGreeted.Writes.Count == 30 && alreadyGreeted.WrittenBytes == 174 &&
+          alreadyGreeted.Writes[0].SequenceEqual(new byte[] { 0xA0 }) &&
+          alreadyGreeted.Writes[1].SequenceEqual(new byte[] { 0xFD }),
+        "MTK boot: a face that is already past the greet (0xA0 comes back as 0xA0) is not greeted again — the read-only query follows and the boot still finishes");
+    Check(greetedLines.Any(l => l.Contains("already past the greet")) &&
+          !greetedLines.Any(l => l.Contains("BROM handshake complete")),
+        "MTK boot: the already-greeted face is reported as already greeted — the operator is not told a greeting happened that did not");
+    greetedBooted.Dispose();
+
+    // Already greeted is not the same as proven: the HW-code answer is still the decider, so a face that echoes the
+    // greeting and then reports another chipset is refused instead of being taken for the phone.
+    var greetedWrongHw = new FakeMtkTransport(new[] { "a0" }.Concat(recordedReplies).ToArray())
+        { ReplyOverride = (2, "07670000") };
+    string greetedWrongText;
+    try
+    {
+        var refused = await MtkDaSession.BootAsync(greetedWrongHw, bootProfile, null, default, 300, 300, 300,
+            null, 3, 10, null, bromHandshake: true);
+        refused.Dispose();
+        greetedWrongText = "(booted, no refusal)";
+    }
+    catch (Exception ex) { greetedWrongText = ex.GetType().Name + ": " + ex.Message; }
+    Check(greetedWrongText.Contains("reports HW code 0x0767"),
+        "MTK boot: an already-greeted face still has to prove its HW code — the greeting is not a proof by itself");
+
+    // The small BROM replies are the only way to see that a phone's own state matches the recording, so a hardware
+    // pipe prints them. A recorded replay stays quiet: that dump belongs to a real phone, not to the fixture.
+    var replyLines = new List<string>();
+    var replyBooted = await MtkDaSession.BootAsync(
+        new FakeMtkTransport(new[] { "5f", "f5", "af", "fa" }.Concat(recordedReplies).ToArray()),
+        bootProfile, replyLines.Add, default, 300, 300, 300, bromHandshake: true);
+    Check(replyLines.Any(l => l.Contains("BROM reply 5 (6 byte(s), content not checked): 0x000000E70000")),
+        "MTK boot: a hardware run prints the small BROM replies (target config, version words) so the next run can be compared with the recording");
+    Check(!bootLines.Any(l => l.Contains("BROM reply")),
+        "MTK boot: a recorded replay stays quiet — the reply dump belongs to a real phone, not to the fixture");
+    replyBooted.Dispose();
+
+    // ==== B4.14 — the wire trace on a hardware run =====================================================
+    //
+    // RUN 20 (2026-10-31 14:03) stopped 64 steps into the recorded boot on a status word the recording does not
+    // have — 0x1D1A where the capture has 0000 — while the working client sends byte-identical commands to the same
+    // phone and is answered 0000. Everything we SEND was known; nothing we RECEIVED was, so the answers are the
+    // only thing left to look at. The trace prints them for the first steps of a hardware run, which is what makes
+    // "the phone answered something else here" a comparison instead of a guess.
+    var wireLines = new List<string>();
+    var wireBooted = await MtkDaSession.BootAsync(
+        new FakeMtkTransport(new[] { "5f", "f5", "af", "fa" }.Concat(recordedReplies).ToArray()),
+        bootProfile, wireLines.Add, default, 300, 300, 300, bromHandshake: true);
+    Check(wireLines.Any(l => l.Contains("BROM wire ") && l.Contains(": tx 0x")) &&
+          wireLines.Any(l => l.Contains("BROM wire ") && l.Contains(": rx 0x")),
+        "MTK B4.14: a hardware run prints the wire it used — the bytes it sent and the bytes it got back");
+    Check(wireLines.Any(l => l.Contains("BROM wire ") && l.Contains(": rx 0x000000E70000")),
+        "MTK B4.14: the trace carries the small answers verbatim, so the next run can be compared with the recording byte for byte");
+    Check(!wireLines.Any(l => l.Contains("BROM wire ") && l.Contains("efeeeefe")),
+        "MTK B4.14: the DA stage is not traced — the frame stream that follows does not belong in a log file");
+    Check(!bootLines.Any(l => l.Contains("BROM wire")),
+        "MTK B4.14: a recorded replay stays quiet — the trace belongs to a real phone, not to the fixture");
+    wireBooted.Dispose();
+
+    // ==== B4.16 — the pacing knobs (RUN 22) =========================================================
+    //
+    // RUN 21 (2026-10-31 14:40) replayed 64 recorded steps byte for byte, was refused at step 65, and did the whole
+    // session inside one second — while the working client, which is Python and pays a round trip per command, sends
+    // the same bytes over the same face and is answered. The protocol is not what differs, so the pace is the half
+    // that has never been tried. These three numbers are read from a file per run, so a timing experiment costs a text
+    // file and not a rebuild.
+    string pacingRoot = Path.Combine(dir, "pacing-root");
+    string pacingSession = Path.Combine(pacingRoot, "MediaTekSessions", "native-da");
+    Directory.CreateDirectory(pacingSession);
+    var noNote = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(noNote.Startup == 0 && noNote.Settle == 0 && noNote.Step == 0 && noNote.Greet,
+        "MTK B4.16: a missing pacing note means no pacing — the recorded timing is the default, not a failure");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"),
+        "# operator note" + Environment.NewLine + "startup=120" + Environment.NewLine + "settle= 80 " +
+        Environment.NewLine + "step=5" + Environment.NewLine + "unknown=9" + Environment.NewLine + "broken=x");
+    var pacingNote = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(pacingNote.Startup == 120 && pacingNote.Settle == 80 && pacingNote.Step == 5,
+        "MTK B4.16: the note is read per run — three numbers, no rebuild, unknown keys ignored");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "startup=-5" + Environment.NewLine + "step=abc");
+    var brokenNote = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(brokenNote.Startup == 0 && brokenNote.Settle == 0 && brokenNote.Step == 0 && brokenNote.Greet,
+        "MTK B4.16: a note with a negative or unreadable number means no pacing — a broken note never stops a boot");
+
+    var pacedLines = new List<string>();
+    var pacedClock = Stopwatch.StartNew();
+    var pacedTransport = new FakeMtkTransport(new[] { "5f", "f5", "af", "fa" }.Concat(recordedReplies).ToArray());
+    var pacedBooted = await MtkDaSession.BootAsync(
+        pacedTransport,
+        bootProfile, pacedLines.Add, default, 300, 300, 300, bromHandshake: true,
+        bromStartupMs: 120, bromSettleMs: 80, bromStepMs: 5);
+    pacedClock.Stop();
+    Check(pacedLines.Any(l => l.Contains("BROM pacing: 120 ms before the greet, 80 ms after it, 5 ms after every BROM step")),
+        "MTK B4.16: the pacing a run used is in the log — a slow run and a fast run can be told apart afterwards");
+    Check(pacedClock.ElapsedMilliseconds >= 180,
+        "MTK B4.16: a hardware run really waits — the startup and settle pauses are on the clock, not only in the log");
+    pacedBooted.Dispose();
+
+    // The capture keeps the timing it was recorded with: the knobs are for a phone, not for the recording.
+    var replayPacedLines = new List<string>();
+    var replayPacedClock = Stopwatch.StartNew();
+    var replayPaced = await MtkDaSession.BootAsync(new FakeMtkTransport(recordedReplies), bootProfile,
+        replayPacedLines.Add, default, 300, 300, 300,
+        bromStartupMs: 5000, bromSettleMs: 5000, bromStepMs: 5000);
+    replayPacedClock.Stop();
+    Check(replayPacedLines.Any(l => l.Contains("(not applied — this is a recorded replay)")) &&
+          replayPacedClock.ElapsedMilliseconds < 1000,
+        "MTK B4.16: a recorded replay ignores the pacing — the capture keeps its own timing");
+    replayPaced.Dispose();
+
+    // ==== B4.17 — the greeting switch (RUN 23) =====================================================
+    //
+    // The wire is now diffed against the working client command by command: our first 65 wire entries are its
+    // first 65, byte for byte, TX and RX alike — until the phone refuses our read of 0xBD80 with 0x1D1A where it
+    // answered 0000 and handed back the data. The one thing our client puts on the wire that the working client does
+    // not is the four-pair greet: its own log has no handshake byte at all, its first TX is the read-only query.
+    // So the greet is the first thing a trial has to be able to take out — and it has to be takeable without a
+    // rebuild, because every attempt on the phone is expensive.
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"),
+        "startup=1000" + Environment.NewLine + "settle=500" + Environment.NewLine + "step=50" +
+        Environment.NewLine + "greet=off");
+    var greetless = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(!greetless.Greet && greetless.Startup == 1000 && greetless.Settle == 500 && greetless.Step == 50,
+        "MTK B4.17: the note can take the four-pair greet out while keeping the timing — one file, no rebuild");
+
+    var greetlessLines = new List<string>();
+    var greetlessTransport = new FakeMtkTransport(recordedReplies);
+    var greetlessBooted = await MtkDaSession.BootAsync(greetlessTransport, bootProfile,
+        greetlessLines.Add, default, 300, 300, 300, bromHandshake: true, bromGreet: false);
+    Check(greetlessBooted.DaIsReady && greetlessBooted.DeviceHwCode == 0x0766 &&
+          greetlessTransport.Writes.Count == 29 && greetlessTransport.Writes[0].SequenceEqual(new byte[] { 0xFD }),
+        "MTK B4.17: with the greet off the recipe's own query is the first byte on the wire — the working client's shape");
+    Check(greetlessTransport.Writes.Count == 29 && pacedTransport.Writes.Count == 33 &&
+          pacedTransport.Writes.Take(4).Select(w => w[0]).SequenceEqual(new byte[] { 0xA0, 0x0A, 0x50, 0x05 }),
+        "MTK B4.17: the greet is exactly four one-byte writes — off means four fewer bytes on the wire");
+    Check(greetlessLines.Any(l => l.Contains("BROM greet: off — the recipe's first byte is the first byte on the wire")) &&
+          pacedLines.Any(l => l.Contains("BROM greet: on — the four pairs go out before the recipe's first byte")),
+        "MTK B4.17: every run says in its log whether it greeted — a later run can tell the two shapes apart");
+    greetlessBooted.Dispose();
+
+    // ==== B4.20 — the two USB-level knobs the working client's API trace shows ============================
+    //
+    // The wire diff left exactly one divergence: our first 65 entries are the working client's, byte for byte, and
+    // step 65 (`da 0 0000bd80 4`) is answered 0x1D1A by the phone where mtk.exe on the same phone, minutes apart,
+    // gets 0000 + 64281000 (control 2026-11-01 08:02 and 08:28, both exit 0). So the answer is below the command
+    // log. Running mtk.exe with LIBUSB_DEBUG=4 (that 08:28 control boot, stderr 25 MB, 9366 transfers) prints its
+    // whole open: libusb_open → libusb_get_configuration ("active config 0") → libusb_set_configuration
+    // ("configuration 1") → libusb_claim_interface 0 → libusb_claim_interface 1. Zero libusb_reset_device and zero
+    // set_interface_alt_setting, so B4.8's removal of the reset still stands — but B4.8's "the working client never
+    // selects a configuration" was read off a log that could not show it, and it is wrong. These knobs are how one
+    // hardware run gets to test that without a rebuild, and the checks below are the fail-closed rules that keep a
+    // knob from inventing a number or claiming an interface nobody measured.
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "setconfig=on" + Environment.NewLine + "claimall=on");
+    var usbKnobs = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(usbKnobs.SetConfig && usbKnobs.ClaimAll && usbKnobs.Greet && usbKnobs.Startup == 0,
+        "MTK B4.20: the note can put a USB-level action into a run while leaving the timings and the greet alone — one file, no rebuild");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "greet=off" + Environment.NewLine + "setconfig=1");
+    var unspoken = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(!unspoken.SetConfig && !unspoken.ClaimAll && !unspoken.Greet,
+        "MTK B4.20: only an explicit on puts a control request on the wire — a value that is not 'on' or 'off' never does");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "startup=0" + Environment.NewLine + "settle=0" +
+        Environment.NewLine + "step=0" + Environment.NewLine + "greet=on");
+    var plainNote = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(MtkNativeBench.DescribeKnobs(plainNote) == null && MtkNativeBench.DescribeKnobs(noNote) == null,
+        "MTK B4.20: a note that changes nothing prints nothing — RUN 27/28's shape stays the recognisable default");
+    Check(MtkNativeBench.DescribeKnobs(usbKnobs).Contains("SET_CONFIGURATION") &&
+          MtkNativeBench.DescribeKnobs(usbKnobs).Contains("every interface"),
+        "MTK B4.20: a run that changes the device's USB state says which change in its own log line");
+
+    Check(MtkNativeBench.ConfigValueToSelect(false, 1, 1) == 0,
+        "MTK B4.20: with setconfig off no configuration request goes on the wire at all — the plain run is untouched");
+    Check(MtkNativeBench.ConfigValueToSelect(true, 1, 0) == 1 && MtkNativeBench.ConfigValueToSelect(true, 2, 1) == 2,
+        "MTK B4.20: a face already in a configuration gets that same value back — the request is the working client's, the number is the device's");
+    Check(MtkNativeBench.ConfigValueToSelect(true, 0, 1) == 1,
+        "MTK B4.20: a face reporting 'active config 0' — what the control boot measured — takes the value off its own descriptor, which is where its 'configuration 1' comes from");
+    Check(MtkNativeBench.ConfigValueToSelect(true, 0, 0) == 0,
+        "MTK B4.20: a configuration number that would have to be guessed is refused, not invented — 0 means the transport must not send anything");
+
+    Check(MtkNativeBench.InterfacesToClaim(1, new[] { 0, 1 }, false).SequenceEqual(new[] { 1 }),
+        "MTK B4.20: with claimall off exactly the data interface is claimed, so the plain open still matches RUN 27/28's");
+    Check(MtkNativeBench.InterfacesToClaim(1, new[] { 1, 0 }, true).SequenceEqual(new[] { 0, 1 }),
+        "MTK B4.20: with claimall on the claims go out in ascending order — interface 0 then interface 1, the order the API trace shows");
+    Check(MtkNativeBench.InterfacesToClaim(0, new[] { 0 }, true).SequenceEqual(new[] { 0 }),
+        "MTK B4.20: a one-interface face is not claimed twice — the set is the descriptor's, deduplicated");
+    Check(MtkNativeBench.InterfacesToClaim(3, Array.Empty<int>(), true).SequenceEqual(new[] { 3 }),
+        "MTK B4.20: a face whose descriptor shows nothing else still claims the interface carrying the bulk pair — the knob never loses the boot");
+
+    // ==== B4.24 — the third knob, from running OUR client under the same API trace =======================
+    //
+    // RUN 32 (2026-11-01 10:19:50, PMKUnlocker.exe with LIBUSB_DEBUG=4, six boots, step 65 refused again) closed the
+    // open as the divergence — get_configuration → set_configuration(1) → claim 0 → claim 1 is now ours too — and
+    // showed the reads are not. Our transport asks for bytes on a 50 ms timer, so each empty wait ends in a host-side
+    // abort: 45 "errcode 995 → detected operation aborted → actual_length=0" completions in one boot, and a median
+    // 26 ms between submissions. The working client arms one bulk transfer at 1000 ms, waits 1.9 ms apart, and aborts
+    // twice in 9366 transfers. Same bytes, different USB. arm= is how one run gets to be theirs.
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "greet=on" + Environment.NewLine + "setconfig=on" +
+        Environment.NewLine + "claimall=on" + Environment.NewLine + "arm=1000");
+    var armed = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(armed.Arm == 1000 && armed.SetConfig && armed.ClaimAll && armed.Greet && armed.Step == 0,
+        "MTK B4.24: arm= sets the read wait and nothing else — the USB-level knobs RUN 30 proved stay exactly as they were");
+    Check(MtkNativeBench.DescribeKnobs(armed).Contains("armed 1000 ms"),
+        "MTK B4.24: a run that changes how it waits on the bus names that wait in its own log line, so tomorrow's diff knows which shape produced today's bytes");
+    Check(noNote.Arm == 0 && plainNote.Arm == 0 && MtkNativeBench.DescribeKnobs(noNote) == null,
+        "MTK B4.24: no note, or a note that never mentions arm, means the 50 ms poll — RUN 32's shape stays the default");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "arm=off");
+    Check(MtkNativeBench.ReadKnobs(pacingRoot).Arm == 0,
+        "MTK B4.24: a value that is not a number cannot arm anything — a typo in the note never changes the transport");
+    Check(MtkNativeBench.ReadArmMs(0) == 0 && MtkNativeBench.ReadArmMs(-5) == 0,
+        "MTK B4.24: 0 and a negative number both mean 'poll', which is the run that has been recorded every time so far");
+    Check(MtkNativeBench.ReadArmMs(1000) == 1000,
+        "MTK B4.24: the working client's arm value passes through untouched — the trial is its number, not ours");
+    Check(MtkNativeBench.ReadArmMs(900_000) == MtkNativeBench.MaxReadArmMs,
+        "MTK B4.24: an arm long enough to outlast a step's own timeout is refused — a wait belongs under the recipe, not above it");
+    // MtkUsbOpenOptions itself is not asserted here: it lives in MtkUsbTransport.cs, which this console test does not
+    // link (MonoLibUsb needs the Windows-targeted app). What it carries is the number above, and the hardware run
+    // names the shape it opened with — which is exactly how RUN 32's trace was read.
+
+    // ==== B4.25 — the fourth knob, and the first one that is not about the wire at all ===================
+    //
+    // RUN 33 (2026-11-01 10:40:36, raw USB, cold complete greet, arm=1000) made our reads the working client's reads —
+    // 84 transfers, 5 of them empty, 79 carrying real bytes, one open, one handle — and step 65 answered 0x1D1A
+    // anyway. The same trace then said something plainer: every completion is logged at the timestamp of its own
+    // submit ("poll() returned 1", revents already set), so the phone is never waited for, and the 26-45 ms between
+    // two wire events sits entirely between libusb_free_transfer and the next libusb_alloc_transfer. That is our own
+    // code: one synchronous rtbLog.Invoke plus a ScrollToCaret per line, on the thread driving the phone, while the
+    // working client's prelude runs 19x faster. uiwire=off stops paying it for the per-byte chatter.
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "greet=on" + Environment.NewLine + "setconfig=on" +
+        Environment.NewLine + "claimall=on" + Environment.NewLine + "arm=1000" + Environment.NewLine + "uiwire=off");
+    var batched = MtkNativeBench.ReadKnobs(pacingRoot);
+    Check(!batched.UiWire && batched.Arm == 1000 && batched.SetConfig && batched.ClaimAll && batched.Greet,
+        "MTK B4.25: uiwire=off takes the per-line UI round-trip out and disturbs no knob RUN 33 was run with — one variable, not six");
+    Check(MtkNativeBench.DescribeKnobs(batched).Contains("batched"),
+        "MTK B4.25: a run that logs differently says so, so a pace measured tomorrow can be attributed to the shape that produced it");
+    Check(armed.UiWire && noNote.UiWire && plainNote.UiWire,
+        "MTK B4.25: every note that never mentions uiwire keeps RUN 33's behaviour — one UI line per wire line is the default");
+    File.WriteAllText(Path.Combine(pacingSession, "pacing.txt"), "uiwire=maybe");
+    Check(MtkNativeBench.ReadKnobs(pacingRoot).UiWire,
+        "MTK B4.25: only an explicit on/off counts — a typo in the note cannot change how a live boot reports itself");
+
+    Check(MtkNativeBench.IsWireChatter(" [i] BROM wire 41: tx 0x00000000"),
+        "MTK B4.25: the per-byte tx line is the chatter that may wait for the screen — it is 60 of the 65 steps");
+    Check(MtkNativeBench.IsWireChatter(" [i] BROM reply 34 (4 byte(s), content not checked): 0x00000020") &&
+        MtkNativeBench.IsWireChatter(" [i] DA packet 3: 65536 byte(s)"),
+        "MTK B4.25: replies and DA frames are the same kind of line, and the DA stage produces thousands of them per partition");
+    Check(!MtkNativeBench.IsWireChatter("[+] BROM face proven: HW 0x0766 (MT6765).") &&
+        !MtkNativeBench.IsWireChatter("[FAIL] Native DA boot: Step 65: the device answered with a non-zero status 0x1D1A.") &&
+        !MtkNativeBench.IsWireChatter("[*] Native DA knobs — startup 0 ms"),
+        "MTK B4.25: a verdict, a refusal or an instruction is never batched — the lines that decide a run reach the screen on their own");
+    Check(!MtkNativeBench.IsWireChatter(" [i] BROM pacing: 0 ms before the greet") && !MtkNativeBench.IsWireChatter(""),
+        "MTK B4.25: an [i] line that is not about a byte on the wire stays synchronous, and an empty line is never chatter");
 
     // ==== B3 — the DA command layer on top of the booted session ======================================
     //
@@ -1867,6 +2713,104 @@ try
     Check((await firstOp).Length == 0x1000, "MTK B3: the read that was already in flight completed untouched once its status arrived");
     mSes.Dispose();
 
+    // ---- B4: the NATIVE tab's gates, asserted without a form, a port or a phone -----------------------
+    Check(MtkNativeBench.DiscoverProfiles().All(File.Exists),
+        "MTK B4: recipe discovery reads the installed tree and never invents a recipe path — an empty folder is a normal state");
+    Check(MtkBootProfile.FindProfiles(Path.Combine(dir, "no-such-recipes")).Count == 0,
+        "MTK B4: with no boot recipe there is nothing to list, so the NATIVE tab does not exist — fail-closed by absence, not a clickable guess");
+    Check(MtkNativeBench.SessionDirectory(Path.Combine(dir, "data")).EndsWith(Path.Combine("MediaTekSessions", "native-da")) &&
+          MtkNativeBench.SessionDirectory(Path.Combine(dir, "data")).StartsWith(Path.GetFullPath(Path.Combine(dir, "data"))),
+        "MTK B4: native dumps get their own folder under the tool's data directory — a GUID-named mtkclient session folder can never be overwritten");
+    Check(MtkNativeBench.SafePartitionToken("logo") == "logo" && MtkNativeBench.SafePartitionToken("boot_a") == "boot_a",
+        "MTK B4: real GPT names survive the filename filter untouched");
+    Check(MtkNativeBench.SafePartitionToken("../../windows/system32") == "windowssystem32",
+        "MTK B4: a device-supplied name cannot carry path syntax into a dump filename");
+    bool blankNamed = false;
+    try { MtkNativeBench.SafePartitionToken("  ..  "); } catch (InvalidOperationException) { blankNamed = true; }
+    Check(blankNamed, "MTK B4: a name with no filename-safe characters is a refusal, not a dump file named '.img'");
+    Check(MtkNativeBench.SafePartitionToken(new string('x', 90)).Length == 40,
+        "MTK B4: an absurd partition name is bounded, so the dump path cannot blow past MAX_PATH");
+    string benchData = Path.Combine(dir, "bench-data");
+    string dump1 = MtkNativeBench.DumpPathFor(benchData, "logo", new DateTime(2026, 10, 30, 14, 5, 6));
+    Check(Path.GetFileName(dump1) == "logo-20261030-140506.img" && Directory.Exists(Path.GetDirectoryName(dump1)),
+        "MTK B4: a dump lands as one timestamped .img in a folder that is created for it, so two runs never collide");
+    Check(Path.GetDirectoryName(MtkNativeBench.DumpPathFor(benchData, "../escape", DateTime.Now)) ==
+          MtkNativeBench.SessionDirectory(benchData),
+        "MTK B4: even a name that looks like traversal is resolved inside the dump folder — the harness cannot be aimed at an arbitrary path");
+    Check(MtkNativeBench.BootBlocker(true, false)!.Contains("already open") &&
+          MtkNativeBench.BootBlocker(false, true)!.Contains("mtkclient") &&
+          MtkNativeBench.BootBlocker(false, false) == null,
+        "MTK B4: a second boot and a boot beside a running mtkclient are both refused in words — one MTK VCOM has exactly one master");
+    Check(!MtkNativeBench.ProgramAllowed("flashinfo", out string whyFlashinfo) && whyFlashinfo.Contains("bricks"),
+        "MTK B4: the UI refuses a never-program name before the dialog, and says plainly that it is a brick rather than a repair");
+    Check(MtkNativeBench.ProgramAllowed("logo", out _), "MTK B4: an ordinary partition passes the same gate, so the guard is a list and not a blanket no");
+    string restoreText = MtkNativeBench.ConfirmText("restore", new MtkDaExtent("logo", 2987008, 2989055, 512), @"C:\dumps\logo.img");
+    Check(restoreText.Contains("0x5b280000") && restoreText.Contains("logo.img") && restoreText.Contains("read back"),
+        "MTK B4: the restore confirmation shows the exact byte extent and promises the read-back, so agreeing means knowing what is written");
+    string eraseText = MtkNativeBench.ConfirmText("erase", new MtkDaExtent("logo", 2987008, 2989055, 512), null);
+    Check(eraseText.Contains("1 MiB") && eraseText.Contains("not proven"),
+        "MTK B4: the erase confirmation says the DA's acceptance is not measured zeroing — no operator is allowed to think it was wiped for certain");
+    bool unknownOp = false;
+    try { MtkNativeBench.ConfirmText("format-all", new MtkDaExtent("logo", 2987008, 2989055, 512), null); }
+    catch (ArgumentException) { unknownOp = true; }
+    Check(unknownOp, "MTK B4: an operation with no written confirmation text cannot be shown — the dialog is enumerated, not improvised");
+    Check(MtkNativeBench.StatusLine(false, "", 0, 0).Contains("closed") &&
+          MtkNativeBench.StatusLine(true, "COM7 0E8D:0003", 0x0766, 44).Contains("44 partition(s)"),
+        "MTK B4: the tab states what the session is in the same words a screenshot of a bench run carries");
+    Check(MtkNativeBench.ProgressLine("dump logo", 25) == "dump logo — 25%",
+        "MTK B4: progress is labelled with the operation it belongs to, so a bar cannot be read as something else's");
+    Check(Path.GetFileName(MtkNativeBench.BenchLogPath(benchData)) == "native-da.log" &&
+          Path.GetDirectoryName(MtkNativeBench.BenchLogPath(benchData)) == MtkNativeBench.SessionDirectory(benchData),
+        "MTK B4: the bench log lives in the native folder and nowhere else — a real run can never overwrite an mtkclient recording");
+
+    string loggedData = Path.Combine(dir, "log-data");
+    string logPath = MtkNativeBench.BenchLogPath(loggedData);
+    MtkNativeBench.AppendBenchLog(loggedData, "[*] Native DA: waiting for the MTK VCOM", new DateTimeOffset(2026, 10, 30, 14, 5, 6, TimeSpan.FromHours(6.5)));
+    MtkNativeBench.AppendBenchLog(loggedData, "[OK] Native DA session is live on COM7 0E8D:0003", new DateTimeOffset(2026, 10, 30, 14, 5, 19, TimeSpan.FromHours(6.5)));
+    string[] logged = File.ReadAllLines(logPath);
+    Check(logged.Length == 2 && logged[0].Contains("14:05:06") && logged[0].Contains("waiting for the MTK VCOM") &&
+          logged[1].Contains("[OK]") && logged[1].StartsWith("2026-10-30"),
+        "MTK B4: every bench line is timestamped and appended in order, so the first real boot is evidence afterwards and not only on screen");
+
+    string unwrittenData = Path.Combine(dir, "log-refused");
+    bool blankLogged = false;
+    try { MtkNativeBench.AppendBenchLog(unwrittenData, "   ", DateTimeOffset.Now); } catch (ArgumentException) { blankLogged = true; }
+    Check(blankLogged && !File.Exists(MtkNativeBench.BenchLogPath(unwrittenData)),
+        "MTK B4: a blank line is refused before the folder is made — the bench log never collects an empty record of a run that said nothing");
+    Check(MtkNativeBench.FaceBootReadiness("0003") == "measured" && MtkNativeBench.DescribeFace("0003").Contains("stale DA"),
+        "MTK B4: the face a completed boot was measured riding is still named with the RUN 9 caveat — a stale DA wears it too");
+    Check(MtkNativeBench.FaceBootReadiness("2001") == "not-brom" && MtkNativeBench.FaceBootReadiness("20FF") == "not-brom" &&
+          MtkNativeBench.FaceBootReadiness("2000") == "unproven" && MtkNativeBench.FaceBootReadiness("9999") == "unknown",
+        "MTK B4: faces are graded measured / unproven / not-brom / unknown instead of a yes-no, because this bench has proof for one and hints for the rest");
+    Check(MtkNativeBench.DescribeFace("1234").Contains("only the recipe") && MtkNativeBench.DescribeFace("").Contains("????"),
+        "MTK B4: an unknown face is admitted as unknown — the harness never claims a PID proves BROM, the echo does");
+    Check(wrongEchoText.Contains(MtkNativeBench.StaleDaRecovery.Trim()),
+        "MTK B4: a refused handshake carries the recovery that RUN 9 proved necessary, not just the fact that it refused");
+
+    // The refuse-then-recheck wording, branch by branch. This is the sentence an operator reads after a failed
+    // boot on a phone that is no longer where it was, so each shape RUN 11 could have been has to be named.
+    var busStayed = new List<MtkNativeBench.MtkBusNode> { new("0003", "COM3") };
+    string stayedText = MtkNativeBench.DescribeBusAfterRefusal("COM3", "0003", busStayed);
+    Check(stayedText.Contains("still enumerated as 0e8d:0003") && stayedText.Contains("did not move"),
+        "MTK B4: a phone still on the face the boot used is reported as a refusal, not as a disappearance");
+    string pidChangedText = MtkNativeBench.DescribeBusAfterRefusal("COM3", "0003",
+        new List<MtkNativeBench.MtkBusNode> { new("2001", "COM3") });
+    Check(pidChangedText.Contains("now 0e8d:2001") && pidChangedText.Contains("started on 0e8d:0003"),
+        "MTK B4: a COM port that survived the boot but changed PID names both PIDs — a DA arriving on the same port is a real outcome");
+    string movedText = MtkNativeBench.DescribeBusAfterRefusal("COM3", "0003",
+        new List<MtkNativeBench.MtkBusNode> { new("2000", "COM7") });
+    Check(movedText.Contains("COM7=0e8d:2000") && movedText.Contains("different serial face"),
+        "MTK B4: a phone that moved to another serial face is reported with the face it moved to");
+    string hidText = MtkNativeBench.DescribeBusAfterRefusal("COM3", "0003",
+        new List<MtkNativeBench.MtkBusNode> { new("20FF", null) });
+    Check(hidText.Contains("no COM port at all") && hidText.Contains("0e8d:20FF"),
+        "MTK B4: RUN 11's real shape — COM3 gone, a HID-only face left — reads as a phone that re-enumerated, not as a dead port");
+    Check(MtkNativeBench.DescribeBusAfterRefusal("COM3", "0003", new List<MtkNativeBench.MtkBusNode>()).Contains("no MediaTek node"),
+        "MTK B4: an empty bus is named as the phone leaving, which is the one thing no byte on the wire can show");
+    Check(MtkNativeBench.DescribeBusAfterRefusal(null, null, null).Contains("is gone") &&
+          MtkNativeBench.DescribeBusAfterRefusal("com3", "0003", new List<MtkNativeBench.MtkBusNode> { new("0003", "COM3") }).Contains("did not move"),
+        "MTK B4: the phrasing survives a missing port, a missing snapshot and lower-case input instead of throwing at the moment of a refusal");
+
     Console.WriteLine($"{passed} regression checks passed.");
 
 
@@ -1902,18 +2846,52 @@ internal sealed class FakeMtkTransport : IMtkTransport
     /// <summary>How many of the scripted replies to keep back, so an operation can be left mid-flight on purpose.</summary>
     public int HoldBack { get; set; }
 
+    /// <summary>
+    /// Answer this exact reply every time the queue runs dry, however many times it is asked — a device that keeps
+    /// giving the same answer instead of a script that advances.
+    /// </summary>
+    public string? AlwaysReply { get; set; }
+
     public FakeMtkTransport(string[] replies) => _replies = replies.ToList();
 
     /// <summary>Script what the device answers next, once the boot has consumed its recorded replies.</summary>
     public void Append(IEnumerable<string> more) => _replies.AddRange(more);
 
-    public string Description => "FAKE-COM";
+    public string Description { get; set; } = "FAKE-COM";
+
+    /// <summary>Set when the session releases the pipe — a closed BROM face and a still-open one are different states.</summary>
+    public bool Disposed { get; private set; }
+
+    /// <summary>What the session is told about the bus when it refuses. A scripted device has no bus, so the default is a fixed phrase.</summary>
+    public string BusNote { get; set; } = "FAKE-COM is still enumerated as 0e8d:0003 — scripted device, no real bus";
+
+    /// <summary>
+    /// Make this write (1-based) and every later one die the way RUN 18's seventh did — <c>libusb -9</c>, nothing
+    /// accepted. The failed write is not recorded, because it never left the host.
+    /// </summary>
+    public int FailWriteAt { get; set; }
+
+    public string FailWriteDetail { get; set; } = "libusb -9 pipe error, 0/1 byte(s) accepted";
+
+    /// <summary>Make the bus re-check itself fail, so the rule "a diagnostic never replaces the real refusal" is testable.</summary>
+    public bool BusThrows { get; set; }
+
+    public string BusAfterRefusal() => BusThrows ? throw new IOException("the bus could not be read") : BusNote;
 
     private void StageNext()
     {
         // HoldBack withholds the tail of the script, which is how a test keeps one operation genuinely in
         // flight: this transport answers instantly, so without it every "async" call finishes synchronously.
-        if (_staged.Count > 0 || _next >= _replies.Count - HoldBack) return;
+        if (_staged.Count > 0) return;
+        if (AlwaysReply != null) { _staged.Enqueue(Convert.FromHexString(AlwaysReply)); return; }
+        if (_next >= _replies.Count - HoldBack) return;
+
+        // A scripted "" is the device saying nothing at all: the wire stays silent until the session writes again.
+        // Every capture shows that shape — a BROM answers the frame it was given and then has nothing more to say —
+        // and the tail read has to be able to see it, or a device that answered one byte would look like one that
+        // kept talking.
+        if (_replies[_next].Length == 0) return;
+
         string hex = _replies[_next];
         if (ReplyOverride is { } over && over.Index == _next) hex = over.Hex;
         _next++;
@@ -1938,9 +2916,102 @@ internal sealed class FakeMtkTransport : IMtkTransport
 
     public void Write(byte[] data, int offset, int count)
     {
+        if (FailWriteAt > 0 && Writes.Count + 1 >= FailWriteAt)
+            throw new MtkDaProtocolException("Writing " + count + " byte(s) to " + Description +
+                " failed (" + FailWriteDetail + "). The device may have left BROM; the boot was stopped with the " +
+                "recipe half-applied.") { TransportFailure = true };
         Writes.Add(data.AsSpan(offset, count).ToArray());
         WrittenBytes += count;
+        // A new command opens the wire again after a scripted silence.
+        if (_staged.Count == 0 && AlwaysReply == null && _next < _replies.Count - HoldBack && _replies[_next].Length == 0)
+            _next++;
     }
 
-    public void Dispose() { /* nothing to release; the recorder keeps what it caught */ }
+    public void Dispose() { Disposed = true; /* the recorder keeps what it caught */ }
+}
+
+/// <summary>
+/// The endpoint-zero side of the scripted device. Wraps a <see cref="FakeMtkTransport"/> for the recorded bulk
+/// walk and answers control transfers from a scripted list of libusb results, recording what the boot asked for.
+/// A device under test cannot be present in CI, so the probe expectations — accepted line coding, stalled
+/// descriptor read — are exercised here against the recipe's own recorded bytes.
+/// </summary>
+internal sealed class FakeCtrlTransport : IMtkTransport, IMtkControlTransport
+{
+    private readonly FakeMtkTransport _inner;
+
+    public FakeCtrlTransport(FakeMtkTransport inner) => _inner = inner;
+
+    /// <summary>The 8-byte setup packet of every control transfer the boot sent, in order, as hex.</summary>
+    public List<string> ControlFrames { get; } = new();
+
+    /// <summary>The data stage of every control transfer (payload for OUT, the receive buffer for IN).</summary>
+    public List<byte[]> ControlData { get; } = new();
+
+    /// <summary>Scripted libusb results, consumed one per call; once dry every transfer succeeds with its data length.</summary>
+    public Queue<int> ControlScript { get; } = new();
+
+    public FakeMtkTransport Inner => _inner;
+
+    public int ControlTransfer(byte bmRequestType, byte bRequest, ushort wValue, ushort wIndex, byte[] data, int timeoutMs)
+    {
+        int wLength = data?.Length ?? 0;
+        var setup = new byte[8];
+        setup[0] = bmRequestType;
+        setup[1] = bRequest;
+        setup[2] = (byte)wValue;
+        setup[3] = (byte)(wValue >> 8);
+        setup[4] = (byte)wIndex;
+        setup[5] = (byte)(wIndex >> 8);
+        setup[6] = (byte)wLength;
+        setup[7] = (byte)(wLength >> 8);
+        ControlFrames.Add(Convert.ToHexString(setup));
+        ControlData.Add((byte[])data!.Clone());
+        // Past the script the fake is the recorded device: a host-to-device request is accepted in full, a
+        // device-to-host read stalls (libusb -9) — which is exactly what RUN 38 measured the phone doing.
+        return ControlScript.Count > 0 ? ControlScript.Dequeue()
+             : (bmRequestType & 0x80) != 0 ? -9
+             : wLength;
+    }
+
+    public string Description { get => _inner.Description; set => _inner.Description = value; }
+    public string BusAfterRefusal() => _inner.BusAfterRefusal();
+    public int BytesAvailable => _inner.BytesAvailable;
+    public void Write(byte[] data, int offset, int count) => _inner.Write(data, offset, count);
+    public int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+    public void Dispose() => _inner.Dispose();
+}
+
+/// <summary>
+/// The BROM→DA handoff as a script: hand back the face the test names, throw the way a missing face does, or answer
+/// with nothing at all. What a real handoff does — wait for the phone to re-enumerate — is not what is under test
+/// here; what the session does with each answer is.
+/// </summary>
+internal sealed class FakeStageHandoff : IMtkDaStageHandoff
+{
+    private readonly Func<IMtkTransport?> _open;
+    internal FakeStageHandoff(Func<IMtkTransport?> open) => _open = open;
+
+    public IMtkTransport OpenDaStageTransport(string bromDescription) => _open()!;
+}
+
+/// <summary>
+/// The face proof's second pipe as a script: hand back a fresh pipe, answer with none (the face never came back), or
+/// throw the way a face that returned but cannot be claimed does. What a real reclaim does — wait for the node and
+/// clear its halt — is not under test; what the proof does with each answer is.
+/// </summary>
+internal sealed class FakeBromRecovery : IMtkBromRecovery
+{
+    private readonly Func<IMtkTransport?> _reopen;
+    public int Calls { get; private set; }
+    public int LastWaitMs { get; private set; }
+
+    internal FakeBromRecovery(Func<IMtkTransport?> reopen) => _reopen = reopen;
+
+    public IMtkTransport Reopen(int waitMs)
+    {
+        Calls++;
+        LastWaitMs = waitMs;
+        return _reopen()!;
+    }
 }

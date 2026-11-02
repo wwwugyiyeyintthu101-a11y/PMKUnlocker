@@ -21,6 +21,22 @@ internal sealed class MtkDaProtocolException : IOException
 {
     internal MtkDaProtocolException(string message) : base(message) { }
     internal MtkDaProtocolException(string message, Exception inner) : base(message, inner) { }
+
+    /// <summary>
+    /// Everything the face said in answer to the refused frame: the bytes the recipe expected, plus whatever followed
+    /// them. Null when there was no answer at all (a timeout, a recipe that never made it onto the wire). Carried so
+    /// the one retryable handshake can tell "one byte and then silence" — the only shape that a device which is not
+    /// listening yet and a wrong mode share — from a live disagreement.
+    /// </summary>
+    internal byte[] Observed { get; init; }
+
+    /// <summary>
+    /// True when the byte never left the host, or the pipe died under it: a dead handle rather than a device
+    /// answering wrongly. RUN 18 (2026-10-31) is the measured shape — six one-byte answers, then
+    /// <c>libusb -9 pipe error</c> on the seventh write, and the boot refused as if the recipe had been half applied.
+    /// The face proof is allowed to re-open the pipe on this; every other frame still stops the boot.
+    /// </summary>
+    internal bool TransportFailure { get; init; }
 }
 
 /// <summary>
@@ -33,7 +49,7 @@ internal static class MtkBrom
     internal const byte GetHwCode = 0xfd;          // -> BE u16 code + BE u16 status (0766 0000)
     internal const byte WriteReg = 0xd4;           // + BE addr + BE value -> BE u16 status
     internal const byte GetTargetConfig = 0xd8;    // -> 6 bytes: BE u32 config + BE u16 status
-    internal const byte GetBlVersion = 0xfe;       // handshake / mode select, echoed only
+    internal const byte GetBlVersion = 0xfe;       // echoed only, no argument and no status
     internal const byte GetBromVersion = 0xff;     // -> 1 byte (0x05 on MT6765)
     internal const byte GetHwSwVersion = 0xfc;     // -> BE u16 subcode + BE u16 hwver + BE u32 swver
     internal const byte GetMeId = 0xe1;            // -> BE u32 length + value + BE u16 status
@@ -42,6 +58,35 @@ internal static class MtkBrom
     internal const byte ReadReg = 0xd1;            // observed: BE addr + BE length, then data
     internal const byte SendDa1 = 0xd7;            // stage-1 upload: addr, length, sig length, image
     internal const byte JumpDa1 = 0xd5;            // jump: BE addr, then BE u16 status, then 0xc0
+
+    // ---- the USB handshake that has to come before any command --------------------------------------
+    //
+    // Measured 2026-10-31 (run P, Redmi 9A / MT6765). A face on 0E8D:0003 that has not completed this exchange
+    // answers EVERY byte with (b + 1) & 0xFF — 0xFD -> 0xFE, 0xFC -> 0xFD, 0x00 -> 0x01, 0x7F -> 0x80, 0xFF -> 0x00 —
+    // and never executes a command. That is the shape RUN 10..19 kept refusing: the reply was never a refusal of
+    // 0xFD, it was the face saying "we have not shaken hands". The four bytes below are answered by their bitwise
+    // complement, and only after all four does 0xFD come back as 0xFD followed by the four-byte HW code
+    // (07 66 00 00 on this phone). mtkclient's 197 "Handshake failed, retrying..." lines are the same state seen
+    // from its side, which is why it retries the whole thing rather than the command.
+    //
+    // Pair 1 alone proves nothing: a preloader face carries the same VID/PID and answers 0xA0 with its complement
+    // too. The gate is the whole sequence, all four complements in order.
+    internal static readonly byte[] HandshakeSequence = { 0xA0, 0x0A, 0x50, 0x05 };
+
+    /// <summary>What the BROM answers each handshake byte with: its bitwise complement.</summary>
+    internal static byte HandshakeReply(byte sent) => (byte)~sent;
+
+    /// <summary>The measured exchange in one line, for the log and for refusals ("A0->5F 0A->F5 50->AF 05->FA").</summary>
+    internal static string HandshakeTranscript()
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (byte sent in HandshakeSequence)
+        {
+            if (text.Length > 0) text.Append(' ');
+            text.Append(sent.ToString("X2")).Append("->").Append(HandshakeReply(sent).ToString("X2"));
+        }
+        return text.ToString();
+    }
 
     // Target config bit meanings, as mtkclient decoded the same 0xE7 byte in its own log.
     internal const uint ConfigSbc = 0x01;

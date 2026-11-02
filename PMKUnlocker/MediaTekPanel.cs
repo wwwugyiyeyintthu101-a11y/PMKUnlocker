@@ -382,6 +382,9 @@ public partial class Form1
 
         flashTab.Controls.AddRange(new Control[] { mediaTekSkipUserdata, mediaTekFlashableOnly, mediaTekVerifyReadback, btnMtkClearSel, btnMtkFlash, mediaTekSummary });
 
+        // ---- NATIVE tab (Phase 1.75 Path B bench harness) — only when a boot recipe is actually present ----
+        BuildNativeDaTab();
+
         // ---- Add everything to tabMtk ----
         tabMtk.Controls.AddRange(new Control[] { grpMtkPicker, mtkModes });
 

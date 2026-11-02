@@ -459,6 +459,8 @@ namespace PMKUnlocker
                 SaveSettings();
                 try { devicePollTimer?.Stop(); devicePollTimer?.Dispose(); } catch { }
                 try { clockTimer?.Stop(); clockTimer?.Dispose(); } catch { }
+                // NATIVE DA tab: a held COM port outlives the process and blocks the next bench run
+                try { ReleaseNativeDaSession(); } catch { }
                 try
                 {
                     if (activeProcess != null && !activeProcess.HasExited)

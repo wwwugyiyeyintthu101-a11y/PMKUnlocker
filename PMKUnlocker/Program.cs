@@ -35,6 +35,10 @@ namespace PMKUnlocker
             }
 
             Application.Run(new Form1(licEmail, licPlan, licExp, licDays));
+
+            // libusb-1.0 (the MTK raw-USB backend) runs a foreground event thread: once a native MTK session has
+            // opened it, the window closes but the process would never exit. Measured on a probe, not assumed.
+            MediaTek.MtkUsbTransport.ReleaseLibUsbSession();
         }
 
         // PMKLicenseServer — လက်ရှိ run နေရင် မထောင် (manual start ကို မထိ)၊ remote URL

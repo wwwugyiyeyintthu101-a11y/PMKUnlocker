@@ -37,10 +37,15 @@ namespace PMKUnlocker.MediaTek;
 //           DA1 jumped, "sync" proves the DA is listening rather than merely present.
 //   hdr   - a 12-byte EF EE EE FE DA header; magic and type verified, declared length must match the
 //           payload frame that follows it.
+//   ctrl-ack / ctrl-stall - an endpoint-zero control transfer, recorded as its whole setup packet plus its
+//           data stage. RUN 38 (2026-11-01 15:36, passive USBPcap) measured six of them before every
+//           pre-download jump: a CDC SET_LINE_CODING the device accepts (ctrl-ack) followed by a vendor
+//           descriptor read the device stalls (ctrl-stall). A bulk log cannot see this traffic, which is
+//           why the first 35 boots were byte-identical for 65 steps and were still refused.
 
-internal enum MtkReplyKind { Echo, Zero, LengthOnly, HwCode, DaAlive, Sync, Header }
+internal enum MtkReplyKind { Echo, Zero, LengthOnly, HwCode, DaAlive, Sync, Header, CtrlAck, CtrlStall, Complement }
 
-internal enum MtkStepKind { Tx, Rx, Blob }
+internal enum MtkStepKind { Tx, Rx, Blob, Ctrl }
 
 /// <summary>An expected reply, as recorded: how to verify it and how long it is.</summary>
 internal sealed record MtkReply(MtkReplyKind Kind, int Bytes);
@@ -60,7 +65,7 @@ internal sealed class MtkBootProfile
     private const int MaxSteps = 20000;
     private const int MaxBlobBytes = 64 * 1024 * 1024;
     private static readonly byte[] KnownBromCommands =
-        { 0xfd, 0xd4, 0xd8, 0xfe, 0xff, 0xfc, 0xe1, 0xe7, 0xda, 0xd1, 0xd7, 0xd5 };
+        { 0xfd, 0xd4, 0xd8, 0xfe, 0xff, 0xfc, 0xe1, 0xe7, 0xda, 0xd1, 0xd7, 0xd5, 0xa0, 0x0a, 0x50, 0x05 };
 
     private readonly string _blobDirectory;
     private readonly Dictionary<string, byte[]> _blobCache = new(StringComparer.OrdinalIgnoreCase);
@@ -216,6 +221,43 @@ internal sealed class MtkBootProfile
                     steps.Add(new MtkStep(MtkStepKind.Blob, null, null, file, chunk));
                     break;
                 }
+                case "ctrl":
+                {
+                    // An endpoint-zero control transfer, recorded whole: the 8-byte setup packet followed by
+                    // its data stage when the request is host-to-device. RUN 38 measured the two prelude shapes
+                    // and RUN 39 added the data-less SET_CONTROL_LINE_STATE the payload's re-open uses — the
+                    // loader accepts exactly those, anything else means the recipe was edited by hand.
+                    byte[] frame = ParseHex(ReadString(s, "hex"), ChipsetLabel(chipset, arrayName + " ctrl"));
+                    if (frame.Length < 8)
+                        throw new InvalidDataException(ChipsetLabel(chipset) + " records a control step shorter than " +
+                            "its 8-byte setup packet, which is not a transfer the wire could have carried.");
+                    ushort wLength = (ushort)(frame[6] | frame[7] << 8);
+                    MtkReply expect = ReadReply(s, chipset, arrayName);
+                    if (expect.Kind == MtkReplyKind.CtrlAck)
+                    {
+                        // wLength 0 is legal (RUN 39 measured SET_CONTROL_LINE_STATE accepted with no data stage);
+                        // the shape that is not negotiable is host-to-device with the whole data stage in the frame.
+                        if ((frame[0] & 0x80) != 0 || frame.Length != 8 + wLength)
+                            throw new InvalidDataException(ChipsetLabel(chipset) + " records an accepted control transfer " +
+                                "that is not the measured shape (a host-to-device request whose whole data stage is in the frame). " +
+                                "The boot was refused before anything was loaded.");
+                    }
+                    else if (expect.Kind == MtkReplyKind.CtrlStall)
+                    {
+                        if ((frame[0] & 0x80) == 0 || frame.Length != 8 || wLength == 0)
+                            throw new InvalidDataException(ChipsetLabel(chipset) + " records a refused control read that is not " +
+                                "the measured shape (a device-to-host request carrying no data, refused by the device itself). " +
+                                "The boot was refused before anything was loaded.");
+                    }
+                    else
+                        throw new InvalidDataException(ChipsetLabel(chipset) + " records a control step whose reply kind " +
+                            expect.Kind + " a control transfer cannot carry.");
+                    if (expect.Bytes != wLength)
+                        throw new InvalidDataException(ChipsetLabel(chipset) + " disagrees with itself about a control " +
+                            "transfer's length (" + expect.Bytes + " expected vs " + wLength + " in the setup packet).");
+                    steps.Add(new MtkStep(MtkStepKind.Ctrl, frame, expect, null, 0));
+                    break;
+                }
                 default:
                     throw new InvalidDataException(ChipsetLabel(chipset) + " uses an unknown step kind '" + kind + "'.");
             }
@@ -231,11 +273,17 @@ internal sealed class MtkBootProfile
     {
         string kind = ReadString(step, "k");
         int bytes = ReadInt(step, "bytes");
-        if (bytes <= 0 || bytes > MaxBlobBytes)
+        // Zero is legal only for a data-less control write (SET_CONTROL_LINE_STATE, RUN 39): the transfer is
+        // accepted with no data stage, so there is no reply to read and no frame length to carry.
+        if (bytes < 0 || bytes > MaxBlobBytes || (bytes == 0 && kind != "ctrl-ack"))
             throw new InvalidDataException(ChipsetLabel(chipset) + " expects a reply of " + bytes + " bytes, which is not a frame length.");
-        if (kind == "token")
+        if (kind == "token" || kind is "sync" or "hw-code" or "da-alive")
         {
-            string what = ReadString(step, "what");
+            // The capture script writes the BROM tokens as {"k":"token","what":...} and the DA's SYNC frame as the
+            // bare kind {"k":"sync"}. Both spellings mean the same thing, so both are accepted — but a bare token
+            // still has to carry exactly the byte count that was measured on the wire, which is what the switch
+            // below enforces.
+            string what = kind == "token" ? ReadString(step, "what") : kind;
             return what switch
             {
                 "hw-code" when bytes == 4 => new MtkReply(MtkReplyKind.HwCode, 4),
@@ -245,11 +293,16 @@ internal sealed class MtkBootProfile
                     "' (" + bytes + " bytes) in " + arrayName + ".")
             };
         }
+        if (kind is "ctrl-ack" or "ctrl-stall")
+            return new MtkReply(kind == "ctrl-ack" ? MtkReplyKind.CtrlAck : MtkReplyKind.CtrlStall, bytes);
         return kind switch
         {
             "echo" => new MtkReply(MtkReplyKind.Echo, bytes),
             "zero" => new MtkReply(MtkReplyKind.Zero, bytes),
             "len" => new MtkReply(MtkReplyKind.LengthOnly, bytes),
+            "complement" when bytes == 1 => new MtkReply(MtkReplyKind.Complement, 1),
+            "complement" => throw new InvalidDataException(ChipsetLabel(chipset) + " records a handshake complement of " + bytes +
+                " byte(s); the greet's answer is exactly one byte, so the step was refused."),
             "hdr" => new MtkReply(MtkReplyKind.Header, MtkDaFrame.HeaderSize),
             _ => throw new InvalidDataException(ChipsetLabel(chipset) + " uses an unknown reply kind '" + kind + "' in " + arrayName + ".")
         };
