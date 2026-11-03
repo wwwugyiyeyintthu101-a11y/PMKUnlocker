@@ -1148,12 +1148,13 @@ public partial class Form1
         var result = await MediaTekCommandAsync(new[] { "printgpt" });
         result.RequireSuccess();
         var table = MtkClientEngine.ParseGpt(result);
-        // mtkclient's printgpt does not report the DA geometry, so a table from here carries no binding.
+        // mtkclient's printgpt does not report the DA geometry, so a table from here carries no binding. It still
+        // serves this run through SetLiveTable, but it is deliberately not written to the cache: an unbound table
+        // would be refused on load anyway, and writing it would erase the binding a native boot recorded.
         SetLiveTable(table, null);
         if (mediaTekPackage?.Platform is { Length: > 0 } platform &&
             !result.Lines.Any(l => l.Contains(platform, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Device chipset could not be matched to scatter " + platform + ". Nothing written.");
-        SaveMediaTekGptCache(table);
         if (display)
         {
             mediaTekPackage = null; mediaTekScatter.Clear(); mediaTekGrid.Rows.Clear();
@@ -1181,10 +1182,17 @@ public partial class Form1
         string hex = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(mediaTekPackage.ScatterPath))).ToLowerInvariant();
         return Path.Combine(ShopServices.DataDirectory, "MediaTekGptCache", "gpt-" + hex[..16] + ".json");
     }
-    private void SaveMediaTekGptCache(IReadOnlyList<MtkPartition> table, string binding = null)
+    /// <summary>
+    /// Persist a partition table for reuse, together with the device it came from. A table with no binding is not
+    /// written at all: the cache exists to save a plug cycle, and a table that cannot name its device must never
+    /// become the reason an extent is trusted. Skipping the write also means an mtkclient printgpt cannot erase the
+    /// binding a native boot recorded.
+    /// </summary>
+    private void SaveMediaTekGptCache(IReadOnlyList<MtkPartition> table, string binding)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(binding)) return;
             string file = MtkGptCacheFile();
             if (file == null || table == null || table.Count == 0) return;
             Directory.CreateDirectory(Path.GetDirectoryName(file));
@@ -1207,6 +1215,13 @@ public partial class Form1
             // Files written before B5.4 carry no Binding — an absent field is "unknown device", not "any device".
             if (doc.RootElement.TryGetProperty("Binding", out var bindEl) && bindEl.ValueKind == JsonValueKind.String)
                 binding = bindEl.GetString();
+            // A cache that cannot name the device it came from is not a cache we may use: it would hand the next
+            // phone the previous one's extents. Drop the file so the operator is told once, not on every operation.
+            if (string.IsNullOrWhiteSpace(binding))
+            {
+                try { File.Delete(file); } catch { }
+                return null;
+            }
             var list = new List<MtkPartition>();
             foreach (var e in doc.RootElement.GetProperty("Partitions").EnumerateArray())
                 list.Add(new MtkPartition(e.GetProperty("Name").GetString(),
@@ -1233,12 +1248,15 @@ public partial class Form1
         if (cached != null)
         {
             SetLiveTable(cached, cachedBinding);
-            Log("  * Partition table reused from cache (" + (when ?? "earlier") + ")" +
-                (cachedBinding != null ? " — taken from " + cachedBinding : " — device it came from is not recorded") +
+            Log("  * Partition table reused from cache (" + (when ?? "earlier") + ") — taken from " + cachedBinding +
                 ", no extra plug cycle.", Color.Cyan);
             return cached;
         }
-        Log(" No cached partition table — reading GPT first (one extra cycle).", Color.Orange);
+        if (when != null)
+            Log("  * Cached partition table from " + when + " was ignored — it did not record which device it came " +
+                "from, so its extents are not trusted. Reading the device GPT instead.", Color.Orange);
+        else
+            Log(" No cached partition table — reading GPT first (one extra cycle).", Color.Orange);
         SetProgress(0, "Reading GPT");
         return await ReadMediaTekGptAsync();
     }

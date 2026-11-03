@@ -21,3 +21,11 @@ Release builds and publishing verify all bundled inventory hashes. Restore the
 approved tool inventory when cloning; do not replace missing tools with an empty
 manifest. The per-process PowerShell execution setting in the build does not
 change machine-wide execution policy.
+
+MTK native recipes (`mtk/boot-profiles` next to the exe) are PMK's own DA/EMI
+artefacts: they are not tracked and not shipped, and without them the NATIVE tab
+is deliberately absent. Keep the master copy at
+`%LOCALAPPDATA%\PMKMobileTool\mtk\boot-profiles`; the build copies it into every
+output (`CopyMtkBootRecipes`), so a clean or rebuild cannot silently remove the
+tab. Point `-p:MtkRecipeSource=<folder>` elsewhere if the recipes live outside
+that directory.

@@ -92,6 +92,23 @@
     </Content>
   </ItemGroup>
 
+  <!-- MTK native recipes (mtk\boot-profiles) are PMK's own DA/EMI artefacts: they are not tracked in git and not
+       shipped. Without the folder the NATIVE tab is deliberately absent (BuildNativeDaTab returns early), so a
+       clean/rebuild of bin used to look like a different program. Keep the master copy in the tool's data
+       directory and copy it into every build output; override with -p:MtkRecipeSource=<folder> if it lives
+       somewhere else. -->
+  <PropertyGroup>
+    <MtkRecipeSource Condition="'$(MtkRecipeSource)' == ''">$(UserProfile)\AppData\Local\PMKMobileTool\mtk\boot-profiles</MtkRecipeSource>
+  </PropertyGroup>
+  <Target Name="CopyMtkBootRecipes" BeforeTargets="Build" Condition="Exists('$(MtkRecipeSource)')">
+    <ItemGroup>
+      <_MtkRecipeFile Include="$(MtkRecipeSource)\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MtkRecipeFile)"
+          DestinationFiles="@(_MtkRecipeFile->'$(OutDir)mtk\boot-profiles\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="WriteBuildIntegrity" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
     <PropertyGroup><IntegrityReleaseArguments Condition="'$(Configuration)' == 'Release'">-VerifyBundled</IntegrityReleaseArguments></PropertyGroup>
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File &quot;$(MSBuildProjectDirectory)\..\scripts\write_runtime_integrity.ps1&quot; -SourceRoot &quot;$(MSBuildProjectDirectory)&quot; -OutputRoot &quot;$(TargetDir).&quot; $(IntegrityReleaseArguments)" />
