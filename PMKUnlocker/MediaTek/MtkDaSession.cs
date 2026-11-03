@@ -215,6 +215,15 @@ internal sealed partial class MtkDaSession : IDisposable
     internal bool DaIsReady { get; private set; }
     internal string TransportDescription => _transport.Description;
 
+    /// <summary>
+    /// The chipset the recipe being replayed was recorded on. This is not a name pulled out of the air: the boot
+    /// reads the BROM's own HW code and refuses the run when it differs from this recipe's recorded code, so once
+    /// a session is live the two are proven equal — which is what makes it safe to print as the device's CPU.
+    /// (mtkclient does the same thing: its "CPU:" line is a lookup of the HW code it just read, before any DA
+    /// command has run.)
+    /// </summary>
+    internal string RecipeChipset => _profile.Chipset;
+
     private MtkDaSession(IMtkTransport transport, MtkBootProfile profile, Action<string> log,
         int bromTimeoutMs, int daTimeoutMs, int settleTimeoutMs, IMtkDaStageHandoff handoff = null,
         int proofAttempts = 25, int proofRetryDelayMs = 400, IMtkBromRecovery recovery = null,

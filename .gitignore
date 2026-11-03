@@ -23,6 +23,8 @@ video-review/
 port_trace.txt
 **/hwparam.json
 **/adminkey.txt
+# mtkclient per-run state (MEID / SoC id) - never tracked
+**/.state
 
 # logs & temp
 *.log

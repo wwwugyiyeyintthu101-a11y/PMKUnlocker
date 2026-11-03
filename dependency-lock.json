@@ -32,7 +32,7 @@
                       }
                   ],
     "optionalBackends":  {
-                             "mtkclient":  "Bundled local CLI 2.1.4; files pinned in mtkclient-lock.json; hardware compatibility not validated",
+                             "mtkclient":  "Bundled local CLI 2.2.9 (bkerler/mtkclient @ ebe450da, 2026-08-16); files pinned in mtkclient-lock.json; reset path hardware-validated on MT6765 (2026-10-27, see the lock file's hardwareValidationNote)",
                              "python":  "External, not bundled; supply a complete environment rather than python.exe alone",
                              "edl.py":  "External, not bundled; dependencies and approved loader must be configured"
                          },

@@ -363,8 +363,14 @@ internal sealed record MtkLimits(uint WriteChunkSize, uint TransferPacketSize)
 ///   01000000 00020000 00004000 00000000 00004000 00000000 00004000 00000000
 ///   00000000 00000000 (x4) 0000808f 0e000000 ...
 /// and the only slot order that reproduces all eight printed numbers is type, block size, boot1, boot2,
-/// RPMB, GP1..GP4, USER. The 16 bytes after USER are the eMMC CID; they are deliberately NOT decoded here —
-/// a card serial is device identity and this product does not carry identity values into its records.
+/// RPMB, GP1..GP4, USER. The 16 bytes after USER are the eMMC CID.
+/// B5.4 reads ONE field out of it, and only because the same reply is printed twice by the working client on
+/// one unit — the payload carried <c>150100434a5444345204e992496597ad</c> at +72 while its own log printed both
+/// "EMMC ID: CJTD4R" and "EMMC CID: 150100434a5444345204e992496597ad", so the six ASCII bytes at +75..+80 are
+/// the part number the operator reads as the eMMC's name. That is a part number (every unit of that eMMC model
+/// carries it), not a serial: the bytes after it are the device's own serial and they are NOT decoded, NOT
+/// stored and NOT reachable from any string this record produces. A card serial is device identity and this
+/// product does not carry identity values into its records.
 /// </summary>
 internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Boot1Size, ulong Boot2Size,
     ulong RpmbSize, ulong GeneralPurpose1, ulong GeneralPurpose2, ulong GeneralPurpose3, ulong GeneralPurpose4,
@@ -372,6 +378,38 @@ internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Bo
 {
     /// <summary>1 in every observed reply, printed as "EMMC". Anything else is a storage we have not measured.</summary>
     internal bool IsEmmcUserAddressed => StorageType == 1;
+
+    /// <summary>Where the 16-byte CID sits in the reply, measured from the print cross-check above.</summary>
+    private const int CidOffset = 72;
+
+    /// <summary>Bytes 3..8 of the CID — the six ASCII characters the working client prints as "EMMC ID".</summary>
+    private const int PartNumberOffset = CidOffset + 3;
+
+    private const int PartNumberLength = 6;
+
+    /// <summary>
+    /// The eMMC part number (e.g. "CJTD4R"), or null when the reply is not the measured eMMC layout or the field
+    /// is not printable ASCII. Nothing else from the CID is exposed: the serial bytes after it stay undecoded.
+    /// </summary>
+    internal string EmmcPartNumber { get; init; }
+
+    /// <summary>
+    /// Decodes only the part-number field. A non-printable field yields null rather than a name — an invented
+    /// "EMMC ID" on a status line is worse than none, because the operator reads it as the device's own answer.
+    /// </summary>
+    private static string DecodePartNumber(ReadOnlySpan<byte> payload, uint storageType)
+    {
+        if (storageType != 1) return null;
+        var chars = new char[PartNumberLength];
+        for (int i = 0; i < PartNumberLength; i++)
+        {
+            byte b = payload[PartNumberOffset + i];
+            if (b < 0x20 || b > 0x7e) return null;
+            chars[i] = (char)b;
+        }
+        string name = new(chars);
+        return name.Trim().Length == 0 ? null : name;
+    }
 
     /// <summary>
     /// Every DA extent in the captures is a byte offset into the user area, and the GPT is read in units of
@@ -392,7 +430,10 @@ internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Bo
             MtkDaFrame.ReadUInt64Little(payload, 40),
             MtkDaFrame.ReadUInt64Little(payload, 48),
             MtkDaFrame.ReadUInt64Little(payload, 56),
-            MtkDaFrame.ReadUInt64Little(payload, 64));
+            MtkDaFrame.ReadUInt64Little(payload, 64))
+        {
+            EmmcPartNumber = DecodePartNumber(payload, MtkDaFrame.ReadUInt32Little(payload, 0))
+        };
 
         // A block size that is not a sane power of two would silently move every partition by the wrong
         // factor, which is a mis-flash rather than an error — so this is refused here, at the last point

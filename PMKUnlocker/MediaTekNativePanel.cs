@@ -160,10 +160,11 @@ public partial class Form1
         var lblNativeHint = new Label
         {
             Location = new Point(UiX(0), UiY(7)),
-            Size = new Size(856, 56),
-            Text = "BENCH HARNESS — the native DA session has not been validated on hardware yet. Recipes are read from mtk\\boot-profiles next to the exe and are not shipped (the DA/EMI blob licence is PMK's call). " +
+            Size = new Size(856, 72),
+            Text = "NATIVE BENCH — proven on MT6765 (HW 0766) on real hardware: RUN 42 booted the DA, RUN 43 proved READ/WRITE/ERASE, RUN 47/49 the UI. A recipe for any other chipset is a first run, not a supported device. " +
+                  "Recipes are read from mtk\\boot-profiles next to the exe and are not shipped (the DA/EMI blob licence is PMK's call). " +
                   "Do not use this on a phone you cannot afford to reflash, and never unplug between Boot and Close. " +
-                  "RUN 10/11 were refused by the BROM on the COM pipe (0xfd -> 0xfe); the recorded boot came through the device's bulk endpoints, so try raw USB first and read the pipe line in the log.",
+                  "If the BROM refuses the greet, try the raw USB pipe first and read the pipe line in the log.",
             ForeColor = Color.FromArgb(255, 170, 60),
             Font = new Font("Segoe UI", 8f)
         };
@@ -214,14 +215,18 @@ public partial class Form1
         if (toolTipMain != null)
             Tip(btnInfoNativeSeccfg, "READ the seccfg config block head over the live session (the extent the device's own GPT names seccfg) and print the bootloader lock state: 0x00 = LOCKED, 0x03 = UNLOCKED, anything else shown raw. Read-only by construction — no WRITE or ERASE frame is sent, and the unlock payload has never been measured, so this tool does not lock or unlock through a DA session.");
         Panel grpSeccfgInfo = CreateGroupPanel("SECCFG (NATIVE)", UiX(0), UiY(4), 1, btnInfoNativeSeccfg);
+        // The badge used to start at UiX(0)+332, inside the BOOT DEVICE frame's own width (3 columns reach x=495),
+        // and the frame paints in front of it — so the state line appeared to begin mid-sentence. It now sits in
+        // the clear space to the right of the SECCFG frame (that group is one column wide), on the same band, and
+        // wraps rather than ellipsising because the LIVE line carries the transport description, which is long.
         lblNativeBadge = new Label
         {
-            Location = new Point(UiX(0) + 332, UiY(2) + 34),
-            Size = new Size(506, 20),
+            Location = new Point(UiX(0) + 185, UiY(4) + 14),
+            Size = new Size(650, 44),
             Text = "Session: not booted",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-            AutoEllipsis = true
+            AutoEllipsis = false
         };
         if (toolTipMain != null)
             Tip(lblNativeBadge, "Live native DA session state. While it reads LIVE, the mtkclient operations (FLASH, Unlock, Backup) are refused — Eject Device first; two clients on one BROM corrupt both sessions.");
@@ -496,23 +501,112 @@ public partial class Form1
             handoff: handoff, recovery: recovery, bromHandshake: true, bromGreet: knobs.Greet,
             bromStartupMs: knobs.Startup, bromSettleMs: knobs.Settle, bromStepMs: knobs.Step)
             .ConfigureAwait(false);
-        SetNativeButtonsLive();
+        // NativeBootAsync reaches this on a pool thread (ConfigureAwait(false) all the way through the wire), and a
+        // state line plus a grid refresh are window state — so they are applied on the window's thread.
+        NativeUi(() =>
+        {
+            // A boot only happens after the cable was touched, so whatever table is in memory came from the phone
+            // that was HERE before this one. It is dropped before anything new is read: a scatter flow must never
+            // act on extents that were not read from the device in front of the operator.
+            if (mediaTekLiveTable != null)
+            {
+                SetLiveTable(null, null);
+                NativeSay("[*] Native DA: the partition table in memory is from the previous device — dropped; the live read replaces it.");
+            }
+            SetNativeButtonsLive();
+        });
         NativeSay("[OK] Native DA session is live on " + nativeDa.TransportDescription + " — the cable is now touched once, everything else runs over this session.");
+        // Honest provenance for a chipset this tool has never booted: the DA command layer is generic and the run
+        // will behave the same, but the BROM prelude and its blobs are new here — say so instead of letting the
+        // operator read a green line as "supported device".
+        if (!MtkNativeBench.BootProvenOnHardware(nativeDa.DeviceHwCode))
+            NativeSay("[!] Native DA: HW 0x" + nativeDa.DeviceHwCode.ToString("X4") + " has not been booted to a live DA by this " +
+                "tool before — the recipe is replayed exactly as recorded, and this run is its first test on hardware.");
+
+        // B5.4: the table is read as part of the boot, because the FLASH grid, the scatter flows and the device
+        // status line all wait on it and the operator should not have to press a second button to find out what is
+        // plugged in. A table read that fails does not take the session down with it — the DA is live, and
+        // Geometry + GPT retries the read.
+        try
+        {
+            await NativeReadDeviceTableAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            NativeSay("[!] Native DA: the session is live, but the partition table did not read (" + ex.Message +
+                ") — press Geometry + GPT to retry it; the session itself is intact.");
+        }
     }
 
-    private async Task NativeGeometryAsync()
+    /// <summary>
+    /// The three queries that have to answer before any partition can be touched — storage geometry, transfer
+    /// limits, then the device's own GPT — and everything a live table feeds: the state line, the FLASH grid, the
+    /// scatter flows' table, and the INFO tab's device status. Both the boot and the Geometry + GPT button run it,
+    /// and the answers are cached on the session, so a second call costs nothing but the GPT read.
+    /// </summary>
+    private async Task NativeReadDeviceTableAsync()
     {
         RequireNativeSession();
-        var storage = await nativeDa.QueryStorageAsync(nativeCancel.Token);
-        var limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token);
+        MtkStorageInfo storage = await nativeDa.QueryStorageAsync(nativeCancel.Token).ConfigureAwait(false);
+        MtkLimits limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token).ConfigureAwait(false);
         NativeSay("[+] DA geometry: " + storage.Describe);
         NativeSay("[+] DA transfer: write chunk 0x" + limits.WriteChunkSize.ToString("x") + ", frame 0x" + limits.TransferPacketSize.ToString("x"));
-        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
-        lblNativeState.Text = MtkNativeBench.StatusLine(true, nativeDa.TransportDescription, nativeDa.DeviceHwCode, table.Extents.Count);
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token).ConfigureAwait(false);
+
+        // The cache is written while a loaded scatter is still known — the grid fill below clears the package, and
+        // the cache key is that scatter's own hash, so handing over first is what makes the table survive a restart.
+        HandNativeTableToScatterFlows(storage, table);
+
+        NativeUi(() =>
+        {
+            lblNativeState.Text = MtkNativeBench.StatusLine(true, nativeDa.TransportDescription, nativeDa.DeviceHwCode, table.Extents.Count);
+            SetNativeDeviceStatus(storage);
+            FillFlashGridFromNativeTable(table);
+        });
         foreach (MtkDaExtent extent in table.Extents.Take(12))
             NativeSay("    " + extent.Describe);
         if (table.Extents.Count > 12) NativeSay("    … " + (table.Extents.Count - 12) + " more (all resolvable by name)");
-        FillFlashGridFromNativeTable(table);
+    }
+
+    /// <summary>Geometry and GPT as a button: the same read the boot already ran, on demand.</summary>
+    private async Task NativeGeometryAsync() => await NativeReadDeviceTableAsync();
+
+    /// <summary>
+    /// The INFO tab's device status line, in the same slot mtkclient's Read Info writes it, from what the session
+    /// measured: the recipe-proven chipset and BROM HW code, the eMMC part number out of the storage descriptor
+    /// and the user-area size the DA advertises. A label, not a log line — the descriptor's serial bytes are not
+    /// decoded anywhere, so nothing device-bound can reach native-da.log through here.
+    /// </summary>
+    private void SetNativeDeviceStatus(MtkStorageInfo storage)
+    {
+        if (lblMtkDeviceStatus == null || lblMtkDeviceStatus.IsDisposed || nativeDa == null) return;
+        lblMtkDeviceStatus.Text = MtkNativeBench.DeviceStatusLine(nativeDa.RecipeChipset, nativeDa.DeviceHwCode,
+            storage.EmmcPartNumber, FormatBytesLong((long)storage.UserAreaSize));
+        lblMtkDeviceStatus.ForeColor = Color.LightGreen;
+    }
+
+    /// <summary>
+    /// The live GPT is the device's partition table whether it came off our own DA or off mtkclient's printgpt, so
+    /// the session hands it to the same two places that path fills: the in-memory table every scatter flow asks for
+    /// first (<see cref="GetMediaTekTableAsync"/>) and the disk cache keyed by the loaded scatter. That is what saves
+    /// the extra plug cycle — after one native boot the FLASH and scatter operations already know the extents.
+    /// The binding says which device the table came from, so a second phone cannot inherit the first one's extents.
+    /// </summary>
+    private void HandNativeTableToScatterFlows(MtkStorageInfo storage, MtkDaPartitionTable table)
+    {
+        var parts = new List<MtkPartition>(table.Extents.Count);
+        foreach (MtkDaExtent extent in table.Extents)
+            parts.Add(new MtkPartition(extent.Name, (long)extent.ByteOffset, (long)extent.ByteLength));
+        string binding = MtkNativeBench.GptBinding(nativeDa.DeviceHwCode, storage.BlockSize, storage.UserAreaSize,
+            table.Extents.Count);
+        if (mediaTekTableBinding != null && !string.Equals(mediaTekTableBinding, binding, StringComparison.Ordinal))
+            NativeSay("[*] Native DA: the table from the previous run (" + mediaTekTableBinding + ") is replaced — " +
+                "this phone reports " + binding + ".");
+        SetLiveTable(parts, binding);
+        SaveMediaTekGptCache(parts, binding);
+        NativeSay("[+] Native DA: " + parts.Count + " extent(s) are the live table now (bound to " + binding + ") — " +
+            "scatter flows reuse them without another plug cycle.");
     }
 
     /// <summary>
@@ -654,6 +748,24 @@ public partial class Form1
 
     /// <summary>Session log lines arrive from the boot thread; the color follows the marker the session itself wrote.</summary>
     private void NativeLog(string line) => NativeSay(line);
+
+    /// <summary>
+    /// Run a step on the window's thread, whatever thread the awaited call handed control back on. The native paths
+    /// await with ConfigureAwait(false) — a boot must not idle a wire waiting for a repaint — and their continuations
+    /// therefore land on a pool thread, while a WinForms control may only be touched by the thread that owns it.
+    /// A window that is already gone runs nothing: the bench log holds every line the run produced.
+    /// </summary>
+    private void NativeUi(Action step)
+    {
+        if (rtbLog == null || rtbLog.IsDisposed || !rtbLog.IsHandleCreated) return;
+        try
+        {
+            if (rtbLog.InvokeRequired) rtbLog.Invoke(step);
+            else step();
+        }
+        catch (ObjectDisposedException) { /* the form is going away mid-run */ }
+        catch (InvalidOperationException) { /* same, one beat later */ }
+    }
 
     // B4.25 — where the boot thread's own time goes, measured from our own LIBUSB_DEBUG=4 trace (RUN 33, 10:40:36).
     // Every transfer there completes at the timestamp of its own submit ("poll() returned 1", revents already set), so

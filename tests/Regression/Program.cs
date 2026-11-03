@@ -2804,6 +2804,74 @@ try
         "MTK B5.2: the bad-magic refusal happens after the read the device was entitled to serve — the read went out, the interpretation stopped");
     badSes.Dispose();
 
+    // ---- B5.4: what a live session hands the operator and the scatter flows --------------------------
+    // A descriptor carrying the measured 16-byte CID region. The part number sits at +3..+8 of it — proven by the
+    // working client printing the same reply twice ("EMMC ID: CJTD4R" beside "EMMC CID: 150100434a5444345204e992496597ad").
+    // The bytes after it are this card's serial: they are set to a value that would be unmistakable in any string
+    // that leaked them, which is exactly what the checks below prove does not happen.
+    byte[] idDescriptor = Convert.FromHexString(DescriptorPayload(0xE8F800000ul));
+    "CJTD4R"u8.CopyTo(idDescriptor.AsSpan(75));
+    byte[] cardSerial = { 0xde, 0xad, 0xbe, 0xef };
+    cardSerial.CopyTo(idDescriptor.AsSpan(82));
+    string serialHex = Convert.ToHexString(cardSerial);
+    string cidHex = Convert.ToHexString(idDescriptor.AsSpan(72, 16)).ToLowerInvariant();
+    MtkStorageInfo idInfo = MtkStorageInfo.Parse(idDescriptor);
+    Check(idInfo.EmmcPartNumber == "CJTD4R",
+        "MTK B5.4: the eMMC part number decodes from the six ASCII bytes the working client prints as its EMMC ID");
+    Check(idInfo.Describe.Contains("block 512") && !idInfo.Describe.Contains(serialHex) &&
+          !idInfo.Describe.Contains(cidHex),
+        "MTK B5.4: the geometry line the session speaks carries sizes only — no card serial, no CID bytes");
+    Check(!idInfo.ToString().Contains(serialHex) && !idInfo.ToString().Contains(cidHex),
+        "MTK B5.4: nothing on the decoded record renders the serial region, so no caller can log it by accident");
+    Check(MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(0xE8F800000ul))).EmmcPartNumber == null,
+        "MTK B5.4: a descriptor whose name field is blank yields no part number — the absence stays visible");
+    byte[] junkName = Convert.FromHexString(DescriptorPayload(0xE8F800000ul));
+    junkName[77] = 0x01;                      // one control byte inside the six name bytes
+    Check(MtkStorageInfo.Parse(junkName).EmmcPartNumber == null,
+        "MTK B5.4: a non-printable name field is not dressed up as a model name; it reports nothing");
+    byte[] ufsLike = Convert.FromHexString(DescriptorPayload(0xE8F800000ul));
+    "CJTD4R"u8.CopyTo(ufsLike.AsSpan(75));
+    ufsLike[0] = 2;                           // a storage type this tool has never measured
+    Check(MtkStorageInfo.Parse(ufsLike).EmmcPartNumber == null,
+        "MTK B5.4: the part number is only read from the descriptor layout that was actually measured");
+
+    var idLines = new List<string>();
+    string idStorageReply = DaFrame(Convert.ToHexString(idDescriptor).ToLowerInvariant());
+    var (idSes, idDev) = await BootedDa(idLines, new[] { Status, Status, idStorageReply, Status });
+    int idDaStage = idDev.Writes.Count;            // the BROM prelude is not DA frames; only what follows is
+    MtkStorageInfo queried = await idSes.QueryStorageAsync(default);
+    Check(queried.EmmcPartNumber == "CJTD4R",
+        "MTK B5.4: a live session decodes the name from the bytes its own device answered, not from a fixture");
+    Check(SentFrames(idDev, idDaStage).Count(f => f == StorageCmd) == 1,
+        "MTK B5.4: the storage query goes out exactly once — the name comes off the reply the device chose to send");
+    Check(idLines.Any(l => l.Contains("DA storage: type 1")) &&
+          !idLines.Any(l => l.Contains(serialHex, StringComparison.OrdinalIgnoreCase) || l.Contains(cidHex)),
+        "MTK B5.4: the session log of the storage query shows the geometry and never the identity bytes");
+    Check(idSes.RecipeChipset == "MT6765-TEST" && idSes.DeviceHwCode == 0x0766,
+        "MTK B5.4: the CPU the status line prints is the recipe the boot proved against — a device answering a different HW code never reaches this line");
+    idSes.Dispose();
+
+    string bindA = MtkNativeBench.GptBinding(0x0766, 512, 62537072640ul, 43);
+    Check(bindA == "HW 0x0766 · block 512 · user 62537072640 B · 43 partition(s)",
+        "MTK B5.4: a table's binding is spelled out from the four facts the DA itself reported, so a reused table says whose it is");
+    Check(bindA != MtkNativeBench.GptBinding(0x0766, 512, 62537072640ul, 44) &&
+          bindA != MtkNativeBench.GptBinding(0x0768, 512, 62537072640ul, 43) &&
+          bindA != MtkNativeBench.GptBinding(0x0766, 4096, 62537072640ul, 43),
+        "MTK B5.4: a different partition count, HW code or block size gives a different binding — the guard is not decorative");
+    Check(!bindA.Contains(serialHex, StringComparison.OrdinalIgnoreCase) && !bindA.Contains(cidHex),
+        "MTK B5.4: the binding that lands in the disk cache is geometry, not identity");
+    string status = MtkNativeBench.DeviceStatusLine("MT6765", 0x0766, "CJTD4R", "58.23 GB");
+    Check(status == "MT6765 (HW 0766) · CJTD4R · 58.23 GB",
+        "MTK B5.4: the device status line reads as the same three facts mtkclient's Read Info put there, from the native side");
+    Check(MtkNativeBench.DeviceStatusLine("MT6765", 0x0766, null, "58 GB") == "MT6765 (HW 0766) · 58 GB" &&
+          MtkNativeBench.DeviceStatusLine("", 0x0766, null, "") == "HW 0x0766",
+        "MTK B5.4: a missing part number or size leaves no separator and no placeholder behind — the line never looks like a value it does not have");
+    Check(!status.Contains(serialHex, StringComparison.OrdinalIgnoreCase) && !status.Contains(cidHex),
+        "MTK B5.4: the screen line shows the model name of the chip, never its serial");
+    Check(MtkNativeBench.BootProvenOnHardware(0x0766) && !MtkNativeBench.BootProvenOnHardware(0x0768) &&
+          !MtkNativeBench.BootProvenOnHardware(0x6885),
+        "MTK B5.4: exactly the HW codes this tool booted on hardware are claimed as proven; a new chipset says it is a first run");
+
     // ---- B3.5: the live GPT, read once and cached ----------------------------------------------------
     byte[] liveHeader = GptHeader(2, 3, 128);
     var liveEntries = new byte[512];

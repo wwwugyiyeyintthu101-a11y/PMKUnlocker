@@ -675,11 +675,51 @@ internal static class MtkNativeBench
         };
     }
 
+    /// <summary>
+    /// The BROM HW codes this tool has booted to a live DA on real hardware, from its own runs. MT6765 (0x0766) got
+    /// there on 2026-11-02 (RUN 42, and four clean boots after it). Nothing else is claimed: the DA command layer
+    /// this tool runs is chipset-generic — geometry, limits, GPT, READ/WRITE/ERASE and the reboot were all measured
+    /// on that one unit — but the BROM prelude and its blobs are recorded per chipset, and a recipe that has never
+    /// been replayed is a first run, not a supported device.
+    /// </summary>
+    internal static bool BootProvenOnHardware(ushort hwCode) => hwCode == 0x0766;
+
     /// <summary>The one-line state the tab shows, so a screenshot of a bench run says what the session is doing.</summary>
     internal static string StatusLine(bool booted, string chipset, ushort hwCode, int partitionCount) =>
         booted
             ? "Session: BOOTED  " + chipset + "  HW 0x" + hwCode.ToString("X4") + "  " + partitionCount + " partition(s) cached"
             : "Session: closed — nothing is sent until Boot runs";
+
+    /// <summary>
+    /// Which device a partition table came from. Every number in it is one the DA itself reported — the BROM's HW
+    /// code the recipe was proven against, the storage block size, the user-area size and how many extents the
+    /// device's own GPT lists — so it answers "is this the phone in front of me?" without carrying a card serial
+    /// or any other identity value into a file on disk. Two different phones landing on the same string would have
+    /// to share a chipset, a block size, an exact capacity and a partition count, and at that point the table is
+    /// the same table.
+    /// </summary>
+    internal static string GptBinding(ushort hwCode, uint blockSize, ulong userBytes, int partitionCount) =>
+        "HW 0x" + hwCode.ToString("X4") + " · block " + blockSize + " · user " + userBytes +
+        " B · " + partitionCount + " partition(s)";
+
+    /// <summary>
+    /// The INFO tab's device status line, built only from what the live session read: the chipset the recipe was
+    /// proven on, the BROM's own HW code, the eMMC part number out of the storage descriptor and the user-area
+    /// size the DA advertises. A missing part number shows as nothing rather than a placeholder — an invented
+    /// "EMMC ID" reads like the device's own answer.
+    ///
+    /// This is a SCREEN line. The full 16-byte CID and the serial bytes inside it are not decoded anywhere, so
+    /// they cannot reach a log; the part number is a model name shared by every unit of that eMMC, which is why
+    /// it is the one field the status line is allowed to show.
+    /// </summary>
+    internal static string DeviceStatusLine(string chipset, ushort hwCode, string emmcPartNumber, string userSizeText)
+    {
+        string line = string.IsNullOrWhiteSpace(chipset) ? "HW 0x" + hwCode.ToString("X4")
+            : chipset + " (HW " + hwCode.ToString("X4") + ")";
+        if (!string.IsNullOrWhiteSpace(emmcPartNumber)) line += " · " + emmcPartNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(userSizeText)) line += " · " + userSizeText.Trim();
+        return line;
+    }
 
     /// <summary>Progress text for the tab label. Percentages are the DA's own frame counts, not an estimate.</summary>
     internal static string ProgressLine(string what, int percent) => what + " — " + percent + "%";

@@ -46,6 +46,10 @@ public partial class Form1
     const string MtkAutoCatalogMode = "Auto + catalog DA";
     // ဒီ session က live GPT cache — NV Restore က GPT re-read မလုပ်ချင်ရင် (1 plug cycle) ဒါကိုသုံးတယ်
     private IReadOnlyList<MtkPartition> mediaTekLiveTable;
+    // B5.4: which phone that table came from — the DA's own geometry + HW code, never an identity value. A native
+    // hand-off replaces it; mtkclient's printgpt path leaves it null (that output does not report the HW code in a
+    // form we could bind on, and an unknown binding is honest "we do not know", not a guess).
+    private string mediaTekTableBinding;
     // Operation Progress — flash တစ်ခုတည်းအတွက် (writes 0→95, workflow end 100)။
     // python wfscatter က GPT+images တစ်ပြိုင်နက်ရေးတယ် — staging/prep မရှိ (sparse = python ဘက် streaming)
     private int mtkProgressTotal, mtkProgressDone;
@@ -128,20 +132,26 @@ public partial class Form1
         Button btnMtkSaveGpt = Create3DButton("📋 Save GPT", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkSaveGpt.Click += async (_, _) => { try { await SaveMediaTekGptAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
 
-        Button btnMtkReset = Create3DButton("🔄 Reset Device", UiX(2), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Green);
-        btnMtkReset.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => { var r = await MediaTekCommandAsync(new[] { "reset" }); bool confirmed = r.Lines.Any(l => l.Contains("Reset command was sent", StringComparison.OrdinalIgnoreCase)); if (!confirmed) r.RequireSuccess(); Log(confirmed ? "[i] Reset confirmed — the device reboots; Android boot is not verified by the tool." : "[i] Reset command returned. Check the phone; Android boot is not verified.", Color.Cyan); }); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-
-        Panel grpInfo = CreateGroupPanel("SERVICE", UiX(0), UiY(0), 3, btnMtkReadInfo, btnMtkSaveGpt, btnMtkReset);
+        // Post-B5.2 (PMK's call): the standalone "Reset Device" button leaves this group. The INFO tab's native
+        // Reboot Device does the same job over a live DA session from RUN 48's measured recipe (hardware-proven in
+        // RUN 49), and every mtkclient flow that needs a reset already carries ";reset" inside its own session
+        // (MtkEraseAndResetAsync, the NV restore, AutoRebootAsync's own reset) — so no capability was lost here,
+        // only a button that duplicated a live-session control and sat beside it on the same tab.
+        Panel grpInfo = CreateGroupPanel("SERVICE", UiX(0), UiY(0), 2, btnMtkReadInfo, btnMtkSaveGpt);
         infoTab.Controls.Add(grpInfo);
 
+        // This hint used to start at UiX(0), one row under the SERVICE frame — but CreateGroupPanel is added to the
+        // tab first, so the frame paints IN FRONT and the sentence appeared cut in half (only its tail, past the
+        // frame's right edge, was readable). It now sits in the clear space beside the frame, and wraps instead of
+        // ellipsising, because the whole line is operator instruction, not decoration.
         Label lblInfoHint = new()
         {
-            Location = new Point(UiX(0), UiY(1) + 10),
-            Size = new Size(850, 40),
+            Location = new Point(UiX(0) + 335, UiY(0) + 12),
+            Size = new Size(500, 56),
             Text = "Power off the phone, connect in MediaTek mode (BROM / Preloader), then select its COM port. DA / Auth / Preloader depend on the device. Read Info loads the live partition table into FLASH tab.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
-            AutoEllipsis = true
+            AutoEllipsis = false
         };
         infoTab.Controls.Add(lblInfoHint);
 
@@ -1138,7 +1148,8 @@ public partial class Form1
         var result = await MediaTekCommandAsync(new[] { "printgpt" });
         result.RequireSuccess();
         var table = MtkClientEngine.ParseGpt(result);
-        mediaTekLiveTable = table;
+        // mtkclient's printgpt does not report the DA geometry, so a table from here carries no binding.
+        SetLiveTable(table, null);
         if (mediaTekPackage?.Platform is { Length: > 0 } platform &&
             !result.Lines.Any(l => l.Contains(platform, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Device chipset could not be matched to scatter " + platform + ". Nothing written.");
@@ -1170,20 +1181,21 @@ public partial class Form1
         string hex = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(mediaTekPackage.ScatterPath))).ToLowerInvariant();
         return Path.Combine(ShopServices.DataDirectory, "MediaTekGptCache", "gpt-" + hex[..16] + ".json");
     }
-    private void SaveMediaTekGptCache(IReadOnlyList<MtkPartition> table)
+    private void SaveMediaTekGptCache(IReadOnlyList<MtkPartition> table, string binding = null)
     {
         try
         {
             string file = MtkGptCacheFile();
             if (file == null || table == null || table.Count == 0) return;
             Directory.CreateDirectory(Path.GetDirectoryName(file));
-            File.WriteAllText(file, JsonSerializer.Serialize(new { SavedUtc = DateTime.UtcNow, Partitions = table }));
+            File.WriteAllText(file, JsonSerializer.Serialize(new { SavedUtc = DateTime.UtcNow, Binding = binding, Partitions = table }));
         }
         catch { /* cache failure must never fail the operation */ }
     }
-    private IReadOnlyList<MtkPartition> LoadMediaTekGptCache(out string when)
+    private IReadOnlyList<MtkPartition> LoadMediaTekGptCache(out string when, out string binding)
     {
         when = null;
+        binding = null;
         try
         {
             string file = MtkGptCacheFile();
@@ -1192,6 +1204,9 @@ public partial class Form1
             if (doc.RootElement.TryGetProperty("SavedUtc", out var whenEl) &&
                 DateTime.TryParse(whenEl.GetString(), null, DateTimeStyles.RoundtripKind, out var saved))
                 when = saved.ToLocalTime().ToString("dd.MM.yy HH:mm");
+            // Files written before B5.4 carry no Binding — an absent field is "unknown device", not "any device".
+            if (doc.RootElement.TryGetProperty("Binding", out var bindEl) && bindEl.ValueKind == JsonValueKind.String)
+                binding = bindEl.GetString();
             var list = new List<MtkPartition>();
             foreach (var e in doc.RootElement.GetProperty("Partitions").EnumerateArray())
                 list.Add(new MtkPartition(e.GetProperty("Name").GetString(),
@@ -1200,15 +1215,27 @@ public partial class Form1
         }
         catch { return null; }
     }
+    /// <summary>
+    /// Every live partition table enters through here, together with which device it came from. A table without its
+    /// provenance is how a second phone ends up flashed with the first one's extents, so the pairing is not left to
+    /// the caller remembering two fields.
+    /// </summary>
+    private void SetLiveTable(IReadOnlyList<MtkPartition> table, string binding)
+    {
+        mediaTekLiveTable = table;
+        mediaTekTableBinding = binding;
+    }
     // liveTable → disk cache → live read cycle (SP Flash Tool-like: cache hit ဆို plug တစ်ကြိမ်တည်း)
     private async Task<IReadOnlyList<MtkPartition>> GetMediaTekTableAsync()
     {
         if (mediaTekLiveTable != null) return mediaTekLiveTable;
-        var cached = LoadMediaTekGptCache(out string when);
+        var cached = LoadMediaTekGptCache(out string when, out string cachedBinding);
         if (cached != null)
         {
-            mediaTekLiveTable = cached;
-            Log("  * Partition table reused from cache (" + (when ?? "earlier") + ") — no extra plug cycle.", Color.Cyan);
+            SetLiveTable(cached, cachedBinding);
+            Log("  * Partition table reused from cache (" + (when ?? "earlier") + ")" +
+                (cachedBinding != null ? " — taken from " + cachedBinding : " — device it came from is not recorded") +
+                ", no extra plug cycle.", Color.Cyan);
             return cached;
         }
         Log(" No cached partition table — reading GPT first (one extra cycle).", Color.Orange);
@@ -1688,7 +1715,7 @@ public partial class Form1
         var r = await MediaTekCommandAsync(new[] { "multi", script });
         // GPT sizes from the same run (no RequireSuccess — a missing NV part is not fatal)
         var (live, sizes) = ParseGptLines(r.Lines);
-        if (live.Count > 0) mediaTekLiveTable = live;
+        if (live.Count > 0) SetLiveTable(live, null);
         if (sizes.Count == 0)
         {
             foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
@@ -1762,7 +1789,7 @@ public partial class Form1
             var missing = files.Where(n => !MtkClientEngine.HasWriteEvidence(r, n + ".bin")).ToList();
             bool resetOk = r.Lines.Any(l => l.Contains("Reset command was sent", StringComparison.OrdinalIgnoreCase));
             var (live, _) = ParseGptLines(r.Lines);
-            if (live.Count > 0) mediaTekLiveTable = live;
+            if (live.Count > 0) SetLiveTable(live, null);
             if (missing.Count > 0 || !resetOk)
             {
                 foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
