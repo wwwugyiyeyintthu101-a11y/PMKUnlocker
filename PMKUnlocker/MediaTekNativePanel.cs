@@ -102,7 +102,7 @@ public partial class Form1
 
         btnNativeBoot = Create3DButton("🔌 Boot DA (recipe)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
         btnNativeBoot.Click += async (_, _) => await NativeGuarded("boot", NativeBootAsync);
-        if (toolTipMain != null) Tip(btnNativeBoot, "Replay the recorded BROM→DA1→DA2 recipe on the MTK VCOM — the phone must be powered off, Volume Down held, then plugged in. Nothing is sent before the HW code is proven.");
+        if (toolTipMain != null) Tip(btnNativeBoot, "Replay the recorded BROM→DA1→DA2 recipe on the MTK VCOM — the phone must be powered off, BOTH volume keys held, then plugged in. Nothing is sent before the HW code is proven.");
 
         btnNativeGeometry = Create3DButton("📐 Geometry + GPT", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnNativeGeometry.Click += async (_, _) => await NativeGuarded("geometry", NativeGeometryAsync);
@@ -198,7 +198,7 @@ public partial class Form1
         btnInfoNativeReboot = Create3DButton("🔁 Reboot Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Green);
         btnInfoNativeReboot.Click += async (_, _) => await NativeGuarded("reboot", NativeRebootAsync);
         if (toolTipMain != null)
-            Tip(btnInfoNativeReboot, "Send the measured TOPRGU watchdog reset through the live session (RUN 48's recipe — no bare stock reset id exists, this rides the DA extension the boot already loaded). The session ends and the phone leaves DA mode; on the RUN 49 unit it landed in power off — press the Power button to boot. Unplug the cable after.");
+            Tip(btnInfoNativeReboot, "Send the measured TOPRGU watchdog reset through the live session (RUN 48's recipe - no bare stock reset id exists, this rides the DA extension the boot already loaded). The session ends and the phone leaves DA mode; re-proven on 2026-11-03: the phone came back by itself (Mi logo, then the charging screen), the same shape mtkclient's reset produces. Unplug the cable after the reset line.");
 
         btnInfoNativeEject = Create3DButton("⏏ Eject Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Orange);
         btnInfoNativeEject.Click += (_, _) => NativeClose();
