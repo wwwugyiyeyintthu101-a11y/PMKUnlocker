@@ -36,6 +36,8 @@ public partial class Form1
     private Label lblNativeBadge;
     private DataGridViewButtonColumn colNativeRead, colNativeWrite, colNativeErase;
     private bool nativeBusy;
+    // The last (booted, busy) pair the buttons and the badge were styled for, so a repeat call costs nothing.
+    private string nativeButtonsState;
     private bool nativeBenchLogBroken;
     private bool nativeCloseRequested;
     private string nativeLastDump;
@@ -258,6 +260,19 @@ public partial class Form1
         string column = mediaTekGrid.Columns[e.ColumnIndex].Name;
         if (column is not ("nativeRead" or "nativeWrite" or "nativeErase")) return;
         if (mediaTekGrid.Rows[e.RowIndex].Cells["partition"].Value is not string name || string.IsNullOrWhiteSpace(name)) return;
+
+        // The action cells stay clickable while the session is down: a DataGridViewButtonColumn has no per-cell
+        // Enabled, so the dimmed text is all the grid can show. Running such a click through the guarded operation
+        // meant a thrown exception, a bench-log write and two restyles of every button, the badge and all three
+        // action columns — several full invalidations of a 43-row grid, which is what made a partition row feel
+        // heavy to press. The refusal is the same answer for the cost of one log line.
+        if (nativeDa == null)
+        {
+            string verb = column == "nativeRead" ? "Read" : column == "nativeWrite" ? "Write" : "Erase";
+            NativeSay("[!] Native DA: " + verb + " " + name + " needs a live session — press Boot Device first. Nothing was sent.");
+            return;
+        }
+
         try
         {
             if (column == "nativeRead")
@@ -408,6 +423,12 @@ public partial class Form1
     {
         if (btnNativeBoot == null) return;
         bool booted = nativeDa != null;
+        // Every line below is a function of these two flags, and callers run on each transition — including ones
+        // that change nothing. Restyling ten buttons, the badge and three grid columns is several full invalidations
+        // of the FLASH grid, so a repeat of the same state is dropped here instead of painted again.
+        string state = (booted ? "booted" : "down") + (nativeBusy ? "-busy" : "-idle");
+        if (nativeButtonsState == state) return;
+        nativeButtonsState = state;
         btnNativeBoot.Enabled = !booted && !nativeBusy;
         btnNativeClose.Enabled = booted;
         foreach (Button b in new[] { btnNativeGeometry, btnNativeDump, btnNativeRestore, btnNativeErase })
@@ -617,11 +638,15 @@ public partial class Form1
     {
         mediaTekPackage = null;
         mediaTekScatter.Clear();
-        mediaTekGrid.Rows.Clear();
-        foreach (MtkDaExtent extent in table.Extents)
-            mediaTekGrid.Rows.Add(false, extent.Name, "", "0x" + extent.ByteOffset.ToString("x"),
-                FormatBytesLong((long)extent.ByteLength), "Live GPT");
-        RefreshMediaTekSummary();
+        BeginMediaTekGridFill();
+        try
+        {
+            mediaTekGrid.Rows.Clear();
+            foreach (MtkDaExtent extent in table.Extents)
+                mediaTekGrid.Rows.Add(false, extent.Name, "", "0x" + extent.ByteOffset.ToString("x"),
+                    FormatBytesLong((long)extent.ByteLength), "Live GPT");
+        }
+        finally { EndMediaTekGridFill(); }
     }
 
     private async Task NativeDumpAsync()

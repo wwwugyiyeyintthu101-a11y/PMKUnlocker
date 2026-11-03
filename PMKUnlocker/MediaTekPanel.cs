@@ -331,11 +331,16 @@ public partial class Form1
         mediaTekGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(23, 26, 32);
         mediaTekGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(86, 145, 250);
         mediaTekGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+        // A row click repaints the whole row (nine cells, three of them owner-drawn buttons). Without this the grid
+        // erases and redraws cell by cell, which is what made selecting a partition feel heavy on a full GPT.
+        SetDoubleBuffered(mediaTekGrid);
         mediaTekGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "selected", HeaderText = "✓", Width = 34, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         foreach (var col in new[] { ("partition", "Partition"), ("file", "Image"), ("offset", "Offset"), ("size", "Size"), ("status", "Status") })
             mediaTekGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = col.Item1, HeaderText = col.Item2, ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         mediaTekGrid.CurrentCellDirtyStateChanged += (_, _) => { if (mediaTekGrid.IsCurrentCellDirty) mediaTekGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        mediaTekGrid.CellValueChanged += (_, _) => RefreshMediaTekSummary();
+        // Only the tick column changes the summary; the other five are read-only, so a per-cell refresh on every
+        // value the row fill sets was pure repaint work.
+        mediaTekGrid.CellValueChanged += (_, e) => { if (!mediaTekGridFilling && e.ColumnIndex == 0) RefreshMediaTekSummary(); };
         flashTab.Controls.Add(mediaTekGrid);
 
         // Bottom row: options + flash button + summary (grid အောက် 10px ခွာ)
@@ -674,6 +679,20 @@ public partial class Form1
         RefreshMediaTekSummary();
     }
 
+    // Bulk row fill: one layout pass and one summary refresh instead of one per cell. The flag is also read by the
+    // CellValueChanged handler above, so a table load cannot repaint the grid while it is still being built.
+    private bool mediaTekGridFilling;
+    private void BeginMediaTekGridFill()
+    {
+        mediaTekGridFilling = true;
+        mediaTekGrid.SuspendLayout();
+    }
+    private void EndMediaTekGridFill()
+    {
+        mediaTekGrid.ResumeLayout();
+        mediaTekGridFilling = false;
+        RefreshMediaTekSummary();
+    }
     private void RebuildMediaTekGrid()
     {
         if (mediaTekPackage == null) return; // Live GPT mode — rows က filter နဲ့ မဆိုင်
@@ -685,18 +704,22 @@ public partial class Form1
             else mediaTekChecked.Remove(e.Name);
         }
         bool flashableOnly = mediaTekFlashableOnly?.Checked ?? false;
-        mediaTekGrid.Rows.Clear();
-        foreach (var entry in mediaTekPackage.Entries)
+        BeginMediaTekGridFill();
+        try
         {
-            bool supported = IsMediaTekUserImage(entry);
-            if (flashableOnly && !supported) continue;
-            int i = mediaTekGrid.Rows.Add(supported && mediaTekChecked.Contains(entry.Name), entry.Name, entry.FileName,
-                entry.StartHex, FormatBytesLong(entry.Size),
-                !supported ? "Unavailable" : FlashRisk.Classify(entry) == RiskLevel.HighRisk ? "High risk" : "Ready");
-            mediaTekGrid.Rows[i].Tag = entry;
-            mediaTekGrid.Rows[i].Cells[0].ReadOnly = !supported;
+            mediaTekGrid.Rows.Clear();
+            foreach (var entry in mediaTekPackage.Entries)
+            {
+                bool supported = IsMediaTekUserImage(entry);
+                if (flashableOnly && !supported) continue;
+                int i = mediaTekGrid.Rows.Add(supported && mediaTekChecked.Contains(entry.Name), entry.Name, entry.FileName,
+                    entry.StartHex, FormatBytesLong(entry.Size),
+                    !supported ? "Unavailable" : FlashRisk.Classify(entry) == RiskLevel.HighRisk ? "High risk" : "Ready");
+                mediaTekGrid.Rows[i].Tag = entry;
+                mediaTekGrid.Rows[i].Cells[0].ReadOnly = !supported;
+            }
         }
-        RefreshMediaTekSummary();
+        finally { EndMediaTekGridFill(); }
     }
     // USER ရွေးချယ်နိုင်တဲ့ entries + preloader/preloader_backup (EMMC_BOOT1_BOOT2, MST ပုံစံ)
     // pgpt/sgpt/gpt/otp/flashinfo ကို python wfscatter က GPT build ထဲ မထည့် — C# ဘက်ကနေပဲ block
@@ -1157,9 +1180,14 @@ public partial class Form1
             throw new InvalidDataException("Device chipset could not be matched to scatter " + platform + ". Nothing written.");
         if (display)
         {
-            mediaTekPackage = null; mediaTekScatter.Clear(); mediaTekGrid.Rows.Clear();
-            foreach (var p in table) mediaTekGrid.Rows.Add(false, p.Name, "", "0x" + p.Offset.ToString("x"), FormatBytesLong(p.Length), "Live GPT");
-            RefreshMediaTekSummary();
+            mediaTekPackage = null; mediaTekScatter.Clear();
+            BeginMediaTekGridFill();
+            try
+            {
+                mediaTekGrid.Rows.Clear();
+                foreach (var p in table) mediaTekGrid.Rows.Add(false, p.Name, "", "0x" + p.Offset.ToString("x"), FormatBytesLong(p.Length), "Live GPT");
+            }
+            finally { EndMediaTekGridFill(); }
             // Device info panel ပြ
             string cpu = FindMtkInfo(result.Lines, @"CPU:\s+(.+)");
             string emmcId = FindMtkInfo(result.Lines, @"EMMC ID:\s+(\S+)");

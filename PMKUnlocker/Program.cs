@@ -8,25 +8,45 @@ namespace PMKUnlocker
         private static readonly string CrashLogPath =
             ShopServices.DataPath("pmk_crash.log");
 
+        // Startup probe: "the tool is slow to open" cannot be fixed from a feel, and the phases it could be —
+        // runtime start, the login UI tree, the first paint of the card, the main window build — are seconds
+        // apart or milliseconds apart depending on which one it is. One line each, elapsed from process entry.
+        private static readonly Stopwatch StartupClock = Stopwatch.StartNew();
+
+        internal static void StartupMark(string phase)
+        {
+            try
+            {
+                File.AppendAllText(ShopServices.DataPath("pmk_startup.log"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + "  +" + StartupClock.ElapsedMilliseconds + " ms  " +
+                    phase + Environment.NewLine);
+            }
+            catch { }   // a diagnostic that throws must never take the tool down
+        }
+
         [STAThread]
         static void Main()
         {
+            StartupMark("process entered");
             Application.ThreadException += (s, e) => LogCrash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
                 LogCrash(e.ExceptionObject as Exception);
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
             ApplicationConfiguration.Initialize();
+            StartupMark("winforms configured");
 
             // License server ကို tool ကိုယ်တိုင် နောက်ကွယ်က auto-start —
             // login က HTTP နဲ့ 127.0.0.1:5260 ကို စစ်တာမို့ ဖွင့်ချိန်မတိုင်ခင် server အဆင်သင့်ရမယ်
             EnsureLicenseServer();
+            StartupMark("license server gate passed");
 
             // PMK-style login gate — every launch shows login; Cancel/✕ ဆို app မဖွင့်ဘဲ ထွက်
             string licEmail = "", licPlan = "", licExp = "";
             int licDays = 0;
             using (var login = new LoginForm())
             {
+                StartupMark("login UI tree built");
                 if (login.ShowDialog() != DialogResult.OK) return;
                 licEmail = login.LoginEmail;
                 licPlan = login.LoginPlan;
@@ -34,7 +54,10 @@ namespace PMKUnlocker
                 licDays = login.LoginDaysLeft;
             }
 
-            Application.Run(new Form1(licEmail, licPlan, licExp, licDays));
+            Form1 main = new Form1(licEmail, licPlan, licExp, licDays);
+            StartupMark("main form constructed");
+            main.Shown += (_, _) => StartupMark("main window shown");
+            Application.Run(main);
 
             // libusb-1.0 (the MTK raw-USB backend) runs a foreground event thread: once a native MTK session has
             // opened it, the window closes but the process would never exit. Measured on a probe, not assumed.

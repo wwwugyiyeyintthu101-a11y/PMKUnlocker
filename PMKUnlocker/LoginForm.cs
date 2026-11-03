@@ -535,6 +535,16 @@ public class LoginForm : Form
             if (!string.IsNullOrEmpty(emailOnly)) txtEmail.Text = emailOnly;
         }
 
+        // GDI+ alpha primitives (the 360-dot grid, the glow blobs, the card shadow, the gradients) drawn straight
+        // onto a window DC make GDI+ allocate and composite a full-surface blend buffer PER PRIMITIVE. Measured on
+        // this card: the dot grid alone cost 4,750 ms — that, not the tool's startup work, was "ဖွင့်ဖွင့်ချင်း လေးနေတာ"
+        // (process entry → login shown is 203 ms). Buffering the panel puts the identical drawing on a 32bpp ARGB
+        // bitmap, where alpha blending is native, so the same paint runs in milliseconds.
+        SetDoubleBuffered(panelBody);
+        SetDoubleBuffered(panelCard);
+        SetDoubleBuffered(panelTitle);
+        SetDoubleBuffered(panelStatus);
+
         Controls.Add(panelBody);
         Controls.Add(panelTitle);
         Controls.Add(panelStatus);
@@ -543,6 +553,22 @@ public class LoginForm : Form
         ResumeLayout(false);
         PerformLayout();
         UpdateCardRegion();
+    }
+
+    // WinForms Panel paints double-buffered=false by default; Control.DoubleBuffered is protected, so the repo's
+    // existing reflection setter is reused rather than subclassing every panel here.
+    private static void SetDoubleBuffered(Control c)
+    {
+        if (c == null) return;
+        try
+        {
+            typeof(Control).InvokeMember("DoubleBuffered",
+                System.Reflection.BindingFlags.SetProperty |
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic,
+                null, c, new object[] { true });
+        }
+        catch { }
     }
 
     // rounded-rect paint helpers
@@ -593,6 +619,7 @@ public class LoginForm : Form
             BackColor = InputBg,
             Padding = new Padding(14, 8, 14, 2)   // top-aligned edit text → push down to field center
         };
+        SetDoubleBuffered(wrap);
         wrap.Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, w, h, 24, 24));
         var tb = new TextBox
         {
