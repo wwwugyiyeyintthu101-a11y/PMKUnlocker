@@ -115,6 +115,34 @@ internal sealed class MtkBootProfile
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList()
             : new List<string>();
 
+    /// <summary>
+    /// True when two recipes put the same bytes on the wire for the first <paramref name="count"/> BROM steps.
+    ///
+    /// Auto-detect reads the HW code at step 2 and then continues on the same pipe with the recipe recorded on that
+    /// chipset, so it may only do that where the bytes already sent are the bytes the new recipe would have sent.
+    /// Every recipe's first three steps are the HW-code query by construction (<see cref="Load"/> refuses anything
+    /// else), and this makes that guarantee checkable instead of assumed: one step further and the recipes diverge.
+    /// </summary>
+    internal static bool SamePrefix(IReadOnlyList<MtkStep> a, IReadOnlyList<MtkStep> b, int count)
+    {
+        if (a == null || b == null || count < 0 || a.Count < count || b.Count < count) return false;
+        for (int i = 0; i < count; i++)
+        {
+            MtkStep x = a[i], y = b[i];
+            if (x == null || y == null) return false;
+            if (x.Kind != y.Kind || x.Optional != y.Optional || x.ChunkSize != y.ChunkSize) return false;
+            if (!string.Equals(x.BlobFile, y.BlobFile, StringComparison.Ordinal)) return false;
+            if (!SameReply(x.Expect, y.Expect) || !SameBytes(x.Payload, y.Payload)) return false;
+        }
+        return true;
+    }
+
+    private static bool SameReply(MtkReply a, MtkReply b) =>
+        a == null ? b == null : b != null && a.Kind == b.Kind && a.Bytes == b.Bytes;
+
+    private static bool SameBytes(byte[] a, byte[] b) =>
+        a == null ? b == null : b != null && a.AsSpan().SequenceEqual(b);
+
     /// <summary>Parse a recipe, then verify every blob and every framed upload it describes.</summary>
     internal static MtkBootProfile Load(string profilePath, string blobDirectory = null)
     {

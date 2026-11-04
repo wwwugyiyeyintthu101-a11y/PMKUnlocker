@@ -99,7 +99,7 @@ internal interface IMtkControlTransport
 internal sealed partial class MtkDaSession : IDisposable
 {
     private IMtkTransport _transport;
-    private readonly MtkBootProfile _profile;
+    private MtkBootProfile _profile;
     private readonly Action<string> _log;
     private readonly int _bromTimeoutMs;
     private readonly int _daTimeoutMs;
@@ -138,6 +138,16 @@ internal sealed partial class MtkDaSession : IDisposable
     /// started on — the regression path, where a scripted device never disappears.
     /// </summary>
     private readonly IMtkBromRecovery _recovery;
+
+    /// <summary>
+    /// Every installed recipe, when the operator left the choice on auto. Null means the recipe was picked by name
+    /// and the HW-code guard keeps its original, fail-closed behaviour.
+    ///
+    /// The switch happens on the HW-code reply — after three bytes that every recipe sends identically (the 0xFD
+    /// query, its echo, and the code itself) and before the first chipset-specific byte. Nothing is replayed and the
+    /// pipe is not reopened, so the bytes on the wire are exactly the bytes the right recipe would have sent.
+    /// </summary>
+    private readonly IReadOnlyList<MtkBootProfile> _autoProfiles;
 
     // The face proof is the only step that may be asked more than once: the four-byte USB handshake (on a real face)
     // and one read-only byte, then a long patience.
@@ -228,10 +238,12 @@ internal sealed partial class MtkDaSession : IDisposable
         int bromTimeoutMs, int daTimeoutMs, int settleTimeoutMs, IMtkDaStageHandoff handoff = null,
         int proofAttempts = 25, int proofRetryDelayMs = 400, IMtkBromRecovery recovery = null,
         int proofWindowMs = 60000, bool bromHandshake = false, bool bromGreet = true,
-        int bromStartupMs = 0, int bromSettleMs = 0, int bromStepMs = 0)
+        int bromStartupMs = 0, int bromSettleMs = 0, int bromStepMs = 0,
+        IReadOnlyList<MtkBootProfile> autoProfiles = null)
     {
         _transport = transport;
         _profile = profile;
+        _autoProfiles = autoProfiles;
         _log = log;
         _bromTimeoutMs = bromTimeoutMs;
         _daTimeoutMs = daTimeoutMs;
@@ -260,13 +272,14 @@ internal sealed partial class MtkDaSession : IDisposable
         int bromTimeoutMs = 1500, int daTimeoutMs = 8000, int settleTimeoutMs = 20000,
         IMtkDaStageHandoff handoff = null, int proofAttempts = 25, int proofRetryDelayMs = 400,
         IMtkBromRecovery recovery = null, int proofWindowMs = 60000, bool bromHandshake = false,
-        bool bromGreet = true, int bromStartupMs = 0, int bromSettleMs = 0, int bromStepMs = 0)
+        bool bromGreet = true, int bromStartupMs = 0, int bromSettleMs = 0, int bromStepMs = 0,
+        IReadOnlyList<MtkBootProfile> autoProfiles = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(profile);
         var session = new MtkDaSession(transport, profile, log, bromTimeoutMs, daTimeoutMs, settleTimeoutMs, handoff,
             proofAttempts, proofRetryDelayMs, recovery, proofWindowMs, bromHandshake, bromGreet,
-            bromStartupMs, bromSettleMs, bromStepMs);
+            bromStartupMs, bromSettleMs, bromStepMs, autoProfiles);
         try
         {
             await session.BootAsync(ct).ConfigureAwait(false);
@@ -290,8 +303,10 @@ internal sealed partial class MtkDaSession : IDisposable
 
     private async Task BootAsync(CancellationToken ct)
     {
-        Say(" BROM: " + _transport.Description + " — recipe " + _profile.Chipset +
-            " (" + _profile.BromSteps.Count + " BROM steps, " + _profile.DaSteps.Count + " DA steps)");
+        string recipe = _autoProfiles != null
+            ? "auto (" + _autoProfiles.Count + " installed, starting on " + _profile.Chipset + ")"
+            : _profile.Chipset + " (" + _profile.BromSteps.Count + " BROM steps, " + _profile.DaSteps.Count + " DA steps)";
+        Say(" BROM: " + _transport.Description + " — recipe " + recipe);
 
         // The pacing line is printed even when it is all zeroes, because a run that was meant to be slow and was
         // not is the one that explains itself wrongly.
@@ -371,6 +386,10 @@ internal sealed partial class MtkDaSession : IDisposable
         for (int index = 0; index < steps.Count; index++)
         {
             ct.ThrowIfCancellationRequested();
+            // Auto-detect swaps the recipe on the HW-code reply, which is step 2 in every recipe. Re-reading the
+            // list here means the next step is the new recipe's next byte — the same byte the boot would have sent
+            // had the right recipe been chosen by hand (MtkBootProfile.SamePrefix proved the sent prefix equal).
+            if (!isDa && !ReferenceEquals(steps, _profile.BromSteps)) steps = _profile.BromSteps;
             MtkStep step = steps[index];
 
             switch (step.Kind)
@@ -1022,9 +1041,26 @@ internal sealed partial class MtkDaSession : IDisposable
             case MtkReplyKind.HwCode:
                 DeviceHwCode = MtkBrom.ParseHwCode(reply);
                 if (DeviceHwCode != _profile.HwCode)
-                    throw new MtkDaProtocolException("Device reports HW code 0x" + DeviceHwCode.ToString("X4") +
-                        " but recipe " + _profile.Chipset + " was recorded on 0x" + _profile.HwCode.ToString("X4") +
-                        ". Replaying a bypass spray on the wrong chipset is how phones get bricked, so the boot was stopped.");
+                {
+                    // Auto-detect is the only case where a mismatch is recoverable: the code has just been read,
+                    // three bytes that every recipe sends identically are all that has gone out, and the matching
+                    // recipe is on disk. Everything else stays a refusal — a wrong spray is how phones get bricked.
+                    MtkBootProfile auto = MtkNativeBench.PickByHwCode(_autoProfiles, p => p.HwCode, DeviceHwCode);
+                    if (auto == null)
+                        throw new MtkDaProtocolException("Device reports HW code 0x" + DeviceHwCode.ToString("X4") +
+                            " but recipe " + _profile.Chipset + " was recorded on 0x" + _profile.HwCode.ToString("X4") +
+                            (_autoProfiles != null
+                                ? ". No installed recipe is recorded on 0x" + DeviceHwCode.ToString("X4") + " either, so auto has nothing to switch to"
+                                : "") +
+                            ". Replaying a bypass spray on the wrong chipset is how phones get bricked, so the boot was stopped.");
+                    if (!MtkBootProfile.SamePrefix(_profile.BromSteps, auto.BromSteps, index + 1))
+                        throw new MtkDaProtocolException("Auto found recipe " + auto.Chipset + " for HW 0x" +
+                            DeviceHwCode.ToString("X4") + ", but the two recipes differ in the steps already sent, so " +
+                            "the switch cannot continue on this pipe. Pick that recipe by hand and boot again.");
+                    _profile = auto;
+                }
+                if (_autoProfiles != null)
+                    Say(MtkNativeBench.AutoRecipeLine(DeviceHwCode, _profile.Chipset));
                 Say("[+] BROM face proven: HW 0x" + DeviceHwCode.ToString("X4") + " (" + _profile.Chipset + ").");
                 break;
 

@@ -94,7 +94,7 @@ try
         "Folder scan alone builds the catalog when JSON is missing");
 
     // ---- Wired umbrage catalog (real bundled-tools/mtk/loaders + pmk_mtk_devices.json) ----
-    string probe = AppContext.BaseDirectory, projRoot = "";
+    string? probe = AppContext.BaseDirectory, projRoot = "";
     while (probe != null && !(Directory.Exists(Path.Combine(probe, "PMKUnlocker")) && Directory.Exists(Path.Combine(probe, "tests"))))
         probe = Path.GetDirectoryName(probe);
     if (probe != null) projRoot = probe;
@@ -1465,7 +1465,7 @@ try
         "MTK boot: the control probes add no bulk writes — the recorded 29 writes / 173 bytes are unchanged");
     ctrlBooted.Dispose();
     var ctrlNoSupport = new FakeMtkTransport(recordedReplies);
-    string noCtrlError = null;
+    string? noCtrlError = null;
     try
     {
         var noSupportSession = await MtkDaSession.BootAsync(ctrlNoSupport, ctrlProfile, null, default, 300, 300, 300);
@@ -1476,6 +1476,160 @@ try
         "MTK boot: a pipe that cannot send endpoint-zero transfers refuses a control-step recipe instead of skipping the probes");
     Check(ctrlNoSupport.Writes.Count == 3,
         "MTK boot: that refusal stops after the three recorded writes and nothing more, so the phone keeps its state");
+
+    // ---- B6.6: auto recipe choice (2026-11-04) -------------------------------------------------------
+    // PMK has two phones on the bench and the combo made him switch the boot recipe before every single boot.
+    // Row 0 is now Auto, and the session picks the recipe from the BROM's own HW-code reply — the first byte of
+    // the walk that is chipset-specific — so nothing has to be replayed and nothing chipset-specific is early.
+    Check(MtkNativeBench.ProfileChoice(0, 2).Auto && MtkNativeBench.ProfileChoice(0, 2).ProfileIndex < 0 &&
+          MtkNativeBench.ProfileChoice(-1, 2).Auto,
+        "MTK auto: combo row 0 — and a combo nobody filled — means Auto and names no recipe file");
+    Check(!MtkNativeBench.ProfileChoice(1, 2).Auto && MtkNativeBench.ProfileChoice(1, 2).ProfileIndex == 0 &&
+          MtkNativeBench.ProfileChoice(2, 2).ProfileIndex == 1,
+        "MTK auto: a named row is the installed recipe one place after it — the off-by-one that used to boot the wrong phone");
+    Check(!MtkNativeBench.ProfileChoice(3, 2).Auto && MtkNativeBench.ProfileChoice(3, 2).ProfileIndex < 0,
+        "MTK auto: a row past the last installed recipe is refused, not clamped onto the last one");
+    Check(MtkNativeBench.AutoBootLine(2).Contains("2 installed") && MtkNativeBench.AutoBootLine(2).Contains("HW code picks one"),
+        "MTK auto: the boot says the recipe was not chosen by hand and how many are installed, so a later reader knows why it switched");
+
+    string RecipeOn(string chipset, string hw, string brom, string da) =>
+        "{\"chipset\":\"" + chipset + "\",\"hwCode\":\"" + hw + "\",\"source\":\"regression fixture\",\"note\":\"synthetic\"," +
+        "\"blobs\":" + GoodBlobs() + ",\"bromSteps\":" + brom + ",\"daSteps\":" + da + "}";
+    (string, byte[])[] AutoBlobs = { ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2) };
+    var recipe6765 = MtkBootProfile.Load(FixturePath("auto-6765", RecipeOn("MT6765-TEST", "0x0766", GoodBrom, GoodDa), AutoBlobs));
+    var recipe6877 = MtkBootProfile.Load(FixturePath("auto-6877", RecipeOn("MT6877-TEST", "0x0959", GoodBrom, GoodDa), AutoBlobs));
+    // The same first three frames, then a different command: the switch may only continue while the prefix the
+    // phone already answered is provably what the target recipe would have put there.
+    var recipeLate = MtkBootProfile.Load(FixturePath("auto-6877-late", RecipeOn("MT6877-LATE", "0x0959",
+        GoodBrom.Replace("{\"t\":\"tx\",\"hex\":\"d8\"}", "{\"t\":\"tx\",\"hex\":\"ff\"}"), GoodDa), AutoBlobs));
+
+    Check(MtkNativeBench.PickByHwCode(new[] { recipe6765, recipe6877 }, p => p.HwCode, 0x0959) == recipe6877 &&
+          MtkNativeBench.PickByHwCode(new[] { recipe6765, recipe6877 }, p => p.HwCode, 0x0766) == recipe6765 &&
+          MtkNativeBench.PickByHwCode(new[] { recipe6765, recipe6877 }, p => p.HwCode, 0x0bad) == null,
+        "MTK auto: the installed recipe recorded on the device's own HW code is the one picked, and a code nobody claims picks nothing");
+    Check(MtkBootProfile.SamePrefix(recipe6765.BromSteps, recipe6877.BromSteps, recipe6765.BromSteps.Count),
+        "MTK auto: two recipes with the same recorded prelude share their whole prefix, so a switch between them needs no replay");
+    Check(MtkBootProfile.SamePrefix(recipe6765.BromSteps, recipeLate.BromSteps, 3) &&
+          !MtkBootProfile.SamePrefix(recipe6765.BromSteps, recipeLate.BromSteps, 4),
+        "MTK auto: the divergence point is measured step by step — three frames agree, the fourth does not");
+
+    // A recipe file cannot be loaded at all unless it opens with 0xfd / its echo / the HW-code reply, so the only
+    // prefix that ever has to be compared is this three-frame opening. The guard is still asserted against a
+    // hand-built list: it is what stands between a switch and a byte the phone already answered differently.
+    var openQuery = new MtkStep[]
+    {
+        new(MtkStepKind.Tx, new byte[] { 0xfd }, null, null, 0),
+        new(MtkStepKind.Rx, null, new MtkReply(MtkReplyKind.Echo, 1), null, 0),
+        new(MtkStepKind.Rx, null, new MtkReply(MtkReplyKind.HwCode, 4), null, 0)
+    };
+    var differentReply = new MtkStep[]
+    {
+        openQuery[0], openQuery[1],
+        new(MtkStepKind.Rx, null, new MtkReply(MtkReplyKind.HwCode, 2), null, 0)
+    };
+    Check(MtkBootProfile.SamePrefix(openQuery, differentReply, 2) && !MtkBootProfile.SamePrefix(openQuery, differentReply, 3),
+        "MTK auto: the guard walks the frames in order — the query and its echo agree, the HW-code reply it expects does not, so that recipe is not switchable to");
+    Check(MtkBootProfile.SamePrefix(openQuery, openQuery, 3),
+        "MTK auto: a recipe measured against itself always matches, which is the case every real switch takes");
+    Check(!MtkBootProfile.SamePrefix(openQuery, openQuery[..2], 3),
+        "MTK auto: a recipe shorter than the frames already on the wire cannot be switched to either");
+
+    string[] NineFiveNineReplies = recordedReplies.Select((r, i) => i == 1 ? "09590000" : r).ToArray();
+    var autoLines = new List<string>();
+    var autoDevice = new FakeMtkTransport(NineFiveNineReplies);
+    var autoBooted = await MtkDaSession.BootAsync(autoDevice, recipe6765, autoLines.Add, default, 300, 300, 300,
+        autoProfiles: new[] { recipe6765, recipe6877 });
+    Check(autoBooted.DaIsReady && autoBooted.DeviceHwCode == 0x0959 && autoBooted.RecipeChipset == "MT6877-TEST",
+        "MTK auto: the boot starts on the first installed recipe and finishes on the one the BROM named — a plugged-in phone, not a dropdown choice");
+    Check(autoDevice.Writes.Count == 29 && autoDevice.WrittenBytes == 173,
+        "MTK auto: switching costs nothing on the wire — the same 29 writes / 173 bytes a hand-picked recipe puts out, no replay of the prefix");
+    Check(autoLines.Any(l => l.Contains("Auto: recipe MT6877-TEST") && l.Contains("0x0959")) &&
+          autoLines.Any(l => l.Contains("MTK DA ready") && l.Contains("MT6877-TEST")),
+        "MTK auto: the log names the recipe the HW code landed on and the ready line repeats it, so every run says which recipe actually ran");
+    autoBooted.Dispose();
+
+    var noMatchDevice = new FakeMtkTransport(recordedReplies.Select((r, i) => i == 1 ? "0bad0000" : r).ToArray());
+    string? noMatchError = null;
+    try { (await MtkDaSession.BootAsync(noMatchDevice, recipe6765, null, default, 300, 300, 300,
+        autoProfiles: new[] { recipe6765, recipe6877 })).Dispose(); }
+    catch (Exception ex) { noMatchError = ex.Message; }
+    Check(noMatchError != null && noMatchError.Contains("No installed recipe is recorded on 0x0BAD"),
+        "MTK auto: an HW code no installed recipe claims stops the boot instead of replaying a neighbouring chipset's spray");
+    Check(noMatchDevice.Writes.Count == 1,
+        "MTK auto: that refusal is paid for by the one query byte that was already due — nothing else reaches the phone");
+
+    // A recipe that diverges only after the HW-code reply is switchable, and the switch then has to survive the
+    // walk itself: here the recorded device answers the recipe the phone was NOT run with, and the very next echo
+    // refuses. That is the safety property — auto never lets a wrong spray continue silently.
+    var lateSwitch = new FakeMtkTransport(NineFiveNineReplies);
+    string? lateSwitchError = null;
+    try
+    {
+        (await MtkDaSession.BootAsync(lateSwitch, recipe6765, null, default, 300, 300, 300,
+            autoProfiles: new[] { recipe6765, recipeLate })).Dispose();
+    }
+    catch (Exception ex) { lateSwitchError = ex.Message; }
+    Check(lateSwitchError != null && lateSwitchError.Contains("did not repeat what was sent") &&
+          lateSwitchError.Contains("FF") && lateSwitchError.Contains("D8"),
+        "MTK auto: a switch onto a recipe that diverges later is stopped by the first reply that disagrees — the walk keeps its own echo guard");
+    Check(lateSwitch.Writes.Count == 2 && lateSwitch.Writes[1].SequenceEqual(new byte[] { 0xff }),
+        "MTK auto: that stop costs the one divergent byte and nothing after it, so a wrong recipe never reaches the register spray");
+
+    string? handPickedError = null;
+    try { (await MtkDaSession.BootAsync(new FakeMtkTransport(NineFiveNineReplies), recipe6765, null, default, 300, 300, 300)).Dispose(); }
+    catch (Exception ex) { handPickedError = ex.Message; }
+    Check(handPickedError != null && handPickedError.Contains("Replaying a bypass spray") &&
+          !handPickedError.Contains("No installed recipe"),
+        "MTK auto: choosing a recipe by hand keeps the old hard refusal — auto is the only mode that is allowed to switch");
+    Check(MtkNativeBench.ConciseNativeLine("[*] Native DA: starting on recipe mt6765_boot_profile.json (blobs verified)") ==
+          "[*] Recipe: mt6765_boot_profile.json (auto)",
+        "MTK auto: the simple screen still says which recipe the run started on, and says it is the auto choice");
+
+    // ---- B6.7: auto pipe choice (2026-11-04) ---------------------------------------------------------
+    // The same complaint one control further down: the pipe combo made PMK pick raw USB or the COM port before every
+    // boot. Row 0 is now Auto and the choice is read off the bus before anything is sent.
+    Check(MtkNativeBench.PipeChoice(0).Auto && !MtkNativeBench.PipeChoice(0).RawUsb &&
+          MtkNativeBench.PipeChoice(-1).Auto,
+        "MTK pipe: combo row 0 — and an unfilled combo — means Auto and opens no pipe until the bus has been read");
+    Check(!MtkNativeBench.PipeChoice(1).Auto && MtkNativeBench.PipeChoice(1).RawUsb &&
+          !MtkNativeBench.PipeChoice(2).Auto && !MtkNativeBench.PipeChoice(2).RawUsb,
+        "MTK pipe: the two named rows still force their own pipe — raw USB is row 1 and the COM port row 2, so a hand-picked A/B run is still possible");
+    Check(MtkNativeBench.PipeChoice(3).Auto && MtkNativeBench.PipeChoice(99).Auto,
+        "MTK pipe: a row past the last pipe is not an invented pipe — it falls back to Auto rather than booting on a name nobody chose");
+    Check(MtkNativeBench.PickRawPipe(true, true) && MtkNativeBench.PickRawPipe(true, false),
+        "MTK pipe: the bulk face wins any tie, because every hardware-proven boot came through it and the COM face of the same node was refused in RUN 10/11");
+    Check(!MtkNativeBench.PickRawPipe(false, true),
+        "MTK pipe: the COM port is picked when it is the only face the phone is showing — a node UsbDk cannot see but Windows has a driver for");
+    Check(MtkNativeBench.PickRawPipe(false, false),
+        "MTK pipe: nothing listed at all is a phone that is not plugged in yet, so Auto stays on the proven pipe and lets its own wait give the honest refusal");
+    // The accepted BROM PID set, mirrored from the transport's own BromPids (that file is not linked into this
+    // project because it drags System.IO.Ports and System.Management in). One PID today: 0E8D:0003.
+    int[] BromPids = { 0x0003 };
+    Check(MtkNativeBench.BulkBromFaceListed(new[] { 0x0003 }, BromPids) &&
+          !MtkNativeBench.BulkBromFaceListed(new[] { 0x2001 }, BromPids) &&
+          !MtkNativeBench.BulkBromFaceListed(Array.Empty<int>(), BromPids),
+        "MTK pipe: the bulk look counts a BROM face by PID only — the DA face of a phone left over from an earlier session is not a boot start");
+    Check(MtkNativeBench.ComBromPortListed(new[] { "0003" }, BromPids) &&
+          !MtkNativeBench.ComBromPortListed(new[] { "2001", "20FF" }, BromPids) &&
+          !MtkNativeBench.ComBromPortListed(Array.Empty<string>(), BromPids),
+        "MTK pipe: the serial look counts a COM port only when it sits on a BROM PID — the same VID under the DA's PID would otherwise pull Auto off the raw pipe");
+    Check(!MtkNativeBench.ComBromPortListed(new[] { "0003" }, new[] { 0x0766 }),
+        "MTK pipe: that PID test uses the accepted BROM set, not whatever the recipe's HW code happens to say");
+    string pipeAuto = MtkNativeBench.AutoPipeLine(true, true, false);
+    Check(pipeAuto.Contains("pipe = auto (raw USB)") && pipeAuto.Contains("the USB face was listed") &&
+          pipeAuto.Contains("the MediaTek COM port was not listed"),
+        "MTK pipe: the auto line names the pipe it chose and what each side of the bus said, so the log alone explains the choice later");
+    Check(MtkNativeBench.AutoPipeLine(false, false, true).Contains("pipe = auto (COM port)") &&
+          MtkNativeBench.AutoPipeLine(false, false, true).Contains("the only pipe the phone can be reached on"),
+        "MTK pipe: choosing the serial pipe is said as the exception it is, with the reason on the same line");
+    Check(MtkNativeBench.ConciseNativeLine("[*] Native DA: pipe = auto (raw USB) — the USB face was listed and the MediaTek COM port was listed; raw USB is the pipe every recorded boot came through") ==
+          "[*] Pipe: auto (raw USB)",
+        "MTK pipe: the simple screen shows the auto pipe choice as one short line instead of the whole sentence");
+    Check(MtkNativeBench.ConciseNativeLine("[*] Native DA: pipe = raw USB bulk endpoints — power the phone off, hold BOTH volume keys and plug it in") ==
+          "[>] Pipe: raw — power off, hold BOTH volume keys, plug in" &&
+          MtkNativeBench.ConciseNativeLine("[*] Native DA: pipe = COM port (serial) — power the phone off, hold BOTH volume keys and plug it in") ==
+          "[>] Pipe: COM — power off, hold BOTH volume keys, plug in",
+        "MTK pipe: a hand-picked pipe still reaches the screen as the plug-in reminder, and says which pipe it is waiting on");
 
     // ---- B4.33: the payload's re-open (RUN 39, 2026-11-01) --------------------------------------------
     // RUN 39's first hardware boot with the probes answered 0000 + 64281000 and the kamakiri payload ran
@@ -1521,7 +1675,7 @@ try
         "MTK boot: the re-open adds exactly the four greet bytes to the wire — 33 writes / 177 bytes, nothing else");
     string[] wrongComplement = recordedReplies.Take(5).Concat(new[] { "5e", "f5", "af", "fa" })
                                    .Concat(recordedReplies.Skip(5)).ToArray();
-    string greetError = null;
+    string? greetError = null;
     try
     {
         var wrongGreet = await MtkDaSession.BootAsync(new FakeCtrlTransport(new FakeMtkTransport(wrongComplement)), reopenProfile, null, default, 300, 300, 300);
@@ -1548,7 +1702,7 @@ try
     Check(reopenRetry.Inner.Writes.Count == 33 && reopenRetry.Inner.WrittenBytes == 177,
         "MTK boot: the retries add no bulk writes — the re-open census stays 33 writes / 177 bytes");
     reopenRetryBooted.Dispose();
-    string reopenExhausted = null;
+    string? reopenExhausted = null;
     try
     {
         var exhaustedPipe = new FakeCtrlTransport(new FakeMtkTransport(reopenReplies));
@@ -3120,9 +3274,23 @@ try
         "MTK B5.4: a missing part number or size leaves no separator and no placeholder behind — the line never looks like a value it does not have");
     Check(!status.Contains(serialHex, StringComparison.OrdinalIgnoreCase) && !status.Contains(cidHex),
         "MTK B5.4: the screen line shows the model name of the chip, never its serial");
-    Check(MtkNativeBench.BootProvenOnHardware(0x0766) && !MtkNativeBench.BootProvenOnHardware(0x0768) &&
-          !MtkNativeBench.BootProvenOnHardware(0x6885),
-        "MTK B5.4: exactly the HW codes this tool booted on hardware are claimed as proven; a new chipset says it is a first run");
+    Check(MtkNativeBench.BootProvenOnHardware(0x0766) && MtkNativeBench.BootProvenOnHardware(0x0959) &&
+          !MtkNativeBench.BootProvenOnHardware(0x0768) && !MtkNativeBench.BootProvenOnHardware(0x6885),
+        "MTK B5.4/B6: exactly the HW codes this tool booted on hardware are claimed as proven (MT6765 and, from the " +
+        "2026-11-04 UFS run, MT6877); a new chipset still says it is a first run");
+    Check(MtkDaExtent.SizeText(512 * 1024) == "512 KiB" && MtkDaExtent.SizeText(4UL * 1024 * 1024) == "4 MiB" &&
+          MtkDaExtent.SizeText(255919652864UL) == "238 GiB" && MtkDaExtent.SizeText(512) == "512 B",
+        "MTK B6: a 512 KiB partition reads as 512 KiB, not 0 MiB - the unit an operator acts on");
+    Check(MtkNativeBench.ConciseNativeLine("[i] BROM wire 0: tx 0xFD") == null &&
+          MtkNativeBench.ConciseNativeLine("    misc  LBA 8..1031  byte 0x8000 + 0x400000 (4 MiB)") == null &&
+          MtkNativeBench.ConciseNativeLine("[*] BROM pacing: 0 ms before the greet") == null &&
+          MtkNativeBench.ConciseNativeLine("[ ] BROM step 162: the ask never completed") == null,
+        "MTK B6: the simple screen hides the per-byte wire, the partition rows, the pacing knobs and the optional-step detail");
+    Check(MtkNativeBench.ConciseNativeLine("[+] BROM handshake complete: A0->5F 0A->F5 50->AF 05->FA \u2014 the face will now take a command.") == "[+] Handshake OK" &&
+          MtkNativeBench.ConciseNativeLine("[+] MTK DA ready \u2014 MT6877 (HW 0959), boot replayed from recipe.") == "[+] DA ready" &&
+          MtkNativeBench.ConciseNativeLine("[+] Live GPT: 77 partition(s), block 4096 B \u2014 resolved once, no further replug needed.") == "[+] Live GPT: 77 partition(s)" &&
+          MtkNativeBench.ConciseNativeLine("[+] READ 0x1000 + 0x1000 \u2014 4096 byte(s) in 1 frame(s).") == "[+] READ 0x1000 + 0x1000",
+        "MTK B6: the screen keeps the fact of each milestone and drops the explanation native-da.log already holds");
 
     // ---- B3.5: the live GPT, read once and cached ----------------------------------------------------
     byte[] liveHeader = GptHeader(2, 3, 128);

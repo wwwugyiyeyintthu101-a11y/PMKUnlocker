@@ -54,7 +54,20 @@ internal sealed record MtkDaExtent(string Name, long FirstLba, long LastLba, uin
     internal ulong ByteOffset => checked((ulong)(FirstLba * (long)BlockSize));
     internal ulong ByteLength => checked((ulong)(SectorCount * (long)BlockSize));
     internal string Describe => Name + "  LBA " + FirstLba + ".." + LastLba + "  byte 0x" + ByteOffset.ToString("x") +
-        " + 0x" + ByteLength.ToString("x") + " (" + (ByteLength / 1024 / 1024) + " MiB)";
+        " + 0x" + ByteLength.ToString("x") + " (" + SizeText(ByteLength) + ")";
+
+    /// <summary>
+    /// A byte count at the unit an operator reads: a 512 KiB partition must not print as "0 MiB". The DA's own
+    /// numbers stay in the hex beside it, so this only changes the parenthetical, never the extent.
+    /// </summary>
+    internal static string SizeText(ulong bytes)
+    {
+        const ulong KiB = 1024UL, MiB = 1024UL * 1024, GiB = 1024UL * 1024 * 1024;
+        if (bytes >= GiB) return (bytes / GiB) + " GiB";
+        if (bytes >= MiB) return (bytes / MiB) + " MiB";
+        if (bytes >= KiB) return (bytes / KiB) + " KiB";
+        return bytes + " B";
+    }
 }
 
 /// <summary>A GPT read from the live device, kept on the session so the cable is touched once.</summary>

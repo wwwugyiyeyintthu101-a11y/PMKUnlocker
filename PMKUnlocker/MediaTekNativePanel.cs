@@ -25,6 +25,9 @@ public partial class Form1
     private CancellationTokenSource nativeCancel;
     private ComboBox cmbNativeProfile;
     private ComboBox cmbNativeTransport;
+    /// <summary>Which pipe the session now in hand was opened on, so the close line can name it. Since B6.7 Auto can
+    /// pick either pipe on its own, the dropdown is no longer a record of what a run actually used.</summary>
+    private string nativePipeName;
     private TextBox txtNativePartition;
     private Label lblNativeState;
     private Label lblNativeProgress;
@@ -41,6 +44,10 @@ public partial class Form1
     private bool nativeBenchLogBroken;
     private bool nativeCloseRequested;
     private string nativeLastDump;
+    // The last line the simple screen painted, so two identical milestones (two DA syncs) do not read as two events.
+    private string nativeLastScreenLine;
+    // Simple log: the screen shows milestones, native-da.log keeps every byte. Off = watch the wire step by step.
+    private CheckBox chkNativeSimple;
     // FindProfiles walks the recipe tree, so the combo shows a friendly name and the boot uses the full path.
     private readonly List<string> nativeProfilePaths = new();
 
@@ -75,17 +82,27 @@ public partial class Form1
             Font = new Font("Segoe UI", 8.5f)
         };
 
+        // Auto is the default: the chipset is read from the BROM itself and the matching recipe is chosen at that
+        // byte, so an operator moving between phones does not have to remember which recipe belongs to which one.
+        cmbNativeProfile.Items.Add("Auto (detect chipset)");
         foreach (string profile in profiles)
         {
             nativeProfilePaths.Add(profile);
-            cmbNativeProfile.Items.Add(Path.GetFileNameWithoutExtension(profile));
+            // "mt6877_boot_profile" reads as noise in a 250 px combo; the recipe name is the chipset.
+            string label = Path.GetFileNameWithoutExtension(profile);
+            const string suffix = "_boot_profile";
+            if (label.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                label = label.Substring(0, label.Length - suffix.Length);
+            cmbNativeProfile.Items.Add(label);
         }
         cmbNativeProfile.SelectedIndex = 0;
+        if (toolTipMain != null)
+            Tip(cmbNativeProfile, "Auto reads the chipset from the BROM's own HW code (the first reply that is chipset-specific) and runs the recipe recorded on it — nothing chipset-specific is sent before that. Pick a name only to force one recipe.");
 
         // The pipe is a choice, not a constant. On this phone the same 0xfd is echoed over the device's bulk
         // endpoints and answered 0xfe over the COM face Windows shows on the same node, so the only honest bench
-        // offers both and writes into the log which one a run used. Raw USB is the default because that is the pipe
-        // the recorded boot actually came through.
+        // offers both and writes into the log which one a run used. Auto is the default because the phone itself
+        // says which pipe it is reachable on: the bulk face being listed at all is the whole decision.
         cmbNativeTransport = new ComboBox
         {
             Location = new Point(UiX(0) + 662, UiY(4) - 2),
@@ -96,11 +113,29 @@ public partial class Form1
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI", 9f)
         };
+        cmbNativeTransport.Items.Add("Pipe: Auto (detect)");
         cmbNativeTransport.Items.Add("Pipe: raw USB");
         cmbNativeTransport.Items.Add("Pipe: COM port");
         cmbNativeTransport.SelectedIndex = 0;
         if (toolTipMain != null)
-            Tip(cmbNativeTransport, "Raw USB claims the device's bulk endpoints through UsbDk/WinUSB — the pipe the recorded boot was captured through, and the one mtkclient uses. COM port talks through Windows' serial driver; RUN 10 and RUN 11 were refused there. Pick raw USB for the first try; switch only to compare, and read the line it logs either way.");
+            Tip(cmbNativeTransport, "Auto looks at the bus before it sends anything: if the phone's bulk face (0e8d:0003) is listed it runs the raw USB pipe — the pipe every hardware-proven boot came through — and only when no bulk face is listed while a MediaTek COM port is does it run the serial pipe. Pick a name to force one and compare; every run logs which pipe it took either way. RUN 10 and RUN 11 were refused on the COM port.");
+
+        // The screen is for the operator, the file is for the bench. Simple mode (the default) shows the milestones
+        // and hides the per-byte wire; unchecking it is how a run is watched byte by byte. native-da.log always gets
+        // every line either way, so this toggle can never cost evidence.
+        chkNativeSimple = new CheckBox
+        {
+            Text = "Simple log",
+            Location = new Point(UiX(0) + 505, UiY(0) + 8),
+            Size = new Size(110, 24),
+            Checked = true,
+            ForeColor = Color.Gainsboro,
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        chkNativeSimple.CheckedChanged += (_, _) => nativeSimpleLog = chkNativeSimple.Checked;
+        if (toolTipMain != null)
+            Tip(chkNativeSimple, "Show only the milestones on screen (connected, chipset, DA ready, storage, GPT, session live). The full BROM wire still goes to native-da.log. Uncheck to watch every byte on screen.");
 
         btnNativeBoot = Create3DButton("🔌 Boot DA (recipe)", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
         btnNativeBoot.Click += async (_, _) => await NativeGuarded("boot", NativeBootAsync);
@@ -174,7 +209,7 @@ public partial class Form1
         nativeTab.Controls.AddRange(new Control[]
         {
             grpSession, grpData, lblPartition, txtNativePartition, lblProfileTag, cmbNativeProfile, cmbNativeTransport,
-            lblNativeState, lblNativeProgress, lblNativeHint
+            chkNativeSimple, lblNativeState, lblNativeProgress, lblNativeHint
         });
         BuildNativeInfoGroup();
         BuildNativeFlashActions();
@@ -457,14 +492,51 @@ public partial class Form1
               "over mid-handshake answers 0xfe to every byte (RUN 15)."
             : MtkNativeBench.BootBlocker(nativeDa != null, NativeOtherClientHoldingPort());
         if (blocker != null) throw new InvalidOperationException(blocker);
-        int picked = cmbNativeProfile.SelectedIndex;
-        if (picked < 0 || picked >= nativeProfilePaths.Count)
-            throw new InvalidOperationException("No boot recipe is selected — the recipe list is " + nativeProfilePaths.Count + " entry(ies).");
-        string profilePath = nativeProfilePaths[picked];
+        var choice = MtkNativeBench.ProfileChoice(cmbNativeProfile.SelectedIndex, nativeProfilePaths.Count);
+        if (!choice.Auto && choice.ProfileIndex < 0)
+            throw new InvalidOperationException("No boot recipe is selected — the recipe list is " +
+                nativeProfilePaths.Count + " entry(ies) and combo row " + cmbNativeProfile.SelectedIndex + " has none behind it.");
 
         nativeCancel = new CancellationTokenSource();
-        NativeSay("[*] Native DA: loading recipe " + Path.GetFileName(profilePath) + " (blobs verified against their recorded sha256 before anything is sent)");
-        MtkBootProfile profile = MtkBootProfile.Load(profilePath);
+        MtkBootProfile profile;
+        IReadOnlyList<MtkBootProfile> autoProfiles = null;
+        if (choice.Auto)
+        {
+            // Auto means the operator does not know (or should not have to know) which phone is plugged in. The
+            // chipset is only knowable from the BROM's own HW-code reply, so every installed recipe is loaded and
+            // the run starts on the first one; the session switches at that reply and refuses if anything
+            // chipset-specific went out before it. A recipe that does not load is reported and skipped — one
+            // incomplete pack must not make the other phone unbootable.
+            var installed = new List<MtkBootProfile>();
+            string firstFileLoaded = null;
+            foreach (string path in nativeProfilePaths)
+            {
+                try
+                {
+                    MtkBootProfile loaded = MtkBootProfile.Load(path);
+                    installed.Add(loaded);
+                    firstFileLoaded ??= Path.GetFileName(path);
+                }
+                catch (Exception ex)
+                {
+                    NativeSay("[!] Native DA: " + Path.GetFileName(path) + " is installed but did not load (" + ex.Message + ") — auto will not use it.");
+                }
+            }
+            if (installed.Count == 0)
+                throw new InvalidOperationException("Auto has no usable recipe — " + nativeProfilePaths.Count +
+                    " recipe file(s) are installed and none of them passed its blob check (see the lines above).");
+            profile = installed[0];
+            autoProfiles = installed;
+            NativeSay(MtkNativeBench.AutoBootLine(installed.Count));
+            NativeSay("[*] Native DA: starting on recipe " + firstFileLoaded +
+                " (every installed recipe was loaded and its blobs verified against the recorded sha256 before anything was sent)");
+        }
+        else
+        {
+            string profilePath = nativeProfilePaths[choice.ProfileIndex];
+            NativeSay("[*] Native DA: loading recipe " + Path.GetFileName(profilePath) + " (blobs verified against their recorded sha256 before anything is sent)");
+            profile = MtkBootProfile.Load(profilePath);
+        }
 
         // The note is read per run, before the pipe is opened, because it can now change what the open itself does.
         // The timings and the greeting are the B4.17 knobs; setconfig/claimall are B4.20's, added because the
@@ -481,12 +553,39 @@ public partial class Form1
         var openOptions = new MtkUsbOpenOptions(knobs.SetConfig, knobs.ClaimAll, knobs.Arm);
         SetNativeUiWire(knobs.UiWire);
 
-        bool rawUsb = cmbNativeTransport?.SelectedIndex == 0;
+        // Auto asks the bus which face the phone is really showing before anything is sent: the bulk pair this tool
+        // has every hardware-proven boot on, or — only when no bulk face is listed at all — the serial face Windows
+        // has a driver for. The two looks are read here rather than left to the pipe's own 90 s wait, because that
+        // wait is the refusal for a phone that is not in BROM yet and it must stay exactly as worded on each pipe.
+        var pipe = MtkNativeBench.PipeChoice(cmbNativeTransport?.SelectedIndex ?? 0);
+        bool bulkListed = false;
+        bool comListed = false;
+        if (pipe.Auto)
+        {
+            bulkListed = MtkNativeBench.BulkBromFaceListed(MtkUsbTransport.EnumerateFaces().Select(f => f.Pid),
+                MtkUsbTransport.BromPids);
+            try
+            {
+                comListed = MtkNativeBench.ComBromPortListed(MtkVcom.Enumerate().Select(p => p.Pid),
+                    MtkUsbTransport.BromPids);
+            }
+            catch (Exception ex)
+            {
+                // A Windows device list that cannot be read is a missing look, not a refusal to boot: the bulk face
+                // was already read through libusb, and the raw pipe is the one every recorded boot came through.
+                NativeSay("[!] Native DA: Windows could not list the COM faces (" + ex.Message +
+                    ") — auto treated the serial side as not listed.");
+            }
+        }
+        bool rawUsb = pipe.Auto ? MtkNativeBench.PickRawPipe(bulkListed, comListed) : pipe.RawUsb;
+        if (pipe.Auto)
+            NativeSay(MtkNativeBench.AutoPipeLine(rawUsb, bulkListed, comListed));
         IMtkTransport transport;
         IMtkDaStageHandoff handoff = null;
         IMtkBromRecovery recovery;
         if (rawUsb)
         {
+            nativePipeName = "raw USB bulk pipe";
             NativeSay("[*] Native DA: pipe = raw USB bulk endpoints — power the phone off, hold BOTH volume keys and plug it in");
             MtkUsbFace face = await MtkUsbTransport.WaitForFaceAsync(MtkUsbTransport.BromPids,
                 TimeSpan.FromSeconds(90), NativeLog, nativeCancel.Token).ConfigureAwait(false);
@@ -504,6 +603,7 @@ public partial class Form1
         }
         else
         {
+            nativePipeName = "COM port";
             NativeSay("[*] Native DA: pipe = COM port (serial) — power the phone off, hold BOTH volume keys and plug it in");
             MtkVcomPort port = await MtkVcom.WaitForPortAsync(TimeSpan.FromSeconds(90), NativeLog, nativeCancel.Token).ConfigureAwait(false);
             transport = MtkSerialTransport.Open(port);
@@ -520,7 +620,8 @@ public partial class Form1
         // the note says greet=off (the working client's own wire starts at the query itself).
         nativeDa = await MtkDaSession.BootAsync(transport, profile, NativeLog, nativeCancel.Token,
             handoff: handoff, recovery: recovery, bromHandshake: true, bromGreet: knobs.Greet,
-            bromStartupMs: knobs.Startup, bromSettleMs: knobs.Settle, bromStepMs: knobs.Step)
+            bromStartupMs: knobs.Startup, bromSettleMs: knobs.Settle, bromStepMs: knobs.Step,
+            autoProfiles: autoProfiles)
             .ConfigureAwait(false);
         // NativeBootAsync reaches this on a pool thread (ConfigureAwait(false) all the way through the wire), and a
         // state line plus a grid refresh are window state — so they are applied on the window's thread.
@@ -571,8 +672,13 @@ public partial class Form1
         RequireNativeSession();
         MtkStorageInfo storage = await nativeDa.QueryStorageAsync(nativeCancel.Token).ConfigureAwait(false);
         MtkLimits limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token).ConfigureAwait(false);
-        NativeSay("[+] DA geometry: " + storage.Describe);
-        NativeSay("[+] DA transfer: write chunk 0x" + limits.WriteChunkSize.ToString("x") + ", frame 0x" + limits.TransferPacketSize.ToString("x"));
+        // The screen gets the two facts an operator acts on; the indented line keeps the device's raw words in
+        // native-da.log. Simple mode hides the detail line, so a UFS phone reads "Storage: UFS, 4096 B blocks, 238 GiB"
+        // instead of a 130-character sentence.
+        NativeSay("[+] Storage: " + storage.StorageName + ", " + storage.BlockSize + " B blocks, " + MtkDaExtent.SizeText(storage.UserAreaSize));
+        NativeSay("    DA geometry: " + storage.Describe);
+        NativeSay("[+] Transfer: " + MtkDaExtent.SizeText(limits.WriteChunkSize) + " chunk / " + MtkDaExtent.SizeText(limits.TransferPacketSize) + " frame");
+        NativeSay("    DA limits: write chunk 0x" + limits.WriteChunkSize.ToString("x") + ", frame 0x" + limits.TransferPacketSize.ToString("x"));
         MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token).ConfigureAwait(false);
 
         // The cache is written while a loaded scatter is still known — the grid fill below clears the package, and
@@ -584,6 +690,11 @@ public partial class Form1
             lblNativeState.Text = MtkNativeBench.StatusLine(true, nativeDa.TransportDescription, nativeDa.DeviceHwCode, table.Extents.Count);
             SetNativeDeviceStatus(storage);
             FillFlashGridFromNativeTable(table);
+            // PMK's word (2026-11-04): "Live GPT: 43 partition(s) ရောက်တာနဲ့ Partition ဇယားကွက်ပေါ်လာစေချင်တယ်".
+            // The rows were already there — on the FLASH page, while a boot is started from NATIVE, so the operator
+            // watched a line count a table he could not see. The session survives the switch and the NATIVE tab is
+            // one click away again.
+            ShowMediaTekFlashPage();
         });
         foreach (MtkDaExtent extent in table.Extents.Take(12))
             NativeSay("    " + extent.Describe);
@@ -647,6 +758,20 @@ public partial class Form1
                     FormatBytesLong((long)extent.ByteLength), "Live GPT");
         }
         finally { EndMediaTekGridFill(); }
+    }
+
+    /// <summary>Brings the FLASH page forward, found by its own caption so a later tab inserted above it cannot
+    /// silently turn this into "show whichever page happens to sit at index 3".</summary>
+    private void ShowMediaTekFlashPage()
+    {
+        for (int i = 0; i < mtkModes.TabPages.Count; i++)
+        {
+            if (string.Equals(mtkModes.TabPages[i].Text, "FLASH", StringComparison.Ordinal))
+            {
+                mtkModes.SelectedIndex = i;
+                return;
+            }
+        }
     }
 
     private async Task NativeDumpAsync()
@@ -728,7 +853,10 @@ public partial class Form1
         nativeCancel?.Dispose();
         nativeCancel = null;
         SetNativeButtonsLive();
-        NativeSay("[+] Native DA session closed — the COM port is released.");
+        // Named from the pipe the boot actually took, not from the dropdown: since B6.7 Auto can choose either pipe,
+        // and RUN 42/43/48/49 all closed a raw-USB session under the old wording, which told the operator the
+        // serial port had just been let go — a claim about a port that was never opened.
+        NativeSay("[+] Native DA session closed — " + (nativePipeName ?? "the pipe") + " is released.");
     }
 
     /// <summary>The form is going away: the port must not stay claimed by a dead process.</summary>
@@ -803,12 +931,14 @@ public partial class Form1
     private readonly List<KeyValuePair<string, Color>> nativeWirePending = new();
     private readonly object nativeWireGate = new();
     private bool nativeUiWireEach = true;
+    private bool nativeSimpleLog = true;      // screen = milestones; native-da.log = every byte
     private const int NativeWireBatchLines = 24;
 
     /// <summary>
     /// The one place a NATIVE line is shown, and the one place it is recorded. The first real boot proves things no
     /// offline test can reach — whether the SerialPort settings hold, whether the DA stage stays on the same COM
     /// face after the jump — and that proof has to outlive the window, so every line also lands in native-da.log.
+    /// Simple mode only changes what reaches the screen; the file always keeps the full run.
     /// </summary>
     private void NativeSay(string line)
     {
@@ -819,29 +949,49 @@ public partial class Form1
         }
         catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
         {
-            if (nativeBenchLogBroken) return;
-            nativeBenchLogBroken = true;   // say it once; a dead log must not interrupt a live phone
-            Log("[!] Native DA: the bench log is not writable (" + ex.Message + "). The run continues, but its evidence has to come from this screen.", Color.Orange);
-            return;
+            // A locked or unwritable file must not also hide the screen. Warn once and keep going; the next line
+            // retries the append, so a transient lock (an editor, a scanner) does not cost the rest of the run.
+            if (!nativeBenchLogBroken)
+            {
+                nativeBenchLogBroken = true;
+                Log("[!] Native DA: the bench log is not writable (" + ex.Message + "). The screen still shows the run.", Color.Orange);
+            }
         }
 
         string head = line.TrimStart();
+        bool wire = MtkNativeBench.IsWireChatter(head);
+
+        if (nativeSimpleLog)
+        {
+            if (wire) return;                                  // the file has it; the screen does not need it
+            string concise = MtkNativeBench.ConciseNativeLine(line);
+            if (concise == null) return;
+            if (concise == nativeLastScreenLine) return;       // two DA syncs are one milestone on the screen
+            nativeLastScreenLine = concise;
+            line = concise;
+            head = line.TrimStart();
+        }
+
         Color color = head.StartsWith("[+]") || head.StartsWith("[OK]") ? Color.LightGreen
             : head.StartsWith("[FAIL]") ? Color.Red
             : head.StartsWith("[!]") ? Color.Orange
-            : head.StartsWith("[*]") ? Color.Cyan
+            : head.StartsWith("[*]") || head.StartsWith("[>]") ? Color.Cyan
             : Color.Gainsboro;
 
-        bool queue = false;
-        lock (nativeWireGate)
+        if (!nativeUiWireEach && wire)
         {
-            if (!nativeUiWireEach && MtkNativeBench.IsWireChatter(head))
+            bool full;
+            lock (nativeWireGate)
             {
                 nativeWirePending.Add(new KeyValuePair<string, Color>(line, color));
-                queue = nativeWirePending.Count < NativeWireBatchLines;
+                full = nativeWirePending.Count >= NativeWireBatchLines;
             }
+            // The line is already in the batch. Flushing it and then logging it again was the duplicate the screen
+            // showed every 24 wire lines; the batch owns it either way.
+            if (full) FlushNativeWire();
+            return;
         }
-        if (queue) return;
+
         FlushNativeWire();
         Log(line, color);
     }

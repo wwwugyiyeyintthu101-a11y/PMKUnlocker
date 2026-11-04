@@ -3,9 +3,9 @@
 **Status date: 2026-11-04.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **700 checks** in the working tree (664 at `HEAD 36b9e9c`); the B6/B5.9 batch raises the baseline to 700 when it lands.
+- `tests/Regression`: **735 checks** in the working tree (722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `HEAD 7bc88a5`).
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
-- Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and reached a live DA on **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
+- Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
 
 ---
@@ -44,7 +44,7 @@
 | Bootloader Unlock / Lock | yes (`da seccfg`) | **no, by design** | No unlock payload has ever been measured; native is read-only on seccfg |
 | Reboot | yes (`reset`) | yes (TOPRGU stub) | Auto-boots (B5.6) |
 | Seccfg state read | yes | yes | Read-only (B5.1–B5.2) |
-| UFS support | no | yes (B6, in progress) | `0x40004` geometry + `0x30/3` extent pair |
+| UFS support | no | yes (B6, hardware-proven on MT6877) | `0x40004` geometry + `0x30/3` extent pair |
 | One plug cycle per operation | yes | yes (one boot, then many ops) | The native advantage |
 
 ### 2.2 Measured wire facts (the parts that must not be re-derived)
@@ -74,7 +74,7 @@
 | Device / chip | Storage | Proven | Date | Evidence |
 |---|---|---|---|---|
 | Redmi 9A `dandelion`, MT6765 HW 0x0766 | eMMC CJTD4R | Native boot to DA; live GPT (43 extents); grid Read/Write/Erase; seccfg state; reboot auto-boot; NV erase→restore (mtkclient path) | 2026-11-02 → 2026-11-03 | `native-da.log`, RUN 42/43/47/48/51/52, B5.6 |
-| MT6877 HW 0x0959 | UFS | Live DA reached; UFS geometry (`0x40004`) and `0x30/3` extents captured; optional control step measured; split framing answered 17× | 2026-11-03 | RUN B6-1/B6-3/B6-4, `capture` notes |
+| MT6877 HW 0x0959 | UFS, 4096 B blocks, 238 GiB | **Full native session:** boot to live DA; `0x40001` refused as non-eMMC → `0x40004` UFS geometry; limits 2 MiB / 64 KiB; READ 4 KiB and 16 KiB; live GPT **77 partitions**; both optional line-setting asks stepped over on the pipe in hand; Reboot Device answered status 0 and the phone rebooted | 2026-11-04 09:19:45 → 09:25:03 | `native-da.log` (281 lines), RUN B6-1/B6-3/B6-4 + this run |
 | Any other MTK chipset | — | Not yet | — | first-run risk |
 
 **Known limits:** native boot depends on the kamakiri race (or an auth file); SLA/DAA chipsets are not supported natively; UFS RPMB/GP sizes are not reported; seccfg write is intentionally absent; sparse images are refused; native multi-partition flash/backup/Format All/NV/IMEI/FRP are not implemented yet.
@@ -106,32 +106,77 @@
 | **B5.5** (2026-11-03) | NV Erase → NV Restore hardware-proven: 6 partitions, same extents, 6/6 SHA-256, IMEI + signal back | RUN 51/52, backup `20261027_165526` |
 | **B5.6** (2026-11-03) | Native Reboot Device auto-boots (Mi logo → charging screen); RUN 49 power-off note retired | `native-da.log` 09:40:09 → 09:40:54 |
 | **B5.7–B5.8** (2026-11-03) | Startup first paint 5,390 → 682 ms (double-buffered login card); FLASH grid repaint costs fixed (double buffer, bulk fill, idempotent restyle, dead-session click = one line) | `pmk_startup.log`, commit `36b9e9c` |
-| **B5.9** (2026-11-03, uncommitted) | seccfg read-only on the native session (write/erase refused before the dialog; read untouched; mtkclient `da seccfg` unaffected) | tests + `ReadOnlyPayloadNames` |
-| **B6** (2026-11-03, uncommitted) | MT6877/UFS support (`0x40004`, `0x30/3`), optional control steps, no-answer state + bounded asks, split framing | RUN B6-1/3/4, tests |
+| **B5.9** (2026-11-03, `7bc88a5`) | seccfg read-only on the native session (write/erase refused before the dialog; read untouched; mtkclient `da seccfg` unaffected) | tests + `ReadOnlyPayloadNames` |
+| **B6** (2026-11-03 → 11-04, `7bc88a5`) | MT6877/UFS support (`0x40004`, `0x30/3`), optional control steps, no-answer state + bounded asks, split framing; **hardware-closed on MT6877** (boot, UFS geometry, 77-partition GPT, READ, optional skip, reboot) | RUN B6-1/3/4, `native-da.log` 2026-11-04, tests |
 
 ---
 
-## 4. In progress — B6 batch (uncommitted)
+## 4. B6 — hardware-closed on MT6877, one re-run left on MT6765
 
 **Goal:** make the native session work on a UFS (MT6877) unit without weakening the proven MT6765 path.
 
-**Changed files:** `MediaTek/MtkBootProfile.cs`, `MtkDaCommands.cs`, `MtkDaSession.cs`, `MtkNativeBench.cs`, `MtkWire.cs`, `tests/Regression/Program.cs`, `ROADMAP.md`; master recipes gained `mt6877/` (profile + 5 blobs). One extra line in `MediaTekPanel.cs` (`MultiSelect = false`).
+**Committed in `7bc88a5`:** `MediaTek/MtkBootProfile.cs`, `MtkDaCommands.cs`, `MtkDaSession.cs`, `MtkNativeBench.cs`, `MtkWire.cs`, `tests/Regression/Program.cs`, `ROADMAP.md`; master recipes gained `mt6877/` (profile + 5 blobs). One extra line in `MediaTekPanel.cs` (`MultiSelect = false`).
 
-**What is verified now**
-- Solution build 0/0; regression **700 checks** PASS; recipes 14/14 copied into Debug and Release outputs.
-- UFS geometry decode, shape discrimination, `0x30/3` extent framing, UFS block-size checks, identity non-exposure.
-- Optional-step skip on the pipe in hand (no reclaim/dispose); strict step still reclaims once and refuses.
-- No-answer bound measured against a fake that never returns (3 s budget, refusal names the reclaim and the recovery).
-- Split framing asserted against both recordings; the mt6765 recipe carries no `opt` flag, so its path is unchanged in intent.
+**MT6877 hardware run (2026-11-04 09:19:45 → 09:25:03) — PASS**
+- BROM → DA1 (454,632 B) → DA2 (542,012 B) → DAext (16,428 B) → live DA, 34 s including one 15 s DA1 stall.
+- `0x40001` answered 104 bytes in a non-eMMC shape → `0x40004` returned type 48 (UFS), block 4096, user 255,919,652,864 B (238 GiB), boot1/2 4 MiB, rpmb 0.
+- Limits 0x200000 / 0x10000; READ 4 KiB and 16 KiB came back; live GPT listed **77 partitions** and the extents were bound to `HW 0x0959 · block 4096 · user 255919652864 · 77`.
+- Both optional line-setting asks (`SET_LINE_CODING`, `SET_CONTROL_LINE_STATE`) never completed; both were logged and stepped over on the pipe in hand, and the greet + DA upload still succeeded.
+- Reboot Device sent the TOPRGU reset, the DA answered status 0, the session closed and the phone rebooted.
+- No `DeviceClass - USBError(5, ...)` line reached the app log.
 
-**Still open before the batch can be called closed**
-1. **MT6765 hardware re-run** after the split-framing change: boot → live GPT → one dump → one sacrificial write/erase. This is the only protocol change that touches the hardware-proven path; the recording supports it, but it has not been run on the 9A with the new build.
-2. **MT6877 hardware run:** boot to live DA, UFS read, optional-step skip, reboot. The capture and RUN B6-4 prove the DA answers; a full session is not yet logged.
-3. **Docs:** this file's baseline becomes 700 (done here); add the B6 entry with the run evidence; correct the stale "669" wording in B5.9.
-4. **Commit** the batch (push only on request).
+**Still open**
+1. **MT6765 re-run after the split-framing change — DONE, and its write half closed on the MT6877 instead** (boot + geometry + live GPT 2026-11-04 10:42/11:12/11:15; `para` read → read determinism → write → `VERIFY OK` → independent re-read 2026-11-04 11:24–11:31, see B6.9). What is left of it is only the optional sacrificial **erase** + restore, and a 9A `para` dump if that unit specifically wants one.
+2. **15 s DA1 stall on MT6877** — wire 211 (09:20:03) → wire 212 (09:20:18). Likely 15 × 1 s armed-read timeouts or a device-side pause; the boot recovered. Measure it before calling the UFS boot's timing understood.
+3. **Docs/commit of this closure batch** (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry).
+
+**B6.6 — boot recipe = Auto (2026-11-04)**
+PMK's word: *"boot profile နေရာကိုလဲပြင်ပေးပါ auto ထားပေးပါ ခနခန သွားချိန်းနေရလို့ပါ"* — with two phones on the bench he was switching the recipe dropdown before every boot.
+- The NATIVE combo's row 0 is **Auto (detect chipset)** and is the default; `MtkNativeBench.ProfileChoice` maps a combo row to the installed file (the old code indexed the file list with the combo index, so Auto booted recipe 0 and the last name was out of range).
+- `NativeBootAsync` loads **every** installed recipe (a recipe whose blobs do not load is logged and skipped, not fatal), prints `AutoBootLine`, and passes `autoProfiles:` to `MtkDaSession.BootAsync`.
+- The session starts on the first recipe and switches at the BROM **HW-code reply** — the first byte of the walk that is chipset-specific. The switch is guarded by `MtkBootProfile.SamePrefix(…, index + 1)`, and `MtkBootProfile.Load` already refuses any recipe that does not open with `0xfd` / its echo / the 4-byte HW-code reply, so the three guarded frames are identical by construction for every installable recipe. Nothing is replayed and the pipe is not reopened; an HW code no installed recipe claims stays the fail-closed refusal.
+- Both installed recipes were checked against this: `mt6765` (4486 BROM steps) and `mt6877` (7717) open with the same three steps, so a switch works in either direction on the bench.
+- Regression 722 (+19): `ProfileChoice` mapping incl. the out-of-range row, `AutoBootLine`, `PickByHwCode`, `SamePrefix` (whole-prefix, boundary at the 4th frame, hand-built reply mismatch, short list), an end-to-end auto boot that starts on the 0x0766 fixture and lands on 0x0959 with the same 29 writes / 173 bytes as the hand-picked run, the 0x0BAD refusal costing one byte, a late-divergent recipe stopped by the next echo (2 writes, nothing after it), the hand-picked path keeping its old refusal wording, and the simple-log line for the auto start.
+- **Hardware-PROVEN on both bench phones (PMK's clicks, dropdown untouched):**
+  - **MT6877 10:40:31 → 10:41:01** — `boot recipe = auto — 2 installed`, `starting on recipe mt6765_boot_profile.json`, then `[*] Auto: recipe MT6877 (HW 0x0959)` + `BROM face proven: HW 0x0959` at the HW-code reply; only the mt6877 blobs streamed (DA1 454,632 / DA2 542,012 / DAext 16,428); UFS `0x40001`→`0x40004` fallback, 77-partition live GPT bound to `HW 0x0959 · block 4096`.
+  - **MT6765 10:42:11 → 10:42:59** — same two auto lines, then `[*] Auto: recipe MT6765 (HW 0x0766)`: the resolver names the recipe it landed on **even when that is the one it started on**, so the line is not evidence of a switch. `0x40001` answered the eMMC shape directly (type 1, block 512, 58 GiB) with **no `0x40004` fallback**; limits 0x200000/0x10000; READ 0x200+0x200 and 0x400+0x4000; live GPT 43 partitions bound to `HW 0x0766 · block 512 · user 62537072640 B · 43`.
+  - Neither run logged a refusal, a `[!]` line or a replay. The split-framing change therefore now sits under a hardware run on the MT6765 path as well.
+- The 9A run stopped at the GPT fill; the write half it was waiting on has since been run on the MT6877 unit instead — see B6.9.
+
+**B6.7 — pipe = Auto (2026-11-04)**
+PMK's next word: *"pipe raw USB-pipe COM port နေရာမှာလဲ Auto ထားပေးပါ"* — the same complaint one control further down the row.
+- The combo's row 0 is now **Pipe: Auto (detect)**, default; raw USB is row 1 and the COM port row 2, so a forced A/B comparison is still one click away. `MtkNativeBench.PipeChoice` maps the row and a row past the end falls back to Auto rather than inventing a pipe.
+- Auto reads the bus before anything is sent: the bulk face is looked for through libusb (`EnumerateFaces`, accepted PIDs only) and the serial face through the MediaTek COM list, and `PickRawPipe` gives raw USB **any tie** — every hardware-proven boot on both chipsets came through the bulk endpoints, and the same node on the COM face was refused in RUN 10/RUN 11. The COM port is chosen only when no bulk face is listed while a BROM-PID COM port is. Nothing listed at all is a phone that has not been plugged in yet, so the wait stays on the proven pipe and its own 90 s refusal stays the honest answer.
+- Only a **BROM PID** counts on either side (`BulkBromFaceListed` / `ComBromPortListed`): a phone an earlier session left behind still advertises VID 0E8D under the DA's 2001, and counting that would move Auto onto a port that cannot be in BROM.
+- The choice is logged in one line — `[*] Native DA: pipe = auto (raw USB) — the USB face was listed and the MediaTek COM port was not listed; …` — so a later reader sees what each side said. A COM list Windows cannot enumerate is reported as a missing look, not a refusal to boot.
+- Fix found while wiring this: `ConciseNativeLine` trimmed the line at its em dash **before** the pipe branch tested for "power the phone off", so the plug-in reminder never reached the simple screen. The branch now rebuilds the reminder and names the pipe it is waiting on (`[>] Pipe: raw — power off, hold BOTH volume keys, plug in`).
+- Second fix found in the same reading: the session-closed line was the COM-era constant `[+] Native DA session closed — the COM port is released.`, and the 10:41:49 / 10:50:49 runs in `native-da.log` show it printed under **raw-USB** boots (both say `pipe = raw USB bulk endpoints` a few hundred lines earlier). With Auto picking the pipe, the dropdown stops being a record of what a run used, so the line now names `nativePipeName` — the branch the boot actually took: `… — raw USB bulk pipe is released.` / `… — COM port is released.`
+- Regression 735 (+13): the row mapping incl. out-of-range, the tie/exception/nothing-listed rules, the BROM-PID filter on both sides, the auto line's wording for each choice, and the two simple-screen shapes.
+- Hardware PROVEN on the bench (2026-11-04 11:12 and 11:15, MT6765, pipe left on Auto): `[*] Native DA: pipe = auto (raw USB) — the USB face was not listed and the MediaTek COM port was not listed; raw USB is the pipe every recorded boot came through` → `pipe = raw USB bulk endpoints` → `11:12:24 BROM: usb 0E8D:0003` → `11:12:44 [+] MTK DA ready — MT6765 (HW 0766)` → `11:12:48 [+] Live GPT: 43 partition(s)` + `43 extent(s) are the live table now`. Both sides "not listed" is the phone-not-plugged-yet case the rule was written for, and Auto correctly stayed on the proven pipe; the screen showed `[+] Pipe: auto (raw USB)` and `[>] Pipe: raw — power off, hold BOTH volume keys, plug in` — the ConciseNativeLine fix is live on the operator's screen. No `[!]` line in either run.
+- Still owed: nothing — the Auto-pipe boot ran on the MT6877 unit too (below).
+- **MT6877 Auto-pipe boot (2026-11-04 11:23:41 → 11:24:11)**, PMK's clicks, both dropdowns untouched: `pipe = auto (raw USB)` → `[*] Auto: recipe MT6877 (HW 0x0959)` at the HW-code reply → `11:24:11 [+] MTK DA ready — MT6877 (HW 0959)` → UFS `type 48, block 4096, user 255919652864 B (238 GiB)`, limits 0x200000/0x10000, live GPT **77 partitions** bound to `HW 0x0959 · block 4096`. The pipe rule is therefore proven on both chipsets, and the recipe-Auto switch fired in the mt6765-start → mt6877-land direction exactly as the `SamePrefix` check predicts.
+- **The session-closed fix is live on hardware**: `11:23:39 [+] Native DA session closed — raw USB bulk pipe is released.` — the first run of the new wording, on a raw-USB session, replacing the COM-era constant that the 10:41:49 and 10:50:49 runs show was false.
+- **RUN 49's 9A reboot note resolved by the same bench**: the 10:50:49 Reboot Device reported `the bus still carries 0e8d:0003 — the phone did not move`, but the 11:23:39 Reboot on the same unit reported `0e8d:0003 is gone and no MediaTek device is on the bus at all — the phone left download mode or powered off while the boot was talking to it` — the phone did leave. Same 3-byte `0x000000` then silence on the wire both times, so the difference is the phone's state, not our recipe; the bus check is what separates them, and it said the right thing.
+
+**B6.8 — the native GPT read shows the partition grid (2026-11-04)**
+PMK's word: *"Live GPT: 43 partition(s) ရောက်တာနဲ့ Partition ဇယားကွက်ပေါ်လာစေချင်တယ်"*.
+- Nothing was missing from the data: `FillFlashGridFromNativeTable` already wrote 43 `Live GPT` rows. They sat on the **FLASH** sub-tab while a boot is started from **NATIVE**, so the operator read a partition *count* with no partition *table*.
+- `NativeReadDeviceTableAsync` now calls `ShowMediaTekFlashPage()` inside the same `NativeUi` marshal as the grid fill, so the table is on screen at the moment the `Live GPT` line lands. The page is found by its own `"FLASH"` caption rather than index 3, because the NATIVE page was appended after it and a future tab must not silently change which page this opens.
+- Same path serves the NATIVE tab's Geometry + GPT button, which is the other caller of `NativeReadDeviceTableAsync`.
+- Debug 0/0, regression 735 unchanged (the change sits in the panel, which the hardware-free test project does not link).
+- Hardware PROVEN (2026-11-04 11:16, MT6765): second consecutive clean Auto-pipe boot (`pipe = auto (raw USB)` → `11:16:26 MTK DA ready — MT6765 (HW 0766)` → `11:16:30 Live GPT: 43 partition(s)` + `43 extent(s) are the live table now`), and PMK's screenshot shows the **FLASH** page forward on its own at that moment with the 43 `Live GPT` rows and their Read/Write/Erase cells — his word: *"partition grid ပေါ်လာပါပြီ"*.
+
+**B6.9 — MT6877 write half proven on hardware (2026-11-04 11:24–11:31, Redmi Note 12 Pro, PMK's clicks)**
+The first write ever pushed through the native session on this chipset (RUN 44's write was the MT6765 `logo`), and it landed on the UFS geometry: block 4096, `para = LBA 1032..1159 = 0x408000 + 0x80000`.
+- **Read** (grid) → `READ 0x408000 + 0x80000 — 524288 byte(s) in 8 frame(s)` → `para-20261104-112440.img`. The file is exactly the extent size and is **not** an all-zero echo: 135 non-zero bytes in two structures at `0x20000..0x20083` and `0x23ff4..0x23ffd`, which is the MTK para layout — so a mostly-zero para dump is a *good* read, not a dead one.
+- **Read determinism**: a second Read five minutes later (`11:29:41`) produced a byte-for-byte identical file. Only then was anything written.
+- **Write** of that same dump back (`11:31:04`) → `WRITE 0x408000 + 0x80000 committed.` → `Verifying the write by reading the same range back...` → `READ … 524288 byte(s) in 8 frame(s)` → `VERIFY OK — the device answers with the same bytes for the whole range.` → `[OK] Native DA: para written from para-20261104-112941.img and read back identical.` Commit-to-verified in ~1 s, one 512 KiB chunk against the DA's own 0x200000 write-chunk limit.
+- **Independent confirmation**: a third Read after the write (`11:31:52`) is identical too. All four artifacts — the three dumps plus the Temp backup taken before anything was written — hash to `c7b92e5763ad8712c8ece2bdab134c292daa1c3e55144cb28d8805e8804ed635`. The device's `para` is unchanged by the exercise, which is the point: the write path was tested with content the device already held.
+- The grid Write always verifies — `verify: true` is hardcoded in `NativeGridWriteAsync`, so the FLASH tab's "Verify readback (SHA-256)" checkbox plays no part in this route, and `ConfirmText("write", …)` states the raw-bytes honesty and the smaller-image rule before the port is touched.
+- **Still owed:** the sacrificial **erase** + restore (step ဂ) — deliberately not run, because it needs PMK's separate word and leaves the extent genuinely empty for a window.
 
 **Risks**
-- Leaving an abandoned control transfer in flight while continuing on the same pipe is measured (RUN B6-3) but is still the least-understood state; keep the late-ask line as evidence.
+- Leaving an abandoned control transfer in flight while continuing on the same pipe is measured (RUN B6-3) but is still the least-understood state; keep the late-ask line as evidence. On this run the abandoned ask came back 306,611 ms later, at session close.
 - `CtrlProbeTimeoutMs` is now 2,000 ms (was 1,000) — a strict refusal on a silent face can take longer than before.
 - The MT6877 recipe/blobs are licensing-sensitive and stay untracked.
 
@@ -139,10 +184,10 @@
 
 ## 5. Remaining work plan (ordered)
 
-### P0 — Close B6 (next)
-**Why:** a protocol change is sitting on top of the only hardware-proven boot path.
-**Steps:** (1) 9A run: boot, Geometry + GPT, dump `para`, sacrificial write/erase, readback; (2) MT6877 run if the unit is present: boot, UFS read, optional skip, reboot; (3) add the B6 ROADMAP entry + fix the check count; (4) commit.
-**Done when:** both runs are in `native-da.log`, regression 700, Debug/Release 0/0, docs consistent.
+### P0 — Finish B6 (next)
+**Why:** the MT6877 half is closed and the Auto boot has run on both phones; the write half of the MT6765 re-run is the only protocol exposure left.
+**Steps:** (1) 9A write half: dump `para` and one sacrificial write/erase with readback, through the live session already open; (2) measure the 15 s DA1 stall on the MT6877 unit if it is on the bench; (3) commit this closure batch.
+**Done when:** the `para` dump and the write/erase + readback are in `native-da.log`, regression 735, Debug/Release 0/0, docs consistent.
 
 ### P1 — Native MTK parity for the core flows (replace mtkclient for daily work)
 **Why:** the native session already owns the phone after one plug; the remaining daily operations still shell out to `mtk.exe`.
@@ -236,7 +281,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 700 after the B6 batch lands (664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 735 after the B6.7 auto-pipe wiring (722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
@@ -245,13 +290,13 @@ dotnet run --project tests/Regression/Regression.csproj
 
 | What | Where |
 |---|---|
-| Native session log | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\native-da.log` |
+| Native session log | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\native-da.log` — the 2026-11-04 MT6877 run is the 281 lines from 09:19:45 to 09:20:20, plus the reset at 09:25:03 |
 | Pacing / knobs note | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\pacing.txt` |
 | Startup probe | `%LOCALAPPDATA%\PMKMobileTool\pmk_startup.log` |
 | Recipe master | `%LOCALAPPDATA%\PMKMobileTool\mtk\boot-profiles` (`mt6765/`, `mt6877/`) |
 | NV backup used for B5.5 | `C:\Users\PMK\Desktop\New folder\20261027_165526` (6 bins + manifest, 190,701,568 B) |
 | Wire captures / spikes | `%TEMP%\mtk-da-spike\capture` (framing spec, write/erase/read transcripts, RUN B6 notes) |
-| Regression | `tests/Regression/Program.cs` (700 checks) |
+| Regression | `tests/Regression/Program.cs` (735 checks) |
 | Loader integrity | `bundled-tools/integrity.json`, `dependency-lock.json` |
 
 ---

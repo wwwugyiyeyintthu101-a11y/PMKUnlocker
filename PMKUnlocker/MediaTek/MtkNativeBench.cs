@@ -212,6 +212,86 @@ internal static class MtkNativeBench
     }
 
     /// <summary>
+    /// The screen's version of a native line: the same run, told in the few lines an operator acts on. The bench log
+    /// still gets every byte, so a shortened screen never shortens the evidence. Null means "do not show this line".
+    /// Kept here, not in the form, so the wording is asserted by the hardware-free regression run.
+    /// </summary>
+    internal static string ConciseNativeLine(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return null;
+        string t = line.TrimStart();
+        if (t.Length == 0) return null;
+        if (t.StartsWith("[i]", StringComparison.Ordinal) || t.StartsWith("[ ]", StringComparison.Ordinal)) return null;
+        if (!t.StartsWith("[", StringComparison.Ordinal)) return null;   // partition rows and other indented detail
+
+        // The long "why" sits after an em dash. The screen keeps the fact; native-da.log keeps the reason.
+        int dash = line.IndexOf(" \u2014 ", StringComparison.Ordinal);
+        if (dash > 0) line = line.Substring(0, dash).TrimEnd();
+
+        if (line.Contains("Native DA knobs", StringComparison.Ordinal) ||
+            line.Contains("BROM pacing", StringComparison.Ordinal) ||
+            line.Contains("BROM greet:", StringComparison.Ordinal)) return null;
+
+        if (line.Contains("loading recipe", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf("loading recipe ", StringComparison.Ordinal) + "loading recipe ".Length;
+            int end = line.IndexOf(" (", at, StringComparison.Ordinal);
+            string name = end > at ? line.Substring(at, end - at) : line.Substring(at);
+            return "[*] Recipe: " + name;
+        }
+        if (line.Contains("starting on recipe", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf("starting on recipe ", StringComparison.Ordinal) + "starting on recipe ".Length;
+            string name = line.Substring(at).Split(' ')[0];
+            return "[*] Recipe: " + name + " (auto)";
+        }
+        if (line.Contains("pipe = auto", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf("pipe = auto (", StringComparison.Ordinal);
+            string which = at < 0 ? "" : line.Substring(at + "pipe = auto (".Length).Split(')')[0];
+            return "[*] Pipe: auto (" + which + ")";
+        }
+        // This is the one line the operator has to act on — the boot then waits up to 90 s for the face to appear —
+        // so the plug-in order is re-written here instead of matched against the clause the em-dash trim above has
+        // already taken off the string.
+        if (line.Contains("pipe = ", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf("pipe = ", StringComparison.Ordinal) + "pipe = ".Length;
+            return "[>] Pipe: " + line.Substring(at).Split(' ')[0] + " — power off, hold BOTH volume keys, plug in";
+        }
+        if (line.Contains("BROM handshake complete", StringComparison.Ordinal)) return "[+] Handshake OK";
+        if (line.Contains("BROM face proven:", StringComparison.Ordinal))
+            return "[+] Chipset: " + line.Substring(line.IndexOf("BROM face proven:", StringComparison.Ordinal) + "BROM face proven:".Length).Trim();
+        if (line.Contains("DA1 jumped", StringComparison.Ordinal)) return "[+] DA1 loaded";
+        if (line.Contains("DA SYNC received", StringComparison.Ordinal)) return "[+] DA sync";
+        if (line.Contains("MTK DA ready", StringComparison.Ordinal)) return "[+] DA ready";
+        if (line.Contains("session is live", StringComparison.Ordinal)) return "[OK] Session live - phone ready";
+        if (line.Contains("has not been booted to a live DA", StringComparison.Ordinal))
+            return "[!] First run on this chipset - the recipe is replayed exactly as recorded";
+        if (line.Contains("Live GPT:", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf("Live GPT:", StringComparison.Ordinal);
+            string rest = line.Substring(at);
+            int comma = rest.IndexOf(',');
+            return "[+] " + (comma > 0 ? rest.Substring(0, comma) : rest);
+        }
+        if (line.StartsWith("[+] READ ", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf(" - ", StringComparison.Ordinal);
+            return at > 0 ? line.Substring(0, at) : line;
+        }
+        if (line.Contains("MTK USB face", StringComparison.Ordinal))
+        {
+            int at = line.IndexOf(" - ", StringComparison.Ordinal);
+            return at > 0 ? line.Substring(0, at) : line;
+        }
+        if (line.Contains("extent(s) are the live table", StringComparison.Ordinal)) return null; // Live GPT already said it
+        if (line.Contains("Reset command was sent", StringComparison.Ordinal)) return "[+] Reset sent - phone rebooting";
+        if (line.Contains("session closed", StringComparison.Ordinal)) return "[+] Session closed";
+        return line;
+    }
+
+    /// <summary>
     /// The <c>arm=</c> knob in milliseconds, or 0 for "keep polling". It is a wait, not a pacing gap, so it is bounded:
     /// a value large enough to outlast a step's own timeout would move the refusal out of the recipe and into the
     /// transport, and an operator typing the wrong number should get the experiment they meant, not a hang.
@@ -279,13 +359,29 @@ internal static class MtkNativeBench
         return claim;
     }
 
-    /// <summary>Append one timestamped bench line. Throws on a real disk failure: a run with no log is a run with no proof.</summary>
+    /// <summary>
+    /// Append one timestamped bench line. A transient lock (an editor, a scanner, another reader) is retried twice
+    /// before the caller is told: one locked instant must not cost the rest of the run its evidence. A real disk
+    /// failure still throws, because a run with no log is a run with no proof.
+    /// </summary>
     internal static void AppendBenchLog(string dataDirectory, string line, DateTimeOffset at)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(line);
         string path = BenchLogPath(dataDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(path));
-        File.AppendAllText(path, at.ToString("yyyy-MM-dd HH:mm:ss") + "  " + line.Trim() + Environment.NewLine, Encoding.UTF8);
+        string text = at.ToString("yyyy-MM-dd HH:mm:ss") + "  " + line.Trim() + Environment.NewLine;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.AppendAllText(path, text, Encoding.UTF8);
+                return;
+            }
+            catch (IOException) when (attempt < 2)
+            {
+                Thread.Sleep(15);
+            }
+        }
     }
 
     /// <summary>
@@ -694,12 +790,104 @@ internal static class MtkNativeBench
 
     /// <summary>
     /// The BROM HW codes this tool has booted to a live DA on real hardware, from its own runs. MT6765 (0x0766) got
-    /// there on 2026-11-02 (RUN 42, and four clean boots after it). Nothing else is claimed: the DA command layer
-    /// this tool runs is chipset-generic — geometry, limits, GPT, READ/WRITE/ERASE and the reboot were all measured
-    /// on that one unit — but the BROM prelude and its blobs are recorded per chipset, and a recipe that has never
-    /// been replayed is a first run, not a supported device.
+    /// there on 2026-11-02 (RUN 42, and four clean boots after it). MT6877 (0x0959) followed on 2026-11-04: the UFS
+    /// recipe replayed to a live DA, 0x40004 answered the 208-byte UFS geometry, the live GPT listed 77 extents at
+    /// 4096 B, a READ came back, the two optional line-setting asks were stepped over, and Reboot Device sent the
+    /// reset (native-da.log 09:19:45 -> 09:25:03). Nothing else is claimed: the DA command layer this tool runs is
+    /// chipset-generic, but the BROM prelude and its blobs are recorded per chipset, and a recipe that has never been
+    /// replayed is a first run, not a supported device.
     /// </summary>
-    internal static bool BootProvenOnHardware(ushort hwCode) => hwCode == 0x0766;
+    internal static bool BootProvenOnHardware(ushort hwCode) => hwCode == 0x0766 || hwCode == 0x0959;
+
+    /// <summary>
+    /// Auto-detect: which installed recipe belongs to the HW code the BROM just reported.
+    ///
+    /// A boot cannot know the chipset before it starts — the BROM prelude is what reads the code — so the run begins
+    /// on one recipe and switches at the HW-code reply, which is the first byte that is chipset-specific and still
+    /// before any DA image or register spray. Null means no installed recipe claims that chipset: the boot keeps the
+    /// fail-closed refusal it has always had rather than guessing at a neighbouring chipset's spray.
+    /// </summary>
+    internal static T PickByHwCode<T>(IReadOnlyList<T> candidates, Func<T, ushort> hwCode, ushort deviceHwCode) where T : class
+    {
+        if (candidates == null || hwCode == null) return null;
+        foreach (T candidate in candidates)
+        {
+            if (candidate != null && hwCode(candidate) == deviceHwCode) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>The one line that says the recipe was not chosen by hand, so a later reader knows why it switched.</summary>
+    internal static string AutoBootLine(int recipes) =>
+        "[*] Native DA: boot recipe = auto — " + recipes + " installed; the BROM's own HW code picks one";
+
+    /// <summary>
+    /// What a boot-recipe combo row means. Row 0 is Auto and the installed files fill the rows after it in order,
+    /// so a named row is the file at (row - 1). A row past the last file is a combo filled before the list changed:
+    /// no recipe is returned rather than booting one the operator never chose.
+    /// </summary>
+    internal static (bool Auto, int ProfileIndex) ProfileChoice(int selectedIndex, int installed)
+    {
+        if (selectedIndex <= 0) return (true, -1);
+        int index = selectedIndex - 1;
+        return index >= installed ? (false, -1) : (false, index);
+    }
+
+    /// <summary>Which recipe the HW code landed on. Printed whether it matched the first try or was switched to.</summary>
+    internal static string AutoRecipeLine(ushort hwCode, string chipset) =>
+        "[*] Auto: recipe " + chipset + " (HW 0x" + hwCode.ToString("X4") + ")";
+
+    /// <summary>
+    /// What a pipe-combo row means. Row 0 is Auto and the two named pipes follow it, so raw USB is row 1 and the
+    /// COM port is row 2. A row past the end has no pipe behind it and gets Auto rather than an invented choice.
+    /// </summary>
+    internal static (bool Auto, bool RawUsb) PipeChoice(int selectedIndex) => selectedIndex switch
+    {
+        1 => (false, true),
+        2 => (false, false),
+        _ => (true, false),
+    };
+
+    /// <summary>
+    /// Which pipe Auto runs when both sides of the bus have been looked at.
+    ///
+    /// Raw USB wins whenever the bulk face is listed, because every boot this tool has proven on hardware — MT6765
+    /// and MT6877 alike — came through it, and the same node answering over the COM face was refused in RUN 10 and
+    /// RUN 11. The COM port is picked only when it is the sole face the phone is actually showing: a node that
+    /// UsbDk cannot see but Windows has a serial driver for. Nothing listed at all is not a choice between pipes,
+    /// it is a phone that has not been plugged in yet, so the wait stays on the proven pipe and its own refusal is
+    /// the honest answer.
+    /// </summary>
+    internal static bool PickRawPipe(bool bulkFaceListed, bool comPortListed) => bulkFaceListed || !comPortListed;
+
+    /// <summary>
+    /// The bulk side is reachable when the USB list holds a node whose PID is one a BROM boot may start on. The
+    /// list is what libusb reported; a PID that is not in the accepted set is a different state of the phone, not
+    /// a BROM face.
+    /// </summary>
+    internal static bool BulkBromFaceListed(IEnumerable<int> listedPids, IEnumerable<int> acceptedPids) =>
+        listedPids != null && acceptedPids != null && listedPids.Any(acceptedPids.Contains);
+
+    /// <summary>
+    /// The serial side is reachable when a COM port sits on a BROM PID. It has to be that PID and not "some
+    /// MediaTek port": a phone an earlier session left behind keeps advertising the same VID under the DA's own
+    /// PID, and counting that would pull Auto off the proven pipe onto a port that cannot be in BROM at all.
+    /// </summary>
+    internal static bool ComBromPortListed(IEnumerable<string> listedPids, IEnumerable<int> acceptedPids)
+    {
+        if (listedPids == null || acceptedPids == null) return false;
+        var wanted = acceptedPids.Select(p => p.ToString("X4")).ToList();
+        return listedPids.Any(p => wanted.Any(w => string.Equals(p, w, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>The one line that says the pipe was not chosen by hand, and what the bus said when it was decided.</summary>
+    internal static string AutoPipeLine(bool rawUsb, bool bulkFaceListed, bool comPortListed) =>
+        "[*] Native DA: pipe = auto (" + (rawUsb ? "raw USB" : "COM port") + ") — the USB face was " +
+        (bulkFaceListed ? "listed" : "not listed") + " and the MediaTek COM port was " +
+        (comPortListed ? "listed" : "not listed") + "; " +
+        (rawUsb
+            ? "raw USB is the pipe every recorded boot came through"
+            : "no bulk face is visible while a serial face is, so the COM port is the only pipe the phone can be reached on");
 
     /// <summary>The one-line state the tab shows, so a screenshot of a bench run says what the session is doing.</summary>
     internal static string StatusLine(bool booted, string chipset, ushort hwCode, int partitionCount) =>
