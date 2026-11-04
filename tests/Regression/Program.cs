@@ -1175,15 +1175,18 @@ try
         "MTK BROM: an all-zero config word keeps the three inverted flags honest (no false 'unlocked' comfort)");
 
     Check(LcHex(MtkDaFrame.Header(0x14)) == "efeeeefe0100000014000000", "MTK DA: header is magic + type 1 + LE length, byte-identical to the capture");
-    Check(LcHex(MtkDaFrame.Command(MtkDaCommand.Read)) == "efeeeefe010000000400000005000100", "MTK DA: READ travels as a 4-byte command frame");
-    Check(LcHex(MtkDaFrame.Ack()) == "efeeeefe010000000400000000000000", "MTK DA: the host ack is a zero u32le inside its own frame");
+    Check(LcHex(MtkDaFrame.Word(MtkDaCommand.Read)) == "05000100",
+        "MTK DA: a bare command is its u32le id on its own — RUN B6-4 (2026-11-03 16:03) is what split the frame in two: " +
+        "the MT6877 DA answered the recipe's header-then-id writes seventeen times and said nothing at all to the same " +
+        "0x10009 sent as one merged 16-byte transfer");
+    Check(LcHex(MtkDaFrame.Word(0)) == "00000000", "MTK DA: the host ack is a zero u32le, and it is the payload half of its own frame");
     Check(MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeeefe010000000c000000"), out uint declaredLen) && declaredLen == 12,
         "MTK DA: the declared length is read little-endian (0x0c000000 would be 201 MB)");
     Check(!MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeeefe0200000004000000"), out _), "MTK DA: a frame whose type is not 1 is not a DA header");
     Check(!MtkDaFrame.TryParseHeader(Convert.FromHexString("efeeef0e0100000004000000"), out _), "MTK DA: wrong magic is refused");
     Check(!MtkDaFrame.TryParseHeader(new byte[11], out _), "MTK DA: an 11-byte header is refused");
-    Check(MtkDaFrame.Header(0).Length == MtkDaFrame.HeaderSize && MtkDaFrame.Pack(new byte[4]).Length == 16,
-        "MTK DA: header size 12, and Pack is header + payload");
+    Check(MtkDaFrame.Header(0).Length == MtkDaFrame.HeaderSize && MtkDaFrame.Word(0).Length == 4,
+        "MTK DA: a frame is built as two pieces — a 12-byte header and its payload — and there is no merged-frame codec left to call");
 
     byte[] readExtent = MtkOpStruct.Create(0, 0x400);
     Check(readExtent.Length == 56 &&
@@ -1580,6 +1583,137 @@ try
         "MTK boot: a SET_LINE_CODING the device stalls through the whole retry budget stops the boot — a dead CDC function is not absorbed");
     Check((await CtrlFailure(new[] { 12, 9 })).Contains("is recorded as refused"),
         "MTK boot: a descriptor read that comes back with bytes is not the recorded stall — the boot stops rather than trust a foreign answer");
+
+    // ---- B6.4: the ask that never comes back (RUN B6-1, 2026-11-03) --------------------------------------
+    // RUN B6-1 replayed the MT6877 recipe byte for byte as far as the payload's a1a2a3a4 (wire 161) and then the
+    // post-payload SET_LINE_CODING printed nothing at all: the phone re-initialised its USB stack and left the bus,
+    // the driver never completed the transfer, and a call that trusts libusb's timeout sits inside it for the life of
+    // the process — a boot the operator can stop only by closing the window. The same recording shows that transfer
+    // completing 1,004 ms after its submit, so an arm of exactly one second loses a step the working boot wins. Three
+    // measured behaviours: one ask is bounded, a pipe that ran out is not re-asked nineteen more times, and the face
+    // is reclaimed once the way the proof reclaims it before the step is refused.
+    async Task<(string Message, FakeMtkTransport Device)> SilentAskRun(MtkBootProfile profile, string[] replies,
+        IMtkBromRecovery? recovery)
+    {
+        var device = new FakeMtkTransport(replies);
+        var pipe = new FakeCtrlTransport(device);
+        pipe.ControlScript.Enqueue(MtkNativeBench.CtrlNoAnswer);
+        try
+        {
+            var session = await MtkDaSession.BootAsync(pipe, profile, null, default, 300, 300, 300,
+                recovery: recovery).ConfigureAwait(false);
+            session.Dispose();
+            return ("(booted, no refusal)", device);
+        }
+        catch (Exception ex) { return (ex.Message, device); }
+    }
+    var (silentRefusal, silentDevice) = await SilentAskRun(reopenProfile, reopenReplies, null);
+    Check(silentRefusal.Contains("no answer") && silentRefusal.Contains("Refused 1 ask(s) in a row"),
+        "MTK boot: an endpoint-zero ask that never completes is reported as silence rather than a stall, and it is asked once — a pipe that cannot answer endpoint zero cannot answer a re-ask either");
+    Check(silentDevice.Writes.Count == 3 && silentDevice.WrittenBytes == 3,
+        "MTK boot: nothing after the unanswered control step reaches the phone — the refusal stops at the three prelude writes already on the wire");
+
+    var faceNeverBack = new FakeBromRecovery(() => null);
+    string lostRefusal = (await SilentAskRun(reopenProfile, reopenReplies, faceNeverBack)).Message;
+    Check(lostRefusal.Contains("never completed") && lostRefusal.Contains("did not come back") &&
+          lostRefusal.Contains("hold BOTH volume keys"),
+        "MTK boot: an unanswered probe whose face does not return ends the boot naming the reclaim it tried and telling the operator what to do");
+    Check(faceNeverBack.Calls == 1 && faceNeverBack.LastWaitMs == 5000,
+        "MTK boot: the face after a silent probe is waited on once, for the ~1 s the recorded re-open took plus room");
+
+    // The same ask on a face that comes back: one reclaimed pipe, the step asked there, the boot carried on to a
+    // ready DA — the recovery the working client runs between its own retries, applied to a control step.
+    var carriedDevice = new FakeMtkTransport(reopenReplies);
+    var silentPipe = new FakeCtrlTransport(carriedDevice);
+    silentPipe.ControlScript.Enqueue(MtkNativeBench.CtrlNoAnswer);
+    var reclaimedPipe = new FakeCtrlTransport(carriedDevice);
+    var faceCameBack = new FakeBromRecovery(() => reclaimedPipe);
+    var reclaimedSession = await MtkDaSession.BootAsync(silentPipe, reopenProfile, null, default, 300, 300, 300,
+        recovery: faceCameBack);
+    Check(reclaimedSession.DaIsReady && faceCameBack.Calls == 1 &&
+          silentPipe.ControlFrames.Count == 1 && reclaimedPipe.ControlFrames.Count == 2 &&
+          carriedDevice.Writes.Count == 33,
+        "MTK boot: the face that returns carries the step the dead pipe could not — line coding and DTR asked there, the greet replayed, a ready DA");
+    reclaimedSession.Dispose();
+
+    Check((await CtrlFailure(new[] { 12, MtkNativeBench.CtrlNoAnswer })).Contains("Silence is not a stall"),
+        "MTK boot: a descriptor read recorded as refused is not satisfied by a device that stopped answering — silence is a fourth state, not a stall");
+
+    // The bound itself, with a fake that behaves like RUN B6-1's phone: the transfer does not return at all.
+    var hangingPipe = new FakeCtrlTransport(new FakeMtkTransport(reopenReplies)) { BlockMs = 8000 };
+    var hangStart = DateTime.UtcNow;
+    string hangRefusal;
+    try
+    {
+        var hungSession = await MtkDaSession.BootAsync(hangingPipe, reopenProfile, null, default, 300, 300, 300);
+        hungSession.Dispose();
+        hangRefusal = "(booted, no refusal)";
+    }
+    catch (Exception ex) { hangRefusal = ex.Message; }
+    int hangMs = (int)(DateTime.UtcNow - hangStart).TotalMilliseconds;
+    Check(hangRefusal.Contains("no answer") && hangMs >= 3000 && hangMs < 7000,
+        "MTK boot: a control transfer the driver never completes is given its timeout plus room and then reported — " + hangMs +
+        " ms, while the fake device is still inside the call");
+
+    // ---- B6.5: the probe the recipe itself marks optional (the B6 capture, 2026-11-03 13:28) ------------------
+    // The recorded bus answers the payload with a1a2a3a4 at 58.841 s, takes 1,004 ms to accept the SET_LINE_CODING
+    // that follows 0.8 ms later, then gets SET_CONTROL_LINE_STATE and all four greet pairs inside 1 ms (f3416-f3440).
+    // So the two line-setting writes configure a serial face nothing in the boot reads: the greet is the proof. When
+    // our own pipe cannot carry that one ask, the MT6877 recipe steps over it out loud and lets the bulk walk decide —
+    // and RUN B6-3 (15:26:57) is why the skip may not touch the pipe: the reclaim it used to try spent 64 open attempts
+    // and 12 s on a node the pinned transfer would not hand over, and it had already disposed the pipe the greet needs.
+    string LineCoding7Optional = LineCoding7.Replace("\"bytes\":7}", "\"bytes\":7,\"opt\":true}");
+    var optionalProfile = MtkBootProfile.Load(FixturePath("reopen-optional",
+        Recipe(BromWithReopen.Replace(LineCoding7, LineCoding7Optional), GoodDa),
+        ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", da2)));
+    Check(optionalProfile.BromSteps.Count(s => s.Optional) == 1 &&
+          optionalProfile.BromSteps.Single(s => s.Optional).Expect?.Kind == MtkReplyKind.CtrlAck &&
+          reopenProfile.BromSteps.All(s => !s.Optional),
+        "MTK recipe: 'opt' decodes onto the control step it is written on, and a recipe that does not carry it keeps every step strict");
+
+    async Task<(List<string> Lines, FakeMtkTransport Device, bool Ready, bool PipeWasDisposed)> OptionalAskRun(
+        MtkBootProfile profile, string[] replies, IMtkBromRecovery? recovery)
+    {
+        var walked = new FakeMtkTransport(replies);
+        var quiet = new FakeCtrlTransport(walked);
+        quiet.ControlScript.Enqueue(MtkNativeBench.CtrlNoAnswer);
+        var said = new List<string>();
+        try
+        {
+            var session = await MtkDaSession.BootAsync(quiet, profile, said.Add, default, 300, 300, 300,
+                recovery: recovery).ConfigureAwait(false);
+            bool ready = session.DaIsReady, disposed = walked.Disposed;
+            session.Dispose();
+            return (said, walked, ready, disposed);
+        }
+        catch (Exception ex) { said.Add("REFUSED: " + ex.Message); return (said, walked, false, walked.Disposed); }
+    }
+    var carriedOn = await OptionalAskRun(optionalProfile, reopenReplies, null);
+    Check(carriedOn.Ready && carriedOn.Lines.Any(l => l.Contains("recorded as optional") &&
+          l.Contains("never completed and is left in flight on this pipe")),
+        "MTK boot: a line-setting probe the phone stopped answering is named and stepped over — the walk reaches the greet and a ready DA");
+    Check(carriedOn.Device.Writes.Count == 33,
+        "MTK boot: stepping over the optional probe costs no bulk byte — the same 33 writes the answered boot makes still go out");
+
+    var faceGoneButOptional = new FakeBromRecovery(() => null);
+    var keptPipe = await OptionalAskRun(optionalProfile, reopenReplies, faceGoneButOptional);
+    Check(keptPipe.Ready && faceGoneButOptional.Calls == 0 && !keptPipe.PipeWasDisposed &&
+          keptPipe.Lines.Any(l => l.Contains("no reclaim")),
+        "MTK boot: the optional probe is stepped over on the pipe in hand — the face is never reclaimed and the pipe " +
+        "the greet needs is never disposed, which is the RUN B6-3 ObjectDisposedException refused at the source");
+
+    string[] greetAnsweredWrong = reopenReplies.Select((reply, at) => at == 5 ? "00" : reply).ToArray();
+    var notLenient = await OptionalAskRun(optionalProfile, greetAnsweredWrong, null);
+    Check(!notLenient.Ready && notLenient.Lines.Any(l => l.Contains("handshake complement")),
+        "MTK boot: stepping over the optional probe does not soften the proof after it — a greet that answers anything but the recorded complement still stops the boot");
+
+    // A strict probe keeps the reclaim it always had; the optional flag is the only thing that changes the path.
+    var strictFaceAway = new FakeBromRecovery(() => null);
+    var strictRun = await OptionalAskRun(reopenProfile, reopenReplies, strictFaceAway);
+    Check(!strictRun.Ready && strictFaceAway.Calls == 1 && strictRun.PipeWasDisposed &&
+          strictRun.Lines.Any(l => l.Contains("the face is being waited on")),
+        "MTK boot: a strict control step still reclaims the face and still refuses when the reclaim cannot carry it — " +
+        "the mt6765 boot measured on hardware keeps exactly the path that boot ran");
 
     async Task<string> BootFailure(FakeMtkTransport fake, IMtkDaStageHandoff? handoff = null,
         int proofAttempts = 25, int proofRetryDelayMs = 800, IMtkBromRecovery? recovery = null,
@@ -2331,6 +2465,32 @@ try
     ulong LogoAt = 0x5b280000;                                       // the measured byte offset of logo
     const ulong LogoLen = 0x1000;                                    // 8 blocks: small enough to check frame by frame
     string LogoStruct = ExtentStruct(LogoAt, LogoLen);
+
+    // RUN B6 (2026-11-03) measured the same queries on the MT6877 behind a UFS disk: 0x40001 answers 104 zero
+    // bytes, 0x40004 answers the geometry, and every READ struct carries 0x30 + 3 instead of 1 + 8.
+    const string UfsGeomCmd = "04000400";      // 0x00040004 — the geometry reply a UFS unit answers with
+    string UfsGeometryPayload(ulong userBytes = 0x3B96000000ul, uint blockBytes = 4096)
+    {
+        var g = new byte[208];
+        BinaryPrimitives.WriteUInt32LittleEndian(g, 0x30);                      // the word its READ structs repeat
+        BinaryPrimitives.WriteUInt32LittleEndian(g.AsSpan(4), blockBytes);      // 0x1000 on the capture
+        BinaryPrimitives.WriteUInt64LittleEndian(g.AsSpan(8), 0x400000);        // boot LUN 1
+        BinaryPrimitives.WriteUInt64LittleEndian(g.AsSpan(16), 0x400000);       // boot LUN 2
+        BinaryPrimitives.WriteUInt64LittleEndian(g.AsSpan(24), userBytes);      // 0x3B96000000 on the capture
+        // +32 onward is the disk's own identification (product name, serial, manufacturer id). Deliberately
+        // absent: chip identity does not belong in a fixture, and the checks below prove nothing reads it.
+        return Convert.ToHexString(g).ToLowerInvariant();
+    }
+    string UfsExtentStruct(ulong offset, ulong length)
+    {
+        var b = new byte[56];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, 0x30);
+        BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt64LittleEndian(b.AsSpan(8), offset);
+        BinaryPrimitives.WriteUInt64LittleEndian(b.AsSpan(16), length);
+        return Convert.ToHexString(b).ToLowerInvariant();
+    }
+    string ZeroedDescriptor = DaFrame(new string('0', 208));
     IEnumerable<string> StorageQuery() => new[] { Status, Status, StorageReply, Status };
     IEnumerable<string> LimitsQuery() => new[] { Status, Status, LimitsReply, Status };
     IEnumerable<string> ReadGroup(params string[] dataPayloads)
@@ -2405,6 +2565,50 @@ try
     bool tinyArea = false;
     try { MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(128))); } catch (MtkDaProtocolException) { tinyArea = true; }
     Check(tinyArea, "MTK B3: a user area smaller than one block is refused rather than accepted as a device with no storage");
+
+    // ---- B6.5: the 0x40004 geometry reply a UFS unit gives instead of the descriptor -------------------
+    byte[] ufsGeometry = Convert.FromHexString(UfsGeometryPayload());
+    MtkStorageInfo ufs = MtkStorageInfo.ParseUfs(ufsGeometry);
+    Check(ufs.StorageType == 0x30 && ufs.BlockSize == 4096 && ufs.Boot1Size == 0x400000 && ufs.Boot2Size == 0x400000 &&
+          ufs.UserAreaSize == 0x3B96000000ul && ufs.RpmbSize == 0 && ufs.GeneralPurpose1 == 0 && ufs.IsUfsAddressed &&
+          !ufs.IsEmmcUserAddressed && ufs.HasMeasuredOpPair,
+        "MTK B6.5 UFS: the 208-byte reply decodes as block 4096, two 4 MiB boot LUNs and a 238 GiB user area, and RPMB " +
+        "stays 0 because no slot in this reply was measured for it");
+    Check(ufs.OpRegion == 0x30 && ufs.OpField4 == 3 && decoded.OpRegion == 1 && decoded.OpField4 == 8,
+        "MTK B6.5 UFS: the extent-struct pair travels with the reply that reported it — 1 + 8 on the MT6765, 0x30 + 3 on the MT6877");
+    Check(ufs.Describe.Contains("(UFS)") && ufs.Describe.Contains("block 4096") && ufs.Describe.Contains("238 GiB") &&
+          decoded.Describe.Contains("(eMMC)"),
+        "MTK B6.5 UFS: the status line names the addressing the device itself reported, so the operator can tell a UFS unit from an eMMC one");
+    Check(MtkStorageInfo.IsDescriptorShape(goodDescriptor) && !MtkStorageInfo.IsDescriptorShape(ufsGeometry) &&
+          MtkStorageInfo.IsUfsGeometryShape(ufsGeometry) && !MtkStorageInfo.IsUfsGeometryShape(goodDescriptor),
+        "MTK B6.5 UFS: the two geometry replies are told apart by their own shape — 104 bytes opening with 1, or 208 opening " +
+        "with 0x30 — never by a chipset table, so a new chipset cannot be decoded into a plausible layout");
+    byte[] zeroedDescriptorBytes = Convert.FromHexString(new string('0', 208));   // what 0x40001 really answers on the MT6877
+    Check(!MtkStorageInfo.IsDescriptorShape(zeroedDescriptorBytes) && !MtkStorageInfo.IsUfsGeometryShape(zeroedDescriptorBytes),
+        "MTK B6.5 UFS: the 104 all-zero bytes are neither reply shape — that is the fact that sends the session on to 0x40004");
+    Check(Convert.ToHexString(MtkOpStruct.Create(ufs, 0x1000, 0x1000)).ToLowerInvariant() == UfsExtentStruct(0x1000, 0x1000) &&
+          Convert.ToHexString(MtkOpStruct.Create(decoded, 0x1000, 0x1000)).ToLowerInvariant() == ExtentStruct(0x1000, 0x1000),
+        "MTK B6.5 UFS: the same extent frames as 30000000 03000000 on a UFS unit and 01000000 08000000 on an eMMC one — the pair " +
+        "is not a constant, and a READ into the wrong region reads the wrong area while answering happily");
+    bool shortGeometry = false;
+    try { MtkStorageInfo.ParseUfs(ufsGeometry[..207]); } catch (MtkDaProtocolException) { shortGeometry = true; }
+    Check(shortGeometry, "MTK B6.5 UFS: a 207-byte geometry is refused instead of reading one byte past its end for the user area");
+    bool wrongRegion = false;
+    try { MtkStorageInfo.ParseUfs(Convert.FromHexString("01000000" + UfsGeometryPayload()[8..])); }
+    catch (MtkDaProtocolException) { wrongRegion = true; }
+    Check(wrongRegion, "MTK B6.5 UFS: a 208-byte reply that does not open with 0x30 is an unmeasured layout and is refused");
+    bool ufsOddBlock = false;
+    try { MtkStorageInfo.ParseUfs(Convert.FromHexString(UfsGeometryPayload(blockBytes: 600))); }
+    catch (MtkDaProtocolException) { ufsOddBlock = true; }
+    Check(ufsOddBlock, "MTK B6.5 UFS: the same block-size sanity line guards both decoders — 600 would move every partition by the wrong factor");
+    byte[] withIdentity = (byte[])ufsGeometry.Clone();
+    "FAKEPROD  FAKEPART0123456"u8.CopyTo(withIdentity.AsSpan(32));
+    MtkStorageInfo idUfs = MtkStorageInfo.ParseUfs(withIdentity);
+    Check(!idUfs.Describe.Contains("FAKE") && !idUfs.ToString().Contains("FAKE") && idUfs.EmmcPartNumber == null &&
+          idUfs.UserAreaSize == ufs.UserAreaSize,
+        "MTK B6.5 UFS: the disk's own product name and serial live at +32 and no string this record produces carries them " +
+        "(EmmcPartNumber is only ever read from the eMMC layout, where it is a model-wide part number, not a serial)");
+
     var logoFromLba = new MtkDaExtent("logo", 2987008, 2989055, 512);
     Check(logoFromLba.ByteOffset == LogoAt && logoFromLba.ByteLength == 0x100000,
         "MTK B3: LBA × the DA's own block size gives byte 0x5b280000 + 1 MiB — the exact extent the write capture used");
@@ -2424,19 +2628,58 @@ try
         "MTK B3: the 104-byte descriptor decodes into the block size and user area every extent is measured against");
     CheckFrames(SentFrames(qDev, afterBoot), "MTK B3: each query is the recorded 0x10009 preamble then the command id",
         PreFrame, LimitsCmd, PreFrame, StorageCmd);
+    Check(LcHex(qDev.Writes[afterBoot]) == "efeeeefe0100000004000000" && LcHex(qDev.Writes[afterBoot + 1]) == PreFrame &&
+          LcHex(qDev.Writes[afterBoot + 2]) == "efeeeefe0100000004000000" && LcHex(qDev.Writes[afterBoot + 3]) == LimitsCmd,
+        "MTK B6.5: a live command is two transfers — the 12-byte header, then the id — the way every one of the 102 " +
+        "command frames in the two boot recordings was captured. The same bytes merged into one 16-byte write are what " +
+        "RUN B6-4's MT6877 DA refused to answer, after replaying the split shape seventeen times in one boot");
     int afterQueries = qDev.Writes.Count;
     Check(ReferenceEquals(await qSes.QueryLimitsAsync(default), limitsQ) && ReferenceEquals(await qSes.QueryStorageAsync(default), storageQ) &&
           qDev.Writes.Count == afterQueries,
         "MTK B3: both queries are cached, so the rest of the session costs the port nothing and the DA is not asked twice");
     Check(qLines.Any(l => l.Contains("DA limits: write chunk 0x800, transfer 0x400")),
         "MTK B3: the sizes the device advertised are shown to the operator before anything is transferred");
-    var (descSes, descDev) = await BootedDa(null, new[] { Status, Status, DaFrame(DescriptorPayload(0xE8F800000ul)[..206]), Status });
+    var (descSes, descDev) = await BootedDa(null, new[] { Status, Status, DaFrame(DescriptorPayload(0xE8F800000ul)[..206]), Status }
+        .Concat(new[] { Status, Status, DaFrame(UfsGeometryPayload()[..206]), Status }));
+    int descSince = descDev.Writes.Count;
     Check((await DaFailure(descSes, () => descSes.QueryStorageAsync(default)))
-              .Contains("must be 104 bytes"),
-        "MTK B3: a 103-byte descriptor is refused — extents cannot be addressed from a truncated reply");
+              .Contains("Neither geometry reply this session can read"),
+        "MTK B6.5: a reply that is neither of the two measured shapes is refused, not decoded into something plausible");
     Check(descSes.Storage == null, "MTK B3: nothing is cached from a refused descriptor, so the next operation cannot run on a half-read geometry");
-    CheckFrames(SentFrames(descDev, 29), "MTK B3: the descriptor query is the recorded preamble + 0x40001 pair", PreFrame, StorageCmd);
+    CheckFrames(SentFrames(descDev, descSince), "MTK B6.5: the session asks the two geometry queries the working client asks, in that order",
+        PreFrame, StorageCmd, PreFrame, UfsGeomCmd);
     descSes.Dispose();
+
+    // ---- B6.5: the live MT6877 shape — 0x40001 all-zero, 0x40004 the geometry, 0x30+3 in every struct ----
+    IEnumerable<string> UfsGeometryQuery() => new[] { Status, Status, DaFrame(UfsGeometryPayload()), Status };
+    string UfsLimitsReply = DaFrame("00002000" + "00000100");   // the 0x40007 answer on the capture: 2 MiB chunk, 64 KiB packet
+    var ufsLines = new List<string>();
+    var (ufsSes, ufsDev) = await BootedDa(ufsLines,
+        new[] { Status, Status, ZeroedDescriptor, Status }.Concat(UfsGeometryQuery())
+            .Concat(new[] { Status, Status, UfsLimitsReply, Status })
+            .Concat(ReadGroup(Filler(0xB6, 4096))));
+    int ufsSince = ufsDev.Writes.Count;
+    var ufsPercents = new List<int>();
+    byte[] ufsDump = await ufsSes.ReadExtentAsync(0x1000, 0x1000, ufsPercents.Add);
+    Check(ufsDump.Length == 4096 && ufsDump.All(b => b == 0xB6),
+        "MTK B6.5 UFS READ: the one frame that comes back is the extent, in full");
+    CheckFrames(SentFrames(ufsDev, ufsSince), "MTK B6.5 UFS READ: descriptor, geometry, limits, then the read framed with 0x30 + 3",
+        PreFrame, StorageCmd, PreFrame, UfsGeomCmd, PreFrame, LimitsCmd, ReadCmd, UfsExtentStruct(0x1000, 0x1000), ZeroWord);
+    Check(ufsSes.Limits.WriteChunkSize == 0x200000 && ufsSes.Limits.TransferPacketSize == 0x10000,
+        "MTK B6.5 UFS: this DA advertises 2 MiB / 64 KiB where the MT6765 DA said 2048 / 1024 — the sizes stay read from the device");
+    Check(ufsLines.Any(l => l.Contains("asking 0x40004")) &&
+          ufsLines.Any(l => l.Contains("DA storage: type 48 (UFS), block 4096")) &&
+          ufsLines.Any(l => l.Contains("READ 0x1000 + 0x1000 — 4096 byte(s) in 1 frame(s)")),
+        "MTK B6.5 UFS: the operator sees the fallback happen and the geometry the unit itself reported");
+    Check(ufsPercents.Count == 1 && ufsPercents[0] == 100, "MTK B6.5 UFS READ: a single-frame extent still reports a finished read");
+    int afterUfsRead = ufsDev.Writes.Count;
+    Check(ReferenceEquals(await ufsSes.QueryStorageAsync(default), ufsSes.Storage) && ufsDev.Writes.Count == afterUfsRead,
+        "MTK B6.5 UFS: the geometry the fallback found is cached like the descriptor is, so 0x40004 is not re-asked per operation");
+    string ufsMisaligned = await DaFailure(ufsSes, () => ufsSes.ReadExtentAsync(0x1000, 512));
+    Check(ufsMisaligned.Contains("not a multiple of the device block size 4096") && ufsDev.Writes.Count == afterUfsRead,
+        "MTK B6.5 UFS: extents are checked against the block size THIS unit reported — 512 is a whole eMMC block and a fifth of " +
+        "a UFS one, and the refusal costs the port nothing");
+    ufsSes.Dispose();
 
     // ---- B3.2: READ is frame-driven ------------------------------------------------------------------
     var rLines = new List<string>();
@@ -2766,6 +3009,15 @@ try
         "MTK B5.2: the decoded state carries the extent it was read from, so the record says where the number came from");
     Check(stLines.Any(l => l.Contains("seccfg:") && l.Contains("UNLOCKED")),
         "MTK B5.2: the session logs the verdict once, on the same line that names the partition and the block");
+    int stAfterRead = stDev.Writes.Count;
+    Check((await DaFailure(stSes, () => stSes.WritePartitionAsync("seccfg", shortImage, null, true, default)))
+              .Contains("program payload has never been measured"),
+        "MTK B5.9: writing seccfg through the live session is refused — the unlock payload was never captured, so unmeasured bytes would change the lock policy silently instead of failing");
+    Check((await DaFailure(stSes, () => stSes.ErasePartitionAsync("seccfg", default)))
+              .Contains("erased through a live session is refused"),
+        "MTK B5.9: erasing seccfg is refused by the same guard — wiping the lock policy is not a repair, and no capture has ever proven what the device does afterwards");
+    Check(stDev.Writes.Count == stAfterRead,
+        "MTK B5.9: both seccfg program refusals cost the port zero frames, and the read the state query is entitled to still went out — the block is a gate on programming, not on reading");
     stSes.Dispose();
     Check((await DaFailure(stSes, () => stSes.ReadSeccfgConfigAsync())).Contains("The DA is not ready"),
         "MTK B5.2: a closed session reads no seccfg either — the same spent-session rule every other command obeys");
@@ -3025,6 +3277,11 @@ try
     Check(!MtkNativeBench.ProgramAllowed("flashinfo", out string whyFlashinfo) && whyFlashinfo.Contains("bricks"),
         "MTK B4: the UI refuses a never-program name before the dialog, and says plainly that it is a brick rather than a repair");
     Check(MtkNativeBench.ProgramAllowed("logo", out _), "MTK B4: an ordinary partition passes the same gate, so the guard is a list and not a blanket no");
+    Check(!MtkNativeBench.ProgramAllowed("seccfg", out string whySeccfg) &&
+          whySeccfg.Contains("never been measured") && whySeccfg.Contains("Read it"),
+        "MTK B5.9: the grid refuses a seccfg Write or Erase before the dialog and names the read path as still open — an operator told only 'no' would click again");
+    Check(MtkDaSession.ReadOnlyPayloadNames.Contains("seccfg") && !MtkDaSession.NeverProgramNames.Contains("seccfg"),
+        "MTK B5.9: seccfg sits on its own read-only list, not folded into the brick list — its reason is an unmeasured payload, not a destroyed partition table");
     string restoreText = MtkNativeBench.ConfirmText("restore", new MtkDaExtent("logo", 2987008, 2989055, 512), @"C:\dumps\logo.img");
     Check(restoreText.Contains("0x5b280000") && restoreText.Contains("logo.img") && restoreText.Contains("read back"),
         "MTK B4: the restore confirmation shows the exact byte extent and promises the read-back, so agreeing means knowing what is written");
@@ -3246,10 +3503,15 @@ internal sealed class FakeCtrlTransport : IMtkTransport, IMtkControlTransport
     /// <summary>Scripted libusb results, consumed one per call; once dry every transfer succeeds with its data length.</summary>
     public Queue<int> ControlScript { get; } = new();
 
+    /// <summary>Sit inside every control transfer this long first — RUN B6-1's phone, which left the bus with the
+    /// transfer in flight and so never completed it. The session is expected to stop waiting and say so.</summary>
+    public int BlockMs { get; set; }
+
     public FakeMtkTransport Inner => _inner;
 
     public int ControlTransfer(byte bmRequestType, byte bRequest, ushort wValue, ushort wIndex, byte[] data, int timeoutMs)
     {
+        if (BlockMs > 0) Thread.Sleep(BlockMs);
         int wLength = data?.Length ?? 0;
         var setup = new byte[8];
         setup[0] = bmRequestType;

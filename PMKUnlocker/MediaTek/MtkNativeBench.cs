@@ -440,6 +440,15 @@ internal static class MtkNativeBench
     };
 
     /// <summary>
+    /// The result of a control ask that ran out the wall clock it was given and never came back. It is not a libusb
+    /// code — no libusb error number means "this transfer is still outstanding" — and it is a fourth state next to
+    /// accepted, stalled and timed-out: RUN B6-1 (2026-11-03) watched the MT6877 leave the bus with the transfer in
+    /// flight, so the driver never completed it and a call that trusts libusb's timeout sits there for the life of
+    /// the process. Naming it lets the boot say "nothing answered" instead of pretending the phone refused.
+    /// </summary>
+    internal const int CtrlNoAnswer = -1000;
+
+    /// <summary>
     /// A libusb return code in the words a refusal can be compared against. Only the codes this transport can
     /// actually produce are named; anything else keeps its number rather than inventing a meaning.
     /// </summary>
@@ -640,10 +649,18 @@ internal static class MtkNativeBench
     /// <summary>The never-program list, in the words the operator needs before clicking.</summary>
     internal static bool ProgramAllowed(string partitionName, out string reason)
     {
-        if (MtkDaSession.NeverProgramNames.Contains((partitionName ?? "").Trim()))
+        string name = (partitionName ?? "").Trim();
+        if (MtkDaSession.NeverProgramNames.Contains(name))
         {
             reason = "'" + partitionName + "' is the partition table or the chip identity — erasing or rewriting it " +
                 "through a live session bricks the phone with no BROM-side recovery.";
+            return false;
+        }
+        if (MtkDaSession.ReadOnlyPayloadNames.Contains(name))
+        {
+            reason = "'" + partitionName + "' holds the bootloader lock policy, and its program payload has never " +
+                "been measured on this bench — writing unmeasured bytes changes the lock state silently instead of " +
+                "failing. Read it, or dump it, but do not write or erase it here.";
             return false;
         }
         reason = null;

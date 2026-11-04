@@ -42,6 +42,15 @@ namespace PMKUnlocker.MediaTek;
 //           pre-download jump: a CDC SET_LINE_CODING the device accepts (ctrl-ack) followed by a vendor
 //           descriptor read the device stalls (ctrl-stall). A bulk log cannot see this traffic, which is
 //           why the first 35 boots were byte-identical for 65 steps and were still refused.
+//
+// OPTIONAL STEPS ("opt": true, control steps only). The B6 capture (2026-11-03 13:27, MT6877) measured the phone
+// taking 1,004 ms to accept the post-payload SET_LINE_CODING and answering the greet 1 ms after that: the request is
+// recorded, it is worth replaying, and nothing downstream of it reads the line setting it configures. RUN B6-1 showed
+// our own stack cannot always carry that one ask — the URB sat unfinished and the boot stopped on it. A step marked
+// optional is therefore asked exactly like a strict one and, if the pipe cannot carry it, logged and stepped over on
+// that pipe: no face reclaim (RUN B6-3 measured 64 open attempts and 12 s on a node the pinned transfer would not
+// release) and no dispose, because the greet after it needs the live pipe. The next bulk step proves the boot. No
+// recipe marks anything optional except those two handoff probes.
 
 internal enum MtkReplyKind { Echo, Zero, LengthOnly, HwCode, DaAlive, Sync, Header, CtrlAck, CtrlStall, Complement }
 
@@ -50,8 +59,10 @@ internal enum MtkStepKind { Tx, Rx, Blob, Ctrl }
 /// <summary>An expected reply, as recorded: how to verify it and how long it is.</summary>
 internal sealed record MtkReply(MtkReplyKind Kind, int Bytes);
 
-/// <summary>One frame of the recorded boot: bytes to send, bytes to expect, or an image to stream.</summary>
-internal sealed record MtkStep(MtkStepKind Kind, byte[] Payload, MtkReply Expect, string BlobFile, int ChunkSize);
+/// <summary>One frame of the recorded boot: bytes to send, bytes to expect, or an image to stream.
+/// Optional marks a control step the recording saw accepted that the boot does not depend on — see the header.</summary>
+internal sealed record MtkStep(MtkStepKind Kind, byte[] Payload, MtkReply Expect, string BlobFile, int ChunkSize,
+    bool Optional = false);
 
 internal sealed record MtkBlobRef(string File, int Bytes, string Sha256);
 
@@ -255,7 +266,8 @@ internal sealed class MtkBootProfile
                     if (expect.Bytes != wLength)
                         throw new InvalidDataException(ChipsetLabel(chipset) + " disagrees with itself about a control " +
                             "transfer's length (" + expect.Bytes + " expected vs " + wLength + " in the setup packet).");
-                    steps.Add(new MtkStep(MtkStepKind.Ctrl, frame, expect, null, 0));
+                    bool optional = s.TryGetProperty("opt", out JsonElement o) && o.ValueKind == JsonValueKind.True;
+                    steps.Add(new MtkStep(MtkStepKind.Ctrl, frame, expect, null, 0, optional));
                     break;
                 }
                 default:

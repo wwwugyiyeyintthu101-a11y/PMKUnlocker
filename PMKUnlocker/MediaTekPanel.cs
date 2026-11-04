@@ -322,6 +322,7 @@ public partial class Form1
             BackgroundColor = Color.FromArgb(28, 31, 38),
             BorderStyle = BorderStyle.FixedSingle,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
             Font = new Font("Segoe UI", 8.5f)
         };
         mediaTekGrid.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);

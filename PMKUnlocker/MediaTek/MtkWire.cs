@@ -189,6 +189,7 @@ internal static class MtkDaCommand
     internal const uint Limits = 0x00040007;           // -> 8 bytes: u32le write chunk, u32le transfer packet
     internal const uint DaVersion = 0x00040011;        // -> 4 bytes (0xC0010004 on the capture DA)
     internal const uint StorageDescriptor = 0x00040001;// -> 104 bytes: type, block size, boot areas, u64 user size
+    internal const uint UfsGeometry = 0x00040004;      // -> 208 bytes on the UFS unit; on that unit 0x40001 answers all-zero
     internal const uint BootModeTag = 0x0004000A;      // -> 4 bytes ASCII "brom"
     internal const uint UsbSpeed = 0x0004000B;         // -> 10 bytes ASCII "high-speed"
     internal const uint SlaState = 0x00040016;         // -> 4 bytes; 0 meant "DA SLA is disabled"
@@ -223,7 +224,9 @@ internal static class MtkDaFrame
     internal static readonly byte[] Magic = { 0xEF, 0xEE, 0xEE, 0xFE };
     internal const uint TypeCommand = 1;
 
-    /// <summary>Header only — payload is written as a separate buffer (the wire shows two writes).</summary>
+    /// <summary>Header only — the payload always goes out as its own write, because that is how the wire shows it:
+    /// not one of the 51 command frames recorded on the mt6765 boot, nor one of the 51 on the MT6877 boot, was
+    /// captured as a single merged transfer.</summary>
     internal static byte[] Header(uint payloadLength)
     {
         var h = new byte[HeaderSize];
@@ -233,35 +236,15 @@ internal static class MtkDaFrame
         return h;
     }
 
-    /// <summary>Builds header+payload in one buffer — for small frames, where a single write is simpler.</summary>
-    internal static byte[] Pack(ReadOnlySpan<byte> payload)
+    /// <summary>One u32le as it goes on the wire, with no header in front of it — the payload half of a frame:
+    /// a bare command sends its id this way, and so does the host ack after every data frame.
+    /// (See <see cref="MtkDaSession.WriteCommand"/> for why the two halves are never merged.)</summary>
+    internal static byte[] Word(uint value)
     {
-        var frame = new byte[HeaderSize + payload.Length];
-        Header((uint)payload.Length).CopyTo(frame, 0);
-        payload.CopyTo(frame.AsSpan(HeaderSize));
-        return frame;
+        var b = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, value);
+        return b;
     }
-
-    /// <summary>A command frame is a 4-byte payload carrying only the u32le id.</summary>
-    internal static byte[] Command(uint id)
-    {
-        var p = new byte[4];
-        BinaryPrimitives.WriteUInt32LittleEndian(p, id);
-        return Pack(p);
-    }
-
-    /// <summary>u32le argument, e.g. the length word of <see cref="MtkDaCommand.SendEmi"/>.</summary>
-    internal static byte[] Argument(uint value)
-    {
-        var p = new byte[4];
-        BinaryPrimitives.WriteUInt32LittleEndian(p, value);
-        return Pack(p);
-    }
-
-    internal static byte[] Argument(ReadOnlySpan<byte> value) => Pack(value);
-
-    /// <summary>The host ack that must follow every DA data frame, one ack per frame.</summary>
-    internal static byte[] Ack() => Argument(0);
 
     /// <summary>Validates a 12-byte header. Rejects anything that is not magic + type 1.</summary>
     internal static bool TryParseHeader(ReadOnlySpan<byte> header, out uint length)
@@ -283,18 +266,24 @@ internal static class MtkDaFrame
 
 /// <summary>
 /// The 56-byte extent struct shared by READ (0x10005), WRITE (0x10004) and ERASE (0x10003).
-///   0  u32le region   (1 = eMMC user area in every observed op)
-///   4  u32le field    (constant 8 in all 15 reads of RUN 6 and in every write and erase; unknown
-///                      meaning — send what was observed, do not invent a value)
+///   0  u32le region   (1 = eMMC user area on the MT6765 captures, 0x30 on the MT6877 UFS capture)
+///   4  u32le field    (8 beside every eMMC struct ever seen, 3 beside every UFS struct ever seen;
+///                      unknown meaning — send what was observed, do not invent a value)
 ///   8  u64le offset   byte offset into the storage
 ///  16  u64le length   byte count
 ///  24  32 bytes       reserved, zero in every observed struct
+///
+/// The region/field pair is not a constant. The RUN B6 oracle capture (2026-11-03, MT6877 behind a UFS disk)
+/// put 0x30 + 3 in all eight of its READ structs where the MT6765 reads put 1 + 8, and on both units the region
+/// word is the first word of the geometry reply that unit gave — so the pair travels with the storage info.
 /// </summary>
 internal static class MtkOpStruct
 {
     internal const int Size = 56;
     internal const uint RegionEmmcUser = 1;
     internal const uint ObservedField4 = 8;
+    internal const uint RegionUfsUser = 0x30;
+    internal const uint UfsField4 = 3;
 
     /// <summary>
     /// The length field is a u64, so a 4.5 GiB <c>super</c> read is representable on the wire and is served
@@ -319,6 +308,10 @@ internal static class MtkOpStruct
         // bytes 24..56 stay zero, as in every struct seen on the wire
         return b;
     }
+
+    /// <summary>The struct framed with the region/field pair this unit's own geometry reply reported.</summary>
+    internal static byte[] Create(MtkStorageInfo storage, ulong offset, ulong length) =>
+        Create(storage.OpRegion, storage.OpField4, offset, length);
 
     internal static byte[] Create(ulong offset, ulong length) => Create(RegionEmmcUser, ObservedField4, offset, length);
 
@@ -371,13 +364,32 @@ internal sealed record MtkLimits(uint WriteChunkSize, uint TransferPacketSize)
 /// carries it), not a serial: the bytes after it are the device's own serial and they are NOT decoded, NOT
 /// stored and NOT reachable from any string this record produces. A card serial is device identity and this
 /// product does not carry identity values into its records.
+/// A UFS unit does not answer this command at all — it answers 0x40004 with the 208-byte layout
+/// <see cref="ParseUfs"/> reads; both decoders produce this one record, plus the extent-struct pair measured
+/// against that unit's own READ structs.
 /// </summary>
 internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Boot1Size, ulong Boot2Size,
     ulong RpmbSize, ulong GeneralPurpose1, ulong GeneralPurpose2, ulong GeneralPurpose3, ulong GeneralPurpose4,
     ulong UserAreaSize)
 {
-    /// <summary>1 in every observed reply, printed as "EMMC". Anything else is a storage we have not measured.</summary>
-    internal bool IsEmmcUserAddressed => StorageType == 1;
+    /// <summary>1 in every MT6765 reply observed, printed as "EMMC". 0x30 is the MT6877 UFS geometry word.</summary>
+    internal bool IsEmmcUserAddressed => StorageType == MtkOpStruct.RegionEmmcUser;
+
+    internal bool IsUfsAddressed => StorageType == MtkOpStruct.RegionUfsUser;
+
+    /// <summary>
+    /// The two (region, field) pairs ever measured on this wire. A third storage type has to be captured, not
+    /// mapped: an extent struct with invented leading words would address the wrong area and read as a healthy
+    /// device the whole time.
+    /// </summary>
+    internal bool HasMeasuredOpPair => IsEmmcUserAddressed || IsUfsAddressed;
+
+    /// <summary>The first two words of a READ / WRITE / ERASE extent struct, as this unit's own reply said.</summary>
+    internal uint OpRegion => StorageType;
+
+    internal uint OpField4 => IsUfsAddressed ? MtkOpStruct.UfsField4 : MtkOpStruct.ObservedField4;
+
+    internal string StorageName => IsEmmcUserAddressed ? "eMMC" : IsUfsAddressed ? "UFS" : "type " + StorageType;
 
     /// <summary>Where the 16-byte CID sits in the reply, measured from the print cross-check above.</summary>
     private const int CidOffset = 72;
@@ -434,7 +446,45 @@ internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Bo
         {
             EmmcPartNumber = DecodePartNumber(payload, MtkDaFrame.ReadUInt32Little(payload, 0))
         };
+        return Validate(info);
+    }
 
+    /// <summary>
+    /// The 208-byte answer to <see cref="MtkDaCommand.UfsGeometry"/> — the geometry reply the DA behind a UFS
+    /// disk gives instead. RUN B6 (2026-11-03, MT6877 / hwCode 0x0959) is the capture this comes from: the same
+    /// client queried 0x40001 first and got 104 zero bytes back, then asked 0x40004 and got
+    ///   30000000 00100000 | 00004000 00000000 | 00004000 00000000 | 00000096 3b000000 | identity…
+    /// so the slots read region word 0x30, block size 4096, boot LUN 1 = 4 MiB, boot LUN 2 = 4 MiB, user area
+    /// 0x3b96000000, and from +32 the disk's own ASCII identification — product name, serial, manufacturer id.
+    /// Those bytes are device identity: they are not decoded, not stored, not reachable from any string this
+    /// record produces, exactly as the eMMC card serial is not. RPMB and the general-purpose areas have no
+    /// measured slot in this reply, so they stay 0, which means "not reported", not "absent".
+    /// </summary>
+    internal static MtkStorageInfo ParseUfs(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != 208)
+            throw new MtkDaProtocolException("DA UFS geometry reply must be 208 bytes, got " + payload.Length +
+                ". Extents cannot be addressed without it, so the query was refused.");
+        uint region = MtkDaFrame.ReadUInt32Little(payload, 0);
+        if (region != MtkOpStruct.RegionUfsUser)
+            throw new MtkDaProtocolException("DA UFS geometry reply starts with region word 0x" +
+                region.ToString("x") + ", not the 0x30 every UFS READ struct on the capture carries — this is a " +
+                "layout that has not been measured, so no offset is derived from it.");
+        return Validate(new MtkStorageInfo(region, MtkDaFrame.ReadUInt32Little(payload, 4),
+            MtkDaFrame.ReadUInt64Little(payload, 8), MtkDaFrame.ReadUInt64Little(payload, 16),
+            0, 0, 0, 0, 0, MtkDaFrame.ReadUInt64Little(payload, 24)));
+    }
+
+    /// <summary>The one reply shape <see cref="Parse"/> reads: 104 bytes starting with the eMMC region word.</summary>
+    internal static bool IsDescriptorShape(ReadOnlySpan<byte> payload) =>
+        payload.Length == 104 && MtkDaFrame.ReadUInt32Little(payload, 0) == MtkOpStruct.RegionEmmcUser;
+
+    /// <summary>The one reply shape <see cref="ParseUfs"/> reads: 208 bytes starting with the UFS region word.</summary>
+    internal static bool IsUfsGeometryShape(ReadOnlySpan<byte> payload) =>
+        payload.Length == 208 && MtkDaFrame.ReadUInt32Little(payload, 0) == MtkOpStruct.RegionUfsUser;
+
+    private static MtkStorageInfo Validate(MtkStorageInfo info)
+    {
         // A block size that is not a sane power of two would silently move every partition by the wrong
         // factor, which is a mis-flash rather than an error — so this is refused here, at the last point
         // where it is still only a number.
@@ -446,7 +496,8 @@ internal sealed record MtkStorageInfo(uint StorageType, uint BlockSize, ulong Bo
         return info;
     }
 
-    internal string Describe => "type " + StorageType + ", block " + BlockSize + ", user " + UserAreaSize + " B (" +
+    internal string Describe => "type " + StorageType + (HasMeasuredOpPair ? " (" + StorageName + ")" : "") +
+                ", block " + BlockSize + ", user " + UserAreaSize + " B (" +
                 (UserAreaSize / 1024 / 1024 / 1024) + " GiB), boot1/2 " + Boot1Size + "/" + Boot2Size + ", rpmb " + RpmbSize;
 }
 

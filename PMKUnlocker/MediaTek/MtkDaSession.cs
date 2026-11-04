@@ -404,7 +404,7 @@ internal sealed partial class MtkDaSession : IDisposable
                     break;
 
                 case MtkStepKind.Ctrl:
-                    RunCtrlProbe(step, index);
+                    await RunCtrlProbeAsync(step, index, ct).ConfigureAwait(false);
                     break;
             }
 
@@ -588,6 +588,31 @@ internal sealed partial class MtkDaSession : IDisposable
             : " (the one read-only query is re-sent; no command has run on the phone)";
     }
 
+    private async Task<(IMtkTransport Pipe, string Failure)> ReopenPipeAsync(int waitMs, CancellationToken ct)
+    {
+        string dead = _transport.Description;
+        try { _transport.Dispose(); } catch { /* the handle is already gone; the phone is what matters */ }
+
+        try
+        {
+            IMtkTransport next = await Task.Run(() => _recovery.Reopen(waitMs), ct).ConfigureAwait(false);
+            if (next == null)
+                return (null, null);
+            _transport = next;
+            // A reclaimed pipe is a new face and has to be greeted again, even when the old one had already handshaken.
+            _pipeHandshaken = false;
+            return (next, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
     /// <summary>
     /// Replace a pipe that failed mid-proof with a freshly opened one on the same face, the way the working client
     /// recovers between its own handshake retries. When the face does not come back the boot is refused with the
@@ -598,22 +623,7 @@ internal sealed partial class MtkDaSession : IDisposable
     {
         int wait = (int)Math.Max(0, Math.Min(20000, (deadline - DateTime.UtcNow).TotalMilliseconds));
         string dead = _transport.Description;
-        try { _transport.Dispose(); } catch { /* the handle is already gone; the phone is what matters */ }
-
-        IMtkTransport next = null;
-        string failure = null;
-        try
-        {
-            next = await Task.Run(() => _recovery.Reopen(wait), ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            failure = ex.GetType().Name + ": " + ex.Message;
-        }
+        (IMtkTransport next, string failure) = await ReopenPipeAsync(wait, ct).ConfigureAwait(false);
 
         if (next == null)
             throw new MtkDaProtocolException(cause.Message + " The proof wrote the single read-only byte " + Hex(lastTx) +
@@ -622,9 +632,6 @@ internal sealed partial class MtkDaSession : IDisposable
                 ". Nothing else was written, so the phone is exactly where it was left: power it off from its menu, " +
                 "hold BOTH volume keys and plug it in again.");
 
-        _transport = next;
-        // A reclaimed pipe is a new face and has to be greeted again, even when the old one had already handshaken.
-        _pipeHandshaken = false;
         Say(" [ ] BROM proof: the face is back on " + next.Description + " — asking again there");
     }
 
@@ -644,8 +651,10 @@ internal sealed partial class MtkDaSession : IDisposable
     }
 
     /// <summary>How long one recorded endpoint-zero probe waits before the boot refuses. RUN 38 shows every probe
-    /// completing within ~3 ms of its submit; the oracle arms its transfers at 1000 ms.</summary>
-    private const int CtrlProbeTimeoutMs = 1000;
+    /// completing within ~3 ms of its submit; the oracle arms its transfers at 1000 ms. B6.4 (RUN B6-1, 2026-11-03)
+    /// measured the MT6877's own re-open write completing 1,004 ms after its submit, so an arm of exactly one second
+    /// loses a transfer the recorded boot won — the arm now clears a second with room for the phone's re-init.</summary>
+    private const int CtrlProbeTimeoutMs = 2000;
 
     /// <summary>How many asks an accepted-transfer control step gets when the device stalls it. RUN 40 (2026-11-01
     /// 17:19) is the measurement: the re-open's first SET_LINE_CODING came back libusb -9 within a millisecond of
@@ -656,6 +665,22 @@ internal sealed partial class MtkDaSession : IDisposable
     private const int CtrlProbeRetries = 20;
     private const int CtrlProbeRetryMs = 5;
 
+    /// <summary>The wall-clock budget of a single ask, on top of the transfer's own timeout.
+    ///
+    /// RUN B6-1 (2026-11-03, MT6877) is the measurement behind this: the post-payload SET_LINE_CODING went out and
+    /// never came back. The phone re-initialised its USB stack and left the bus, the outstanding URB was never
+    /// completed, and a call that simply trusts libusb's timeout sits inside it for as long the process lives —
+    /// which leaves the operator looking at a boot that is neither running nor refused, with only the window's
+    /// close button left. An ask that outlives its own timeout is therefore reported as no answer and the step is
+    /// re-asked, and if that fails too the face is reclaimed like the working client does. The abandoned transfer's
+    /// thread is released when the device returns or the process ends; a bounded handful of those is the price of
+    /// a boot that always answers the operator.</summary>
+    private const int CtrlProbeAskSlackMs = 1000;
+
+    /// <summary>How long the face is waited on when a probe cluster could not be satisfied on the pipe in hand.
+    /// The recorded MT6877 boot had the device answering endpoint zero again ~1 s after the payload's ack.</summary>
+    private const int CtrlProbeReopenWaitMs = 5000;
+
     /// <summary>
     /// One recorded endpoint-zero control transfer, replayed as the single atomic call it was captured as.
     ///
@@ -664,61 +689,87 @@ internal sealed partial class MtkDaSession : IDisposable
     /// stalls. The stall is the recorded answer, not a failure — but the probe refuses anything else, because a
     /// device that hands back descriptor bytes is not the BROM the recipe was measured on.
     ///
-    /// An accepted step that the device stalls is a different state: RUN 40 caught the re-open's first
-    /// SET_LINE_CODING refused with libusb -9 while the payload was still re-initialising the USB stack, so the
-    /// step is re-asked inside the <see cref="CtrlProbeRetries"/> budget before the boot gives up.
+    /// A step the recording shows as accepted but the device stalls is a second state: RUN 40 caught the re-open's
+    /// first SET_LINE_CODING refused with libusb -9 while the payload was still re-initialising the USB stack, so it
+    /// is re-asked inside the <see cref="CtrlProbeRetries"/> budget before the boot gives up.
+    ///
+    /// An ask that never completes is a third state, and RUN B6-1 (2026-11-03) is what named it: the MT6877's
+    /// post-payload SET_LINE_CODING went out, the phone re-initialised and left the bus, the URB was never completed,
+    /// and the boot sat inside that call — neither running nor refused, with only the window's close button left. So
+    /// every ask is bounded by <see cref="AskOnceAsync"/> and, when that budget runs out, the ask is left in flight
+    /// and its eventual answer still gets reported (<see cref="ReportLateAsk"/>). What the boot does next is the
+    /// step's own choice: a strict step reclaims the face and asks there once more, and a step the recipe marks
+    /// optional is stepped over on the pipe in hand.
+    ///
+    /// An optional step is stepped over WITHOUT reclaiming, and RUN B6-3 (2026-11-03 15:26:57, MT6877) is why: the
+    /// ask went out 1 ms after the payload's a1a2a3a4 (exactly when the recorded boot sends its own), never came back,
+    /// and the reclaim then spent 12 s and 64 attempts on a node that libusb still listed but refused to open — the
+    /// abandoned transfer holds it. Worse, <see cref="ReopenPipeAsync"/> had already disposed the pipe the boot was
+    /// still standing on, so the step after the skip died on an <c>ObjectDisposedException</c> instead of greeting.
+    /// A decorative step is not worth a pipe, and the bulk transfer after it is a better witness of the same face
+    /// than endpoint zero can be.
     /// </summary>
-    private void RunCtrlProbe(MtkStep step, int index)
+    private async Task RunCtrlProbeAsync(MtkStep step, int index, CancellationToken ct)
     {
-        byte[] frame = step.Payload;
-        byte bmRequestType = frame[0];
-        byte bRequest = frame[1];
-        ushort wValue = (ushort)(frame[2] | frame[3] << 8);
-        ushort wIndex = (ushort)(frame[4] | frame[5] << 8);
-        ushort wLength = (ushort)(frame[6] | frame[7] << 8);
-        byte[] data = new byte[wLength];
-        if ((bmRequestType & 0x80) == 0)
-            frame.AsSpan(8, wLength).CopyTo(data);
+        var ask = new CtrlAsk(step.Payload);
+        bool recordedAsAccepted = step.Expect.Kind == MtkReplyKind.CtrlAck;
 
-        if (_transport is not IMtkControlTransport control)
-            throw new MtkDaProtocolException("Step " + index + " is a recorded endpoint-zero control transfer, but " +
-                _transport.Description + " cannot send one — only a raw-USB pipe replays control steps. The recipe " +
-                "cannot run on this pipe, so the boot was stopped before anything was sent.");
+        (int rc, int attempts) = await AskCtrlAsync(ask, index, recordedAsAccepted, ct).ConfigureAwait(false);
 
-        int rc;
-        int attempts = 1;
-        try
+        if (rc == MtkNativeBench.CtrlNoAnswer && step.Optional)
         {
-            rc = control.ControlTransfer(bmRequestType, bRequest, wValue, wIndex, data, CtrlProbeTimeoutMs);
-            while (rc < 0 && attempts < CtrlProbeRetries && step.Expect.Kind == MtkReplyKind.CtrlAck)
+            SayOptionalUnanswered(index, ask, _transport.Description, attempts,
+                "never completed and is left in flight on this pipe");
+            return;
+        }
+
+        if (rc == MtkNativeBench.CtrlNoAnswer && _recovery != null)
+        {
+            string dead = _transport.Description;
+            Say(" [ ] BROM step " + index + ": the endpoint-zero ask " + Hex(ask.Frame) + " never completed on " +
+                dead + " — the face is being waited on before anything else is sent");
+            (IMtkTransport pipe, string failure) = await ReopenPipeAsync(CtrlProbeReopenWaitMs, ct).ConfigureAwait(false);
+            if (pipe == null)
             {
-                Thread.Sleep(CtrlProbeRetryMs);
-                rc = control.ControlTransfer(bmRequestType, bRequest, wValue, wIndex, data, CtrlProbeTimeoutMs);
-                attempts++;
+                throw new MtkDaProtocolException("Step " + index + ": the control transfer " + Hex(ask.Frame) +
+                    " was asked " + attempts + " time(s) on " + dead + " and never completed; that pipe was then closed " +
+                    "and the face was waited on for " + CtrlProbeReopenWaitMs + " ms" +
+                    (failure == null ? ", but it did not come back" : ", but the re-open failed: " + failure) +
+                    ". Nothing after the ask was sent, so the phone is exactly where it was left: power it off from " +
+                    "its menu, hold BOTH volume keys and plug it in again.") { TransportFailure = true };
             }
+            Say(" [ ] BROM step " + index + ": the face is back on " + pipe.Description + " — asking again there");
+            (rc, attempts) = await AskCtrlAsync(ask, index, recordedAsAccepted, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not MtkDaProtocolException)
-        {
-            throw new MtkDaProtocolException("Step " + index + ": the control transfer " + Hex(frame) +
-                " could not be delivered (" + ex.GetType().Name + ": " + ex.Message + ").") { TransportFailure = true };
-        }
-        TraceCtrl(index, frame, rc, attempts);
+        TraceCtrl(index, ask.Frame, rc, attempts);
 
         switch (step.Expect.Kind)
         {
             case MtkReplyKind.CtrlAck:
-                if (rc != wLength)
-                    throw new MtkDaProtocolException("Step " + index + ": the control transfer " + Hex(frame) +
+                if (rc != ask.WLength)
+                {
+                    if (step.Optional)
+                    {
+                        SayOptionalUnanswered(index, ask, _transport.Description, attempts, CtrlResult(rc));
+                        return;
+                    }
+                    throw new MtkDaProtocolException("Step " + index + ": the control transfer " + Hex(ask.Frame) +
                         " was not accepted the way the recorded boot had it (" + CtrlResult(rc) + " instead of " +
-                        wLength + " byte(s) accepted) on " + _transport.Description + ". Refused " + attempts +
+                        ask.WLength + " byte(s) accepted) on " + _transport.Description + ". Refused " + attempts +
                         " ask(s) in a row. The boot was stopped.");
+                }
                 break;
 
             case MtkReplyKind.CtrlStall:
                 if (rc >= 0)
-                    throw new MtkDaProtocolException("Step " + index + ": the descriptor read " + Hex(frame) +
+                    throw new MtkDaProtocolException("Step " + index + ": the descriptor read " + Hex(ask.Frame) +
                         " is recorded as refused, but the device returned " + CtrlResult(rc) + ". A device that answers " +
                         "this read is not in the state the recipe was measured on, so the boot was stopped.");
+                if (rc == MtkNativeBench.CtrlNoAnswer)
+                    throw new MtkDaProtocolException("Step " + index + ": the descriptor read " + Hex(ask.Frame) +
+                        " is recorded as a refusal from the device, but " + CtrlResult(rc) + " on " +
+                        _transport.Description + ". Silence is not a stall — a phone that is not answering endpoint zero " +
+                        "at all is not the face this recipe was measured on, so the boot was stopped.");
                 break;
 
             default:
@@ -727,8 +778,141 @@ internal sealed partial class MtkDaSession : IDisposable
         }
     }
 
+    /// <summary>The handoff probes a recipe marks optional (<see cref="MtkBootProfile"/>): asked exactly like a strict
+    /// step, and stepped over on the pipe in hand when that pipe cannot carry them. The pipe is neither closed nor
+    /// reclaimed — the ask that is still in flight is what pins the node, so a reclaim could only fail on it, and the
+    /// live pipe is the one the recorded boot greeted on. Nothing is claimed about the boot here: the bulk step that
+    /// follows answers on its own, and its recorded reply is what decides whether the phone came up.</summary>
+    private void SayOptionalUnanswered(int index, CtrlAsk ask, string pipe, int attempts, string outcome) =>
+        Say(" [ ] BROM step " + index + ": " + Hex(ask.Frame) + " — " + outcome + " on " + pipe + " after " +
+            attempts + " ask(s). This line-setting probe is recorded as optional: the measured MT6877 boot took 1,004 ms " +
+            "to accept it after the payload and then greeted 1 ms later over the bulk endpoints, which is what actually " +
+            "proves the face. The pipe is left exactly as it stands — no reclaim, because RUN B6-3 measured that a face " +
+            "with a transfer still pinned to it cannot be opened again from this process. The boot continues; the next " +
+            "bulk step decides.");
+
+    /// <summary>A recorded control step split into the fields the pipe API takes. The data stage is the frame's own
+    /// bytes for a host-to-device request and a receive buffer of the recorded length for a device-to-host one, which
+    /// is how the capture held it.</summary>
+    private readonly struct CtrlAsk
+    {
+        internal byte[] Frame { get; }
+        internal byte[] Data { get; }
+        internal byte BmRequestType { get; }
+        internal byte BRequest { get; }
+        internal ushort WValue { get; }
+        internal ushort WIndex { get; }
+        internal ushort WLength { get; }
+
+        internal CtrlAsk(byte[] frame)
+        {
+            Frame = frame;
+            BmRequestType = frame[0];
+            BRequest = frame[1];
+            WValue = (ushort)(frame[2] | frame[3] << 8);
+            WIndex = (ushort)(frame[4] | frame[5] << 8);
+            WLength = (ushort)(frame[6] | frame[7] << 8);
+            Data = new byte[WLength];
+            if ((BmRequestType & 0x80) == 0)
+                frame.AsSpan(8, WLength).CopyTo(Data);
+        }
+    }
+
+    /// <summary>The asks one control step gets on the pipe currently in hand: the transfer itself, then — only for a
+    /// step the recording shows as accepted — the re-asks that <see cref="CtrlProbeRetries"/> allows, because a
+    /// stalled control endpoint clears at the next SETUP. A no-answer is not a stall: that pipe cannot carry another
+    /// ask, so the budget stops there and the caller decides whether the face is worth reclaiming.</summary>
+    private async Task<(int Rc, int Attempts)> AskCtrlAsync(CtrlAsk ask, int index, bool recordedAsAccepted,
+        CancellationToken ct)
+    {
+        if (_transport is not IMtkControlTransport control)
+            throw new MtkDaProtocolException("Step " + index + " is a recorded endpoint-zero control transfer, but " +
+                _transport.Description + " cannot send one — only a raw-USB pipe replays control steps. The recipe " +
+                "cannot run on this pipe, so the boot was stopped before anything was sent.");
+
+        int rc = await AskOnceAsync(control, ask, index, ct).ConfigureAwait(false);
+        int attempts = 1;
+        while (rc < 0 && rc != MtkNativeBench.CtrlNoAnswer && attempts < CtrlProbeRetries && recordedAsAccepted)
+        {
+            await Task.Delay(CtrlProbeRetryMs, ct).ConfigureAwait(false);
+            rc = await AskOnceAsync(control, ask, index, ct).ConfigureAwait(false);
+            attempts++;
+        }
+        return (rc, attempts);
+    }
+
+    /// <summary>One control transfer, given its own timeout plus <see cref="CtrlProbeAskSlackMs"/> of wall clock to
+    /// come back. An ask that outlives that is reported as no answer and left in flight on purpose: the libusb
+    /// transfer behind it only finishes when the device returns or the process ends, and a boot that waits on it is a
+    /// boot the operator has no way to stop but closing the window. What it eventually says is still worth knowing, so
+    /// the abandoned transfer is watched rather than dropped (<see cref="ReportLateAsk"/>).</summary>
+    private async Task<int> AskOnceAsync(IMtkControlTransport control, CtrlAsk ask, int index, CancellationToken ct)
+    {
+        DateTime submittedUtc = DateTime.UtcNow;
+        Task<int> transfer = Task.Run(() =>
+        {
+            try
+            {
+                return control.ControlTransfer(ask.BmRequestType, ask.BRequest, ask.WValue, ask.WIndex, ask.Data,
+                    CtrlProbeTimeoutMs);
+            }
+            catch (Exception ex) when (ex is not MtkDaProtocolException)
+            {
+                throw new MtkDaProtocolException("Step " + index + ": the control transfer " + Hex(ask.Frame) +
+                    " could not be delivered (" + ex.GetType().Name + ": " + ex.Message + ").") { TransportFailure = true };
+            }
+        }, ct);
+
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(CtrlProbeTimeoutMs + CtrlProbeAskSlackMs);
+        try
+        {
+            return await transfer.WaitAsync(budget.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Nobody is waiting for this ask any more, but its thread is still inside the driver. Keep watching it for
+            // the one number the boot cannot otherwise produce: how long the device really took with our request.
+            _ = transfer.ContinueWith(t => ReportLateAsk(ask, index, submittedUtc, t), CancellationToken.None,
+                TaskContinuationOptions.None, TaskScheduler.Default);
+            return MtkNativeBench.CtrlNoAnswer;
+        }
+    }
+
+    /// <summary>What an abandoned endpoint-zero ask eventually came back with, in its own log line. The boot has moved
+    /// on, so this is evidence about the phone rather than a decision: RUN B6-3 (2026-11-03 15:26:57) put the MT6877's
+    /// post-payload SET_LINE_CODING on the wire 1 ms after the payload's ack — the same instant the recorded boot sent
+    /// its own — and got nothing back within 3 s, while the recorded boot was answered at 1,004 ms. Whether the device
+    /// never took the request or took it after we stopped listening is the difference between a phone problem and a
+    /// wait problem, and only the transfer still in flight can say. It never throws and never changes the boot.</summary>
+    private void ReportLateAsk(CtrlAsk ask, int index, DateTime submittedUtc, Task<int> transfer)
+    {
+        string outcome;
+        try
+        {
+            outcome = transfer.IsFaulted
+                ? transfer.Exception?.InnerException is Exception inner
+                    ? inner.GetType().Name + ": " + inner.Message
+                    : "the ask failed"
+                : CtrlResult(transfer.Result);
+        }
+        catch (Exception ex)
+        {
+            outcome = "reading its result threw " + ex.GetType().Name;
+        }
+        try
+        {
+            Say(" [ ] BROM step " + index + ": the ask " + Hex(ask.Frame) + " that was left in flight came back " +
+                (int)(DateTime.UtcNow - submittedUtc).TotalMilliseconds + " ms after it was submitted — " + outcome +
+                ". The boot had already stopped waiting on it, so this is what the device did with the request, not a " +
+                "change to what the boot did next.");
+        }
+        catch { /* a late line is evidence; it is never allowed to become a failure */ }
+    }
+
     private static string CtrlResult(int rc) =>
-        rc < 0 ? "libusb " + rc + " (" + MtkNativeBench.UsbErrorText(rc) + ")" : rc + " byte(s)";
+        rc == MtkNativeBench.CtrlNoAnswer ? "no answer (the transfer never completed)"
+        : rc < 0 ? "libusb " + rc + " (" + MtkNativeBench.UsbErrorText(rc) + ")" : rc + " byte(s)";
 
     private void TraceCtrl(int index, byte[] frame, int rc, int attempts = 1)
     {
@@ -995,13 +1179,18 @@ internal sealed partial class MtkDaSession : IDisposable
             _transport.Write(payload, offset + sent, Math.Min(TransportWritePieceSize, count - sent));
     }
 
-    /// <summary>Write a bare command id frame (u32le id, no argument).</summary>
-    internal void WriteCommand(uint id)
-    {
-        RequireReady();
-        byte[] frame = MtkDaFrame.Command(id);
-        _transport.Write(frame, 0, frame.Length);
-    }
+    /// <summary>
+    /// Write a bare command id frame (u32le id, no argument) as the two writes the wire shows: the 12-byte header,
+    /// then the 4-byte id.
+    ///
+    /// The boundary, not the bytes, is what matters. RUN B6-4 (2026-11-03 16:03) booted MT6877 to a live DA and the
+    /// replayed recipe was answered by that DA seventeen times over — every one of them a header and an id sent as
+    /// separate writes — while the first command the live layer sent, the same 0x10009 word merged into one 16-byte
+    /// write, was answered with silence until the read timed out. The mt6765 DA takes the merged frame, which is why
+    /// RUN 43-49 never showed this; the recording of that boot sends two writes too, so the split shape is the one
+    /// measured accepted on both chipsets.
+    /// </summary>
+    internal void WriteCommand(uint id) => WriteFrame(MtkDaFrame.Word(id));
 
     /// <summary>Read one DA frame: the 12-byte header and exactly the payload it declares.</summary>
     internal Task<DaReply> ReadFrameAsync(CancellationToken ct) => ReadFrameAsync("DA frame", ct);
@@ -1034,13 +1223,10 @@ internal sealed partial class MtkDaSession : IDisposable
         return MtkDaFrame.ReadUInt32Little(frame.Payload);
     }
 
-    /// <summary>The host ack that follows every DA data frame (a u32le zero, sent as its own frame).</summary>
-    internal void WriteAck()
-    {
-        RequireReady();
-        byte[] ack = MtkDaFrame.Ack();
-        _transport.Write(ack, 0, ack.Length);
-    }
+    /// <summary>The host ack that follows every DA data frame (a u32le zero, sent as its own frame). Split into its
+    /// two writes for the same reason as <see cref="WriteCommand"/>: not one frame in either recording — 51 command
+    /// headers on the mt6765 wire, 51 on the MT6877 — goes out merged with its payload.</summary>
+    internal void WriteAck() => WriteFrame(MtkDaFrame.Word(0));
 
     internal readonly record struct DaReply(byte[] Header, byte[] Payload)
     {

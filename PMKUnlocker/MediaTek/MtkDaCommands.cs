@@ -93,6 +93,15 @@ internal sealed partial class MtkDaSession
     internal static readonly IReadOnlyCollection<string> NeverProgramNames =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "pgpt", "sgpt", "gpt", "otp", "flashinfo" };
 
+    /// <summary>
+    /// Names the live session may read but never program. seccfg carries the bootloader lock policy, and the only
+    /// bytes ever measured on it are a READ of its config-block head — an unlock WRITE has never been captured,
+    /// because the unit that produced the recipe was already unlocked. Writing unmeasured bytes here does not fail
+    /// loudly, it changes lock policy, so the partition stays read-only until a capture names the payload.
+    /// </summary>
+    internal static readonly IReadOnlyCollection<string> ReadOnlyPayloadNames =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MtkSeccfg.PartitionName };
+
     private bool _opInFlight;
     private string _currentOp;
 
@@ -125,6 +134,12 @@ internal sealed partial class MtkDaSession
     /// <summary>
     /// 0x10009 + 0x40001: storage type, block size and area sizes. The block size is what turns GPT LBAs
     /// into the byte offsets the DA wants, so nothing here works without it.
+    ///
+    /// A DA behind a UFS disk answers 0x40001 with 104 zero bytes (RUN B6 measured it, and our own live session
+    /// on the MT6877 got the same). The working client does not stop there: it asks 0x40004 and reads the
+    /// geometry out of that. Which reply is which is decided by the reply's own shape — 104 bytes opening with
+    /// the eMMC region word, or 208 bytes opening with the UFS one — never by a chipset table, so an
+    /// unrecognised reply is still refused rather than decoded into something plausible.
     /// </summary>
     internal async Task<MtkStorageInfo> QueryStorageAsync(CancellationToken ct, bool refresh = false)
     {
@@ -135,9 +150,33 @@ internal sealed partial class MtkDaSession
         await ReadStatusAsync("STORAGE accept", ct).ConfigureAwait(false);
         DaReply data = await ReadFrameAsync("STORAGE reply", ct).ConfigureAwait(false);
         await ReadStatusAsync("STORAGE close", ct).ConfigureAwait(false);
-        Storage = MtkStorageInfo.Parse(data.Payload);
+
+        Storage = MtkStorageInfo.IsDescriptorShape(data.Payload)
+            ? MtkStorageInfo.Parse(data.Payload)
+            : await QueryUfsGeometryAsync(ct, data.Payload.Length).ConfigureAwait(false);
         Say("    DA storage: " + Storage.Describe);
         return Storage;
+    }
+
+    /// <summary>
+    /// The second geometry query, sent only when 0x40001 answered in a shape that is not the eMMC descriptor:
+    /// the same preamble + command + status + frame + status shape, with 0x40004 in place of 0x40001.
+    /// </summary>
+    private async Task<MtkStorageInfo> QueryUfsGeometryAsync(CancellationToken ct, int descriptorLength)
+    {
+        Say("    0x40001 answered " + descriptorLength + " byte(s) in a shape that is not the eMMC descriptor — " +
+            "asking 0x40004, the geometry reply the UFS capture answers with.");
+        await RunPreambleAsync("ufs geometry", ct).ConfigureAwait(false);
+        WriteCommand(MtkDaCommand.UfsGeometry);
+        await ReadStatusAsync("UFS GEOMETRY accept", ct).ConfigureAwait(false);
+        DaReply data = await ReadFrameAsync("UFS GEOMETRY reply", ct).ConfigureAwait(false);
+        await ReadStatusAsync("UFS GEOMETRY close", ct).ConfigureAwait(false);
+        if (!MtkStorageInfo.IsUfsGeometryShape(data.Payload))
+            throw new MtkDaProtocolException("Neither geometry reply this session can read: 0x40001 sent " +
+                descriptorLength + " byte(s) that is not the 104-byte eMMC descriptor, and 0x40004 sent " +
+                data.Payload.Length + " byte(s) that is not the 208-byte UFS geometry. No offset is derived from " +
+                "a layout that has not been measured.");
+        return MtkStorageInfo.ParseUfs(data.Payload);
     }
 
     /// <summary>The 0x10009 preamble: no arguments, always answered with status 0, opens every read and write group.</summary>
@@ -196,12 +235,12 @@ internal sealed partial class MtkDaSession
         Action<int> progress, CancellationToken ct)
     {
         RequireReady();
-        await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
+        MtkStorageInfo storage = await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
         MtkLimits limits = await QueryLimitsAsync(ct).ConfigureAwait(false);
 
         WriteCommand(MtkDaCommand.Read);
         await ReadStatusAsync("READ accept", ct).ConfigureAwait(false);
-        WriteFrame(MtkOpStruct.Create(byteOffset, byteLength));
+        WriteFrame(MtkOpStruct.Create(storage, byteOffset, byteLength));
         await ReadStatusAsync("READ extent", ct).ConfigureAwait(false);
         // Both captures carry a second status word between the accepted extent and the first data frame.
         await ReadStatusAsync("READ extent (second status)", ct).ConfigureAwait(false);
@@ -296,12 +335,12 @@ internal sealed partial class MtkDaSession
         try
         {
             if (byteLength <= 0) throw new IOException("A zero-length write was never observed on this wire.");
-            await CheckExtentAsync(byteOffset, (ulong)byteLength, ct).ConfigureAwait(false);
+            MtkStorageInfo storage = await CheckExtentAsync(byteOffset, (ulong)byteLength, ct).ConfigureAwait(false);
             MtkLimits limits = await QueryLimitsAsync(ct).ConfigureAwait(false);
 
             WriteCommand(MtkDaCommand.Write);
             await ReadStatusAsync("WRITE accept", ct).ConfigureAwait(false);
-            WriteFrame(MtkOpStruct.Create(byteOffset, (ulong)byteLength));
+            WriteFrame(MtkOpStruct.Create(storage, byteOffset, (ulong)byteLength));
             await ReadStatusAsync("WRITE extent", ct).ConfigureAwait(false);
 
             int chunkSize = (int)limits.WriteChunkSize;
@@ -383,11 +422,11 @@ internal sealed partial class MtkDaSession
         EnterOperation("erase 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x"));
         try
         {
-            await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
+            MtkStorageInfo storage = await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
 
             WriteCommand(MtkDaCommand.Erase);
             await ReadStatusAsync("ERASE accept", ct).ConfigureAwait(false);
-            WriteFrame(MtkOpStruct.Create(byteOffset, byteLength));
+            WriteFrame(MtkOpStruct.Create(storage, byteOffset, byteLength));
             await ReadStatusAsync("ERASE extent", ct).ConfigureAwait(false);
 
             Say("[*] ERASE 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x") + " — waiting for the DA's report words.");
@@ -600,6 +639,11 @@ internal sealed partial class MtkDaSession
         if (NeverProgramNames.Contains(name))
             throw new IOException("'" + name + "' is table or chip identity — never " + pastParticiple +
                 " through a live session. Nothing was sent to the device.");
+        if (ReadOnlyPayloadNames.Contains(name))
+            throw new IOException("'" + name + "' holds the bootloader lock policy and its program payload has " +
+                "never been measured on this bench — " + pastParticiple + " through a live session is refused, " +
+                "because unmeasured bytes change the lock state silently instead of failing. Nothing was sent to " +
+                "the device. Seccfg State still reads it, and the mtkclient seccfg flows are unaffected.");
     }
 
     // ---- shared guards -------------------------------------------------------------------------------
@@ -608,8 +652,9 @@ internal sealed partial class MtkDaSession
     /// Block alignment and capacity, checked against what the DA itself reported. An offset that is not a
     /// whole block would be silently rounded by the device, and an extent past the end of the user area would
     /// read as garbage or land in a hardware partition — neither is worth discovering after the port is open.
+    /// The geometry is returned because the extent struct is framed with this unit's own region/field pair.
     /// </summary>
-    private async Task CheckExtentAsync(ulong byteOffset, ulong byteLength, CancellationToken ct)
+    private async Task<MtkStorageInfo> CheckExtentAsync(ulong byteOffset, ulong byteLength, CancellationToken ct)
     {
         if (byteLength == 0) throw new IOException("A zero-length extent was never observed on this wire.");
         MtkStorageInfo storage = await QueryStorageAsync(ct).ConfigureAwait(false);
@@ -621,6 +666,7 @@ internal sealed partial class MtkDaSession
         if (byteOffset + byteLength > storage.UserAreaSize)
             throw new IOException("Extent 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x") +
                 " runs past the end of the user area (" + storage.UserAreaSize + " byte(s)).");
+        return storage;
     }
 
     private void EnterOperation(string what)
