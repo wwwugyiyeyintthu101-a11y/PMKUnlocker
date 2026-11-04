@@ -3,7 +3,7 @@
 **Status date: 2026-11-04.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **735 checks** in the working tree (722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `HEAD 7bc88a5`).
+- `tests/Regression`: **735 checks**, committed as `c93ea36` (722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
 - Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
@@ -281,7 +281,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 735 after the B6.7 auto-pipe wiring (722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 735 at `c93ea36` (722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
