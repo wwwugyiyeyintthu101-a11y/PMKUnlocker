@@ -259,6 +259,7 @@ internal sealed partial class MtkDaSession
         RequireReady();
         MtkStorageInfo storage = await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
         MtkLimits limits = await QueryLimitsAsync(ct).ConfigureAwait(false);
+        ResetReadProbe();
 
         WriteCommand(MtkDaCommand.Read);
         await ReadStatusAsync("READ accept", ct).ConfigureAwait(false);
@@ -297,6 +298,7 @@ internal sealed partial class MtkDaSession
         sink.Flush();
         Say("[+] READ 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x") + " — " + received +
             " byte(s) in " + frame + " frame(s).");
+        Say(ReadProbeLine(frame, received));
     }
 
     private static void CompareFrame(Stream source, byte[] frame, long positionSoFar)

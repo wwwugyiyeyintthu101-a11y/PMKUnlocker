@@ -2868,10 +2868,27 @@ try
         "MTK B3 READ: progress advances per frame rather than per byte, so a long read shows real movement instead of stuttering");
     Check(rLines.Any(l => l.Contains("READ 0x5b280000 + 0x1000 — 4096 byte(s) in 4 frame(s)")),
         "MTK B3 READ: the operator is told the byte count and the frame count that produced it");
+
+    // The read-path probe (2026-11-05, after PMK's "အရမ်းကြာ" on the NV backup). A real read costs 0.41 s per
+    // 64 KiB frame while an 8 MiB write commits in 3 s, so the wait is host-side until proved otherwise — and the
+    // only way to fix the right half is to have the extent say how many passes it made, how many found nothing,
+    // and how many milliseconds went to the transport versus to our own sleep.
+    var readProbe = System.Text.RegularExpressions.Regex.Match(
+        rLines.Last(l => l.Contains("Read probe")),
+        @"(\d+) frame\(s\), (\d+) B — (\d+) read attempt\(s\), (\d+) empty wait\(s\), transport (\d+) ms, our delay (\d+) ms");
+    Check(readProbe.Success && readProbe.Groups[1].Value == "4" && readProbe.Groups[2].Value == "4096",
+        "MTK B7 READ probe: the probe line carries this extent's own frame and byte count, not a session total");
+    Check(readProbe.Success && int.Parse(readProbe.Groups[3].Value) >= 4 && readProbe.Groups[4].Value == "0",
+        "MTK B7 READ probe: a scripted device with bytes ready on every pass charges zero empty waits, so a real " +
+        "run's waits are genuinely the DA's pacing and not our own polling");
     int afterRead = rDev.Writes.Count;
     rDev.Append(ReadGroup(Filler(0x5A, 1024), Filler(0x5A, 1024), Filler(0x5A, 1024), Filler(0x5A, 1024)));
     byte[] secondRead = await rSes.ReadExtentAsync(LogoAt, LogoLen);
     Check(secondRead.All(b => b == 0x5A), "MTK B3 READ: a second extent on the same session reads the device, not the previous answer");
+    Check(System.Text.RegularExpressions.Regex.Match(rLines.Last(l => l.Contains("Read probe")),
+            @"(\d+) read attempt\(s\)").Groups[1].Value == readProbe.Groups[3].Value,
+        "MTK B7 READ probe: the counters reset per extent — a second identical read reports the same attempt count " +
+        "instead of accumulating, so the numbers describe the read the operator is waiting for");
     CheckFrames(SentFrames(rDev, afterRead), "MTK B3 READ: a repeat read sends no preamble and no queries — the cable was touched once",
         ReadCmd, LogoStruct, ZeroWord, ZeroWord, ZeroWord, ZeroWord);
     rSes.Dispose();

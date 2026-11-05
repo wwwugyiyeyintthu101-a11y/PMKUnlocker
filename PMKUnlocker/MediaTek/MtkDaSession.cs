@@ -1105,6 +1105,27 @@ internal sealed partial class MtkDaSession : IDisposable
         }
     }
 
+    // ---- read-path probe -----------------------------------------------------------------------------
+    //
+    // PMK's word on the 2026-11-05 NV backup was that it crawls, and the log backs him with numbers: 8 MiB read in
+    // 53 s (RUN 43/44/45, three separate reads) and 64 MiB in 420 s — 0.41 s per 64 KiB frame every time, while an
+    // 8 MiB WRITE on the same session commits in 3 s. So the phone is not the limit; a per-frame wait is. These
+    // counters split that wait into the time spent inside the transport call (the DA's own pacing) and the time
+    // spent in our own sleep, so the fix targets whichever is real instead of a guess.
+    private long _probeAttempts, _probeEmptyWaits, _probeTransportMs, _probeDelayMs;
+
+    internal void ResetReadProbe()
+    {
+        _probeAttempts = 0;
+        _probeEmptyWaits = 0;
+        _probeTransportMs = 0;
+        _probeDelayMs = 0;
+    }
+
+    internal string ReadProbeLine(long frames, long bytes) =>
+        "[*] Read probe: " + frames + " frame(s), " + bytes + " B — " + _probeAttempts + " read attempt(s), " +
+        _probeEmptyWaits + " empty wait(s), transport " + _probeTransportMs + " ms, our delay " + _probeDelayMs + " ms.";
+
     private async Task<byte[]> ReadAsync(int count, int timeoutMs, int index, MtkReplyKind kind, CancellationToken ct) =>
         await ReadCoreAsync(count, timeoutMs, "Step " + index + " (" + kind + ")", ct).ConfigureAwait(false);
 
@@ -1120,16 +1141,22 @@ internal sealed partial class MtkDaSession : IDisposable
         while (got < count)
         {
             ct.ThrowIfCancellationRequested();
+            var transportClock = System.Diagnostics.Stopwatch.StartNew();
             int available = _transport.BytesAvailable;
-            if (available > 0)
-            {
-                int read = _transport.Read(buffer, got, Math.Min(count - got, available));
-                if (read > 0) got += read;
-            }
+            int read = available > 0 ? _transport.Read(buffer, got, Math.Min(count - got, available)) : 0;
+            _probeTransportMs += transportClock.ElapsedMilliseconds;
+            _probeAttempts++;
+            if (read > 0) got += read;
             if (got >= count) return buffer;
-            if (DateTime.UtcNow >= deadline)
-                break;
+            if (DateTime.UtcNow >= deadline) break;
+            // The old loop slept after every pass, progress included: a 64 KiB frame that the DA delivers in
+            // several bulk transfers paid a ~15 ms sleep between each one, and a frame is 64 KiB by the DA's own
+            // advertised transfer size. Sleeping now only hides the case where the port actually had nothing.
+            if (read > 0) continue;
+            _probeEmptyWaits++;
+            var delayClock = System.Diagnostics.Stopwatch.StartNew();
             await Task.Delay(10, ct).ConfigureAwait(false);
+            _probeDelayMs += delayClock.ElapsedMilliseconds;
         }
         throw new MtkDaProtocolException(what + ": timed out after " + timeoutMs +
             " ms waiting for " + count + " byte(s); got " + got + (got > 0 ? " (" + Hex(buffer[..got]) + ")" : "") +
