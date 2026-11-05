@@ -170,10 +170,6 @@ public partial class Form1
         btnMtkMiCloud.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("persist", "[OK] Persist erased — Mi Cloud / account data cleared.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
         if (toolTipMain != null) Tip(btnMtkMiCloud, "mtkclient e persist + reset in ONE session — Xiaomi Mi Cloud / Mi Account removal.");
 
-        Button btnMtkNvReset = Create3DButton("📶 NV Reset", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Cyan);
-        btnMtkNvReset.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("nvdata", "[OK] NV data erased — IMEI/baseband reset. Restore NV backup after.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkNvReset, "mtkclient e nvdata + reset in ONE session — NV/IMEI reset. Backup NV first!");
-
         Button btnMtkSeccfgUnlock = Create3DButton("🔓 Bootloader Unlock", UiX(1), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Green);
         btnMtkSeccfgUnlock.Click += async (_, _) => { try { await SeccfgAutoPatchAsync(true); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
         if (toolTipMain != null) Tip(btnMtkSeccfgUnlock, "Native da seccfg unlock + cached patch fallback + reset in ONE session (single plug cycle), auto-retry once.");
@@ -183,7 +179,7 @@ public partial class Form1
         if (toolTipMain != null) Tip(btnMtkSeccfgLock, "Native da seccfg lock + cached patch fallback + reset in ONE session (single plug cycle), auto-retry once.");
 
         Panel grpUnlock = CreateGroupPanel("UNLOCK / REPAIR", UiX(0), UiY(0), 3, btnMtkFrpRemove, btnMtkUserlockRemove, btnMtkMiCloud);
-        Panel grpUnlock2 = CreateGroupPanel("NV / SECURE BOOT", UiX(0), UiY(2), 3, btnMtkNvReset, btnMtkSeccfgUnlock, btnMtkSeccfgLock);
+        Panel grpUnlock2 = CreateGroupPanel("SECURE BOOT (SECCFG)", UiX(0), UiY(2), 2, btnMtkSeccfgUnlock, btnMtkSeccfgLock);
 
         Button btnMtkNvBackup = Create3DButton("📂 NV Backup", UiX(0), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Cyan);
         btnMtkNvBackup.Click += async (_, _) =>
@@ -199,17 +195,30 @@ public partial class Form1
                 };
                 if (pick.ShowDialog(this) != DialogResult.OK) return;
                 SetMtkSetting(MtkNvBackupRootKey, pick.SelectedPath);
-                await NvBackupAsync(pick.SelectedPath);
+                // One NV backup button, one folder shape. A live session reads the six in one boot; without one the
+                // mtkclient route still reads them in ONE session (`multi`), not one boot per partition.
+                if (nativeDa != null) await NativeGuarded("NV backup", () => NativeBackupAsync(true, pick.SelectedPath));
+                else await NvBackupAsync(pick.SelectedPath);
             }
             catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
         };
-        if (toolTipMain != null) Tip(btnMtkNvBackup, "Read nvram/nvdata/nvcfg/proinfo/protect1/protect2 in ONE session (one plug cycle) — destination folder is picked (remembered for next time), timestamp subfolder inside.");
+        if (toolTipMain != null) Tip(btnMtkNvBackup, "nvram/nvdata/nvcfg/proinfo/protect1/protect2 in ONE session — through the live native DA when one is open, otherwise one mtkclient session. Destination root is picked (remembered for next time), timestamp subfolder inside, manifest + SHA-256 recorded.");
 
         Button btnMtkNvRestore = Create3DButton("⬆️ NV Restore", UiX(1), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkNvRestore.Click += async (_, _) => { try { await NvRestoreAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
         if (toolTipMain != null) Tip(btnMtkNvRestore, "NV backup folder → write + reset in ONE plug cycle. Sizes pre-checked against cached GPT; otherwise printgpt in the same run verifies them.");
 
-        Button btnMtkNvErase = Create3DButton("🗑 NV Erase", UiX(2), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Red);
+        Button btnMtkNvReset = Create3DButton("📶 NV Reset", UiX(0), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Cyan);
+        btnMtkNvReset.Click += async (_, _) =>
+        {
+            // The same confirmation NV Erase asks for. This one erases a single partition, but it still cannot be
+            // undone from the PC without an NV backup, and the operator should see which five are NOT touched.
+            if (MessageBox.Show(this, "Reset NV data?\n\nErases: nvdata (only).\nNot touched: nvram, nvcfg, proinfo, protect1, protect2.\n\nThe modem rebuilds nvdata on the next boot. If this device carried a patched NV, restore an NV backup afterwards.", "NV Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("nvdata", "[OK] NV data erased — IMEI/baseband reset. Restore NV backup after.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
+        };
+        if (toolTipMain != null) Tip(btnMtkNvReset, "mtkclient e nvdata + reset in ONE session — erases nvdata ONLY (nvram/nvcfg/proinfo/protect1/protect2 untouched). Run NV Backup first.");
+
+        Button btnMtkNvErase = Create3DButton("🗑 NV Erase", UiX(1), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Red);
         btnMtkNvErase.Click += async (_, _) =>
         {
             if (MessageBox.Show(this, "Erase ALL NV partitions?\n\n" + string.Join(", ", NvPartitions) + "\n\nIMEI/baseband will be lost — restore an NV backup afterwards.", "NV Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
@@ -217,7 +226,10 @@ public partial class Form1
         };
         if (toolTipMain != null) Tip(btnMtkNvErase, "mtkclient e nvram,nvdata,nvcfg,proinfo,protect1,protect2 + reset in ONE session. DESTRUCTIVE — backup first.");
 
-        Panel grpNv = CreateGroupPanel("NV BACKUP / RESTORE / ERASE", UiX(0), UiY(4), 3, btnMtkNvBackup, btnMtkNvRestore, btnMtkNvErase);
+        Panel grpNv = CreateGroupPanel("NV BACKUP / RESTORE", UiX(0), UiY(4), 2, btnMtkNvBackup, btnMtkNvRestore);
+        // The two wipes sit in their own frame, side by side with the frames above: NV Reset is one partition
+        // (nvdata), NV Erase is all six. Same row, so the tab height the other tabs use is unchanged.
+        Panel grpNvWipe = CreateGroupPanel("NV RESET / ERASE (DESTRUCTIVE)", UiX(0) + 2 * UiColStep + 25, UiY(4), 2, btnMtkNvReset, btnMtkNvErase);
 
         Button btnMtkImeiRead = Create3DButton("📱 IMEI Read (NV)", UiX(0), UiY(6), UiBtnW, UiBtnH, ButtonTheme.Cyan);
         btnMtkImeiRead.Click += async (_, _) => { try { await ReadImeiFromBackupAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
@@ -227,7 +239,10 @@ public partial class Form1
         btnMtkFormatAll.Click += async (_, _) => { try { await FormatAllAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
         if (toolTipMain != null) Tip(btnMtkFormatAll, "Erase OS + user data partitions (whitelist ∩ live GPT) + reset in ONE session. Bootchain (preloader/lk/uboot/tee), seccfg and NV/IMEI are kept. Phone will not boot — reflash full firmware afterwards.");
 
-        Panel grpImeiFormat = CreateGroupPanel("IMEI READ / FORMAT ALL", UiX(0), UiY(6), 2, btnMtkImeiRead, btnMtkFormatAll);
+        // Two frames, same 325 px width and gutter as the NV row above: a 1-column frame is 170 px, and at
+        // Segoe UI 8.5 Bold these titles measure 161 and 167 px — the closing bracket gets clipped.
+        Panel grpImeiRead = CreateGroupPanel("IMEI READ (FROM BACKUP)", UiX(0), UiY(6), 2, btnMtkImeiRead);
+        Panel grpFormatAll = CreateGroupPanel("FORMAT ALL (DESTRUCTIVE)", UiX(0) + 2 * UiColStep + 25, UiY(6), 2, btnMtkFormatAll);
 
         // ---- IMEI Write (da imei --write wiring) ----
         Panel grpImeiWrite = new()
@@ -252,13 +267,13 @@ public partial class Form1
         var lblImeiCssd = new Label { Text = "CSSD (RSA-signed) devices not re-signed — LD0B devices only", Location = new Point(630, 34), AutoSize = false, Size = new Size(240, 28), ForeColor = Color.FromArgb(255, 170, 60), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
         grpImeiWrite.Controls.AddRange(new Control[] { lblImeiWriteTitle, lblImei1, txtImei1, lblImei2, txtImei2, btnMtkImeiWrite, lblImeiCssd });
 
-        unlockTab.Controls.AddRange(new Control[] { grpUnlock, grpUnlock2, grpNv, grpImeiFormat, grpImeiWrite });
+        unlockTab.Controls.AddRange(new Control[] { grpUnlock, grpUnlock2, grpNv, grpNvWipe, grpImeiRead, grpFormatAll, grpImeiWrite });
 
         Label lblUnlockHint = new()
         {
             Location = new Point(UiX(0), UiY(10)),
             Size = new Size(850, 30),
-            Text = "Bootloader Unlock/Relock and all erase ops run in ONE mtkclient session (native + fallback + reset) — one unplug/plug per operation, auto-retry once on failure. Backup NV before NV Erase/NV Reset. Format All erases OS + user data but keeps bootchain, seccfg and NV/IMEI. IMEI Read scans a saved NV backup (no device needed). IMEI Write uses mtkclient da imei (LD0B devices only).",
+            Text = "Every op runs in ONE mtkclient session (native + fallback + reset) — one plug cycle, auto-retry once. NV Reset erases nvdata only; NV Erase wipes all six NV — run NV Backup first. Format All erases OS + user data, keeps bootchain/seccfg/NV. IMEI Read works offline from a backup.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 7.5f),
             AutoEllipsis = true
@@ -270,23 +285,24 @@ public partial class Form1
         Button btnMtkBackup = Create3DButton("💾 Backup Selected", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
         btnMtkBackup.Click += async (_, _) => { try { await BackupMediaTekAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
 
-        Button btnMtkBackupNv = Create3DButton("📂 Backup NV", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
-        btnMtkBackupNv.Click += async (_, _) => { try { await BackupMediaTekAsync(true); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-
-        Button btnMtkRestore = Create3DButton("⬆️ Restore Image", UiX(2), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
+        // The NV set has one button, on the UNLOCK tab, beside the NV Restore / NV Erase it feeds. It used to sit here
+        // too, as a second route to the same six partitions with a second folder shape.
+        Button btnMtkRestore = Create3DButton("⬆️ Restore Image", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkRestore.Click += async (_, _) => { try { await RestoreMediaTekImageAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
 
-        Panel grpBackup = CreateGroupPanel("BACKUP / RESTORE", UiX(0), UiY(0), 3, btnMtkBackup, btnMtkBackupNv, btnMtkRestore);
+        Panel grpBackup = CreateGroupPanel("BACKUP / RESTORE", UiX(0), UiY(0), 2, btnMtkBackup, btnMtkRestore);
         backupTab.Controls.Add(grpBackup);
 
         Label lblBackupHint = new()
         {
-            Location = new Point(UiX(0), UiY(1) + 10),
+            // Below the frame, not inside it: the group panel is added first, so index 0 puts it on top of a label
+            // that starts within its width, and the first words of the hint are painted over.
+            Location = new Point(UiX(0), UiY(0) + 74),
             Size = new Size(850, 40),
-            Text = "Read Info first, then tick partitions in FLASH tab. Backups are checked against live partition sizes and stored in a new folder. Restore writes one selected USER partition (exact-size raw backup only).",
+            Text = "Tick partitions on the FLASH tab, then Backup Selected. Backups are checked against live partition sizes and stored in a new folder. Restore writes one selected USER partition (exact-size raw backup only). The six NV partitions have their own button on the UNLOCK tab.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
-            AutoEllipsis = true
+            AutoEllipsis = false
         };
         backupTab.Controls.Add(lblBackupHint);
 
@@ -1637,17 +1653,14 @@ public partial class Form1
         if (!Directory.EnumerateFiles(dir).Any(f => new FileInfo(f).Length > 0)) throw new IOException("GPT backup files were not produced.");
         Log("[OK] GPT files saved: " + dir, Color.LightGreen);
     });
-    private Task BackupMediaTekAsync() => BackupMediaTekAsync(false);
-    private Task BackupMediaTekAsync(bool nvOnly) => nativeDa != null
-        // The batched client needs one full boot per partition — six NV partitions is six boots, about three and a
-        // half minutes of replugging. A live session reads them all in one, through the framing the dump button
-        // already proved.
-        ? NativeGuarded("partition backup", () => NativeBackupAsync(nvOnly))
+    private Task BackupMediaTekAsync() => nativeDa != null
+        // The batched client pays one full boot per partition; a live session reads them all in one, through the
+        // framing the dump button already proved.
+        ? NativeGuarded("partition backup", () => NativeBackupAsync(false))
         : RunMediaTekWorkflowAsync(async () =>
     {
         var selected = SelectedMediaTekNames();
         var table = await GetMediaTekTableAsync();
-        if (nvOnly) selected = table.Where(p => new[] { "nvram", "nvdata", "nvcfg", "proinfo", "protect1", "protect2" }.Contains(p.Name)).Select(p => p.Name).ToList();
         if (selected.Count == 0) throw new InvalidOperationException("Select partitions in Flash first.");
         using var pick = new FolderBrowserDialog { Description = "Select backup destination" };
         if (pick.ShowDialog(this) != DialogResult.OK) return;

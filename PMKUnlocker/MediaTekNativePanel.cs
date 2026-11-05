@@ -866,8 +866,13 @@ public partial class Form1
     /// <see cref="ShopServices"/> call, so a native backup restores through the existing restore path unchanged.
     /// Every extent comes from the device's own GPT, and the sizes the manifest records are the same extents the
     /// reads were addressed with.
+    /// <para>
+    /// <paramref name="destRoot"/> is the NV caller's remembered root: an NV backup always lands in
+    /// <c>&lt;root&gt;\&lt;timestamp&gt;</c>, the shape <c>NV Restore</c> opens on, whether it was read natively or
+    /// through mtkclient. Null means ask for a folder and name it <c>MTK-&lt;guid&gt;</c> — the ad-hoc backup shape.
+    /// </para>
     /// </summary>
-    private async Task NativeBackupAsync(bool nvOnly)
+    private async Task NativeBackupAsync(bool nvOnly, string destRoot = null)
     {
         RequireNativeSession();
         // No ConfigureAwait here on purpose: the folder dialog below has to run on the UI thread, and this is the
@@ -883,7 +888,12 @@ public partial class Form1
         if (layout == null) throw new InvalidOperationException(refusal);
 
         string dir;
-        using (var pick = new FolderBrowserDialog { Description = "Select backup destination" })
+        if (destRoot != null)
+        {
+            dir = Path.Combine(destRoot, DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            Directory.CreateDirectory(dir);
+        }
+        else using (var pick = new FolderBrowserDialog { Description = "Select backup destination" })
         {
             if (pick.ShowDialog(this) != DialogResult.OK)
             {
