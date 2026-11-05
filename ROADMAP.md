@@ -3,7 +3,7 @@
 **Status date: 2026-11-04.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **735 checks**, committed as `c93ea36` (722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
+- `tests/Regression`: **739 checks** (735 at `c93ea36`, +4 for the B6.10 walk-timing marks; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
 - Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
@@ -118,7 +118,7 @@
 **Committed in `7bc88a5`:** `MediaTek/MtkBootProfile.cs`, `MtkDaCommands.cs`, `MtkDaSession.cs`, `MtkNativeBench.cs`, `MtkWire.cs`, `tests/Regression/Program.cs`, `ROADMAP.md`; master recipes gained `mt6877/` (profile + 5 blobs). One extra line in `MediaTekPanel.cs` (`MultiSelect = false`).
 
 **MT6877 hardware run (2026-11-04 09:19:45 → 09:25:03) — PASS**
-- BROM → DA1 (454,632 B) → DA2 (542,012 B) → DAext (16,428 B) → live DA, 34 s including one 15 s DA1 stall.
+- BROM → DA1 (454,632 B) → DA2 (542,012 B) → DAext (16,428 B) → live DA, 34 s including one 15 s DA1 stall. *(The "stall" is re-stated in B6.10: it is 21 s here, spread over 7,487 untraced steps plus two 3 s optional probes, and the phone is measured fast.)*
 - `0x40001` answered 104 bytes in a non-eMMC shape → `0x40004` returned type 48 (UFS), block 4096, user 255,919,652,864 B (238 GiB), boot1/2 4 MiB, rpmb 0.
 - Limits 0x200000 / 0x10000; READ 4 KiB and 16 KiB came back; live GPT listed **77 partitions** and the extents were bound to `HW 0x0959 · block 4096 · user 255919652864 · 77`.
 - Both optional line-setting asks (`SET_LINE_CODING`, `SET_CONTROL_LINE_STATE`) never completed; both were logged and stepped over on the pipe in hand, and the greet + DA upload still succeeded.
@@ -127,7 +127,7 @@
 
 **Still open**
 1. **MT6765 re-run after the split-framing change — DONE, and its write half closed on the MT6877 instead** (boot + geometry + live GPT 2026-11-04 10:42/11:12/11:15; `para` read → read determinism → write → `VERIFY OK` → independent re-read 2026-11-04 11:24–11:31, see B6.9). What is left of it is only the optional sacrificial **erase** + restore, and a 9A `para` dump if that unit specifically wants one.
-2. **15 s DA1 stall on MT6877** — wire 211 (09:20:03) → wire 212 (09:20:18). Likely 15 × 1 s armed-read timeouts or a device-side pause; the boot recovered. Measure it before calling the UFS boot's timing understood.
+2. **15 s DA1 stall on MT6877 — attributed, and the phone is exonerated** (B6.10, 2026-11-04, measured from the log and from the capture the recipe was compiled from — no phone touched). It is **20–22 s in every one of the eight recorded MT6877 boots**, and the same window on MT6765 is 1–2 s. Of that, **6 s is two named, optional CDC control probes** (steps 162/163, `CtrlProbeTimeoutMs` 2,000 + `CtrlProbeAskSlackMs` 1,000 each, answered only ~300–600 s later by the abandoned transfer); ~1 s is the steps the log does show; and the remaining **~14 s is host-side per-step cost in the window the wire trace stops printing at step 220** — 4,711 reads and 2,776 writes, ≈3 ms per read, against the reference client's measured **0.834 ms per 512-byte IN and 0.093 ms per 512-byte OUT on this same phone**. What is left is not *"is the phone slow?"* (it is not) but *"what inside 221→7708 costs the 3 ms?"*, which `WalkPhaseLine` now answers from the next boot's own log.
 3. **Docs/commit of this closure batch** (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry).
 
 **B6.6 — boot recipe = Auto (2026-11-04)**
@@ -175,6 +175,17 @@ The first write ever pushed through the native session on this chipset (RUN 44's
 - The grid Write always verifies — `verify: true` is hardcoded in `NativeGridWriteAsync`, so the FLASH tab's "Verify readback (SHA-256)" checkbox plays no part in this route, and `ConfirmText("write", …)` states the raw-bytes honesty and the smaller-image rule before the port is touched.
 - **Still owed:** the sacrificial **erase** + restore (step ဂ) — deliberately not run, because it needs PMK's separate word and leaves the extent genuinely empty for a window.
 
+**B6.10 — the MT6877 pre-DA1 wait measured without a phone (2026-11-04)**
+Open item 2 said "15 s DA1 stall", guessed at either 15 × 1 s armed-read timeouts or a device-side pause, and asked for a measurement before the UFS boot's timing could be called understood. Nothing on the bench was needed: the log already had eight boots and the capture the recipe was compiled from times the phone itself.
+- **It is not 15 s and not a stall — it is 20–22 s, every time, in a stable shape.** Payload ack → `streamed …da1.bin` across the eight MT6877 boots: 11-03 16:01 (22 s), 16:03 (22), 16:33 (22), 17:39 (22), 11-04 09:20 (22), 09:41 (21), 10:40 (20), 11:24 (21). The identical window on MT6765 is **1–2 s** in every one of its seventeen boots (10:42:34→10:42:35, 11:12:24→11:12:25, 11:16:05→11:16:06 …). A device-side pause that appears on one chipset and not the other, always the same size, is not a pause — the recipes differ by step count.
+- **6 s of it is named in the log already.** Steps 162/163 (`SET_LINE_CODING` + `SET_CONTROL_LINE_STATE` after the payload) are the optional CDC probes: `CtrlProbeTimeoutMs = 2000` + `CtrlProbeAskSlackMs = 1000` = 3 s each, `after 1 ask(s)`, stepped over. 11:23:49 → 11:23:52 → 11:23:55. The abandoned asks then report themselves ~300–600 s later (`came back 603711 ms after it was submitted — libusb -9`), which is the RUN B6-3 state, not a new one. On MT6765 the same two steps do not cost 3 s, which is why that phone's window is 1 s.
+- **The remaining ~14 s is invisible by construction.** `WireTraceSteps = 220`: the wire trace prints through step 220 and nothing after, so 11:23:56 (wire 220) → 11:24:10 (`streamed`) is 7,487 recipe steps with zero log lines. Those steps are **4,711 reads and 2,776 writes** for MT6877 (vs 2,837/1,420 for MT6765) — the MT6877 recipe is 7,717 BROM steps precisely because its recorded boot replays ~3,230 more wire events, and the extra ones are reads of 512 bytes each.
+- **The control measurement says the phone is fast.** In `b6-mt6877-20261103-132708.pcap` — the accepted boot this recipe was compiled from, same unit, same pipe — the reference client's two bulk upload runs are **944 OUTs completing in 0.088 s** and **1,062 OUTs in 0.159 s**, which match DA1 (454,632 / 512 = 888 chunks) and DA2 (542,012 / 512 = 1,058) in that order; its 512-byte read run is **128 INs in 0.107 s**. Per transfer that is **0.093–0.150 ms out and 0.834 ms in**. Its whole capture has **no gap larger than 1.006 s** and only 2.85 s cumulative in gaps over 200 ms. So 454,632 bytes cross this pipe in a tenth of a second and the device answers a 512-byte read in under 1 ms; our ≈3 ms per read is a host cost, not the phone's. (Cross-check from the log, same conclusion from the other end: our own DA2 upload — 542,012 bytes, *bigger* than DA1 — takes **1 s** once the DA is live.)
+- **So the two guesses in the old item were both wrong, in opposite directions:** not 15 × 1 s of armed-read timeouts (that would show as many ~1 s gaps; the log shows one 14 s block), and not a device-side pause (the accepted boot on the same phone has no such pause). It is the per-step cost of a read-dominated replay, plus 6 s of optional probes this chipset never answers.
+- **Instrumented rather than guessed.** `MtkNativeBench.WalkPhaseLine` prints one mark where the trace goes quiet — `[*] Walk timing: 7708/7717 step(s) in 14123 ms (4711 read(s), 2776 write(s), 220 control(s)) — uploading mt6877_da1.bin now` — and `StreamedLine` appends the upload's own duration to the blob line it already printed. The mark is emitted **before** the upload so a refusal inside it cannot cost the operator the only line explaining the wait before it, and only on a hardware run (`_traceOn`), so a recorded replay stays byte-identical. No byte sent to the phone changed: `RunStageAsync` counts steps it already performed and times them.
+- Regression **739** (+4): the phase mark's wording and counters (including the all-zero case, which prints zeros rather than omitting them), and the blob line keeping its old text with only the duration added (a sub-millisecond upload must still say `in 0 ms` so the fast path remains visible as a control). Debug/Release **0/0**.
+- **Not done — and each is a decision, not a measurement:** the 6 s is still on the wire because `mt6877_boot_profile.json` records those two probes as steps the capture *saw*; skipping them is a recipe change and needs a boot re-proved on hardware. The 14 s split (libusb per-transfer overhead vs the `Task.Delay(10)` in `ReadCoreAsync` vs NAK pacing) is what the next MT6877 boot's `Walk timing` line will say. USBPcap is uninstalled with a reboot pending, so a fresh capture of our own boot is not available right now either.
+
 **Risks**
 - Leaving an abandoned control transfer in flight while continuing on the same pipe is measured (RUN B6-3) but is still the least-understood state; keep the late-ask line as evidence. On this run the abandoned ask came back 306,611 ms later, at session close.
 - `CtrlProbeTimeoutMs` is now 2,000 ms (was 1,000) — a strict refusal on a silent face can take longer than before.
@@ -186,8 +197,8 @@ The first write ever pushed through the native session on this chipset (RUN 44's
 
 ### P0 — Finish B6 (next)
 **Why:** the MT6877 half is closed and the Auto boot has run on both phones; the write half of the MT6765 re-run is the only protocol exposure left.
-**Steps:** (1) 9A write half: dump `para` and one sacrificial write/erase with readback, through the live session already open; (2) measure the 15 s DA1 stall on the MT6877 unit if it is on the bench; (3) commit this closure batch.
-**Done when:** the `para` dump and the write/erase + readback are in `native-da.log`, regression 735, Debug/Release 0/0, docs consistent.
+**Steps:** (1) 9A write half: dump `para` and one sacrificial write/erase with readback, through the live session already open; (2) ~~measure the 15 s DA1 stall on the MT6877 unit if it is on the bench~~ — **done from the log and the owned capture instead of the bench, see B6.10**; (3) commit this closure batch.
+**Done when:** the `para` dump and the write/erase + readback are in `native-da.log`, regression 739, Debug/Release 0/0, docs consistent.
 
 ### P1 — Native MTK parity for the core flows (replace mtkclient for daily work)
 **Why:** the native session already owns the phone after one plug; the remaining daily operations still shell out to `mtk.exe`.
@@ -281,7 +292,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 735 at `c93ea36` (722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 739 (735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
@@ -296,7 +307,7 @@ dotnet run --project tests/Regression/Regression.csproj
 | Recipe master | `%LOCALAPPDATA%\PMKMobileTool\mtk\boot-profiles` (`mt6765/`, `mt6877/`) |
 | NV backup used for B5.5 | `C:\Users\PMK\Desktop\New folder\20261027_165526` (6 bins + manifest, 190,701,568 B) |
 | Wire captures / spikes | `%TEMP%\mtk-da-spike\capture` (framing spec, write/erase/read transcripts, RUN B6 notes) |
-| Regression | `tests/Regression/Program.cs` (735 checks) |
+| Regression | `tests/Regression/Program.cs` (739 checks) |
 | Loader integrity | `bundled-tools/integrity.json`, `dependency-lock.json` |
 
 ---

@@ -379,6 +379,8 @@ internal sealed partial class MtkDaSession : IDisposable
     {
         byte[] lastTx = Array.Empty<byte>();
         int timeoutMs = isDa ? _daTimeoutMs : _bromTimeoutMs;
+        long reads = 0, writes = 0, controls = 0;
+        var stageClock = System.Diagnostics.Stopwatch.StartNew();
 
         // Only a hardware run has a wire worth printing; a recorded replay would print the recording back at itself.
         _traceOn = !isDa && _bromHandshake;
@@ -395,6 +397,7 @@ internal sealed partial class MtkDaSession : IDisposable
             switch (step.Kind)
             {
                 case MtkStepKind.Tx:
+                    writes++;
                     lastTx = step.Payload;
                     // The BROM stage's very first byte belongs to the proof, not to the loop: it is the one write
                     // that may have to be repeated on a re-opened pipe (RUN 18 died on exactly this byte's seventh
@@ -405,6 +408,7 @@ internal sealed partial class MtkDaSession : IDisposable
                     break;
 
                 case MtkStepKind.Rx:
+                    reads++;
                     // Step 1 is the recipe's first reply: the echo of the single read-only byte that proves the
                     // face. It is the only handshake where "not awake yet" and "wrong device" look alike, and the
                     // only one that may be asked again.
@@ -416,6 +420,12 @@ internal sealed partial class MtkDaSession : IDisposable
                     break;
 
                 case MtkStepKind.Blob:
+                    // The mark is printed before the upload, not after it: the number that matters is how long the
+                    // steps leading up to this point took, and a refusal in the upload must not cost the operator
+                    // the only line that explains the wait before it.
+                    if (_traceOn)
+                        Say(MtkNativeBench.WalkPhaseLine(index, steps.Count, stageClock.ElapsedMilliseconds,
+                            reads, writes, controls, step.BlobFile));
                     StreamBlob(step, index, ct);
                     // The reply after an upload arrives once the target has run what it just received;
                     // the capture shows this taking seconds for DA1, so the next expectation waits longer.
@@ -423,6 +433,7 @@ internal sealed partial class MtkDaSession : IDisposable
                     break;
 
                 case MtkStepKind.Ctrl:
+                    controls++;
                     await RunCtrlProbeAsync(step, index, ct).ConfigureAwait(false);
                     break;
             }
@@ -659,14 +670,16 @@ internal sealed partial class MtkDaSession : IDisposable
         byte[] image = _profile.GetBlob(step.BlobFile);
         if (image.Length == 0)
             throw new MtkDaProtocolException("Blob " + step.BlobFile + " is empty; refusing to upload it.");
+        var uploadClock = System.Diagnostics.Stopwatch.StartNew();
         for (int offset = 0; offset < image.Length; offset += step.ChunkSize)
         {
             ct.ThrowIfCancellationRequested();
             int count = Math.Min(step.ChunkSize, image.Length - offset);
             _transport.Write(image, offset, count);
         }
+        long ms = uploadClock.ElapsedMilliseconds;
         TraceTx(index, image);
-        Say("    streamed " + step.BlobFile + " (" + image.Length + " bytes)");
+        Say(MtkNativeBench.StreamedLine(step.BlobFile, image.Length, ms));
     }
 
     /// <summary>How long one recorded endpoint-zero probe waits before the boot refuses. RUN 38 shows every probe

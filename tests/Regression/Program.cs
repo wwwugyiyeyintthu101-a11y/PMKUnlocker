@@ -1631,6 +1631,24 @@ try
           "[>] Pipe: COM — power off, hold BOTH volume keys, plug in",
         "MTK pipe: a hand-picked pipe still reaches the screen as the plug-in reminder, and says which pipe it is waiting on");
 
+    // ---- B6.10: the walk timing marks --------------------------------------------------------------
+    // Every MT6877 boot so far spends 20-22 s between the payload's ack and the DA1 line, and 14 s of that sits
+    // after WireTraceSteps, where the log prints nothing. The recorded client moved the same 454,632-byte DA1
+    // through the same pipe in 0.088 s, so the phone is not the wait; these two lines are what splits a slow step
+    // sequence from a slow upload without needing a capture.
+    string phase = MtkNativeBench.WalkPhaseLine(7708, 7717, 14123, 4711, 2776, 220, "mt6877_da1.bin");
+    Check(phase.Contains("7708/7717 step(s) in 14123 ms") && phase.Contains("4711 read(s)") &&
+          phase.Contains("2776 write(s)") && phase.Contains("220 control(s)") && phase.Contains("mt6877_da1.bin"),
+        "MTK walk timing: the phase mark names the step, the elapsed time and what kind of steps produced it, so the quiet window is attributable");
+    Check(MtkNativeBench.WalkPhaseLine(0, 4486, 0, 0, 0, 0, "x.bin").Contains("0/4486 step(s) in 0 ms") &&
+          MtkNativeBench.WalkPhaseLine(0, 4486, 0, 0, 0, 0, "x.bin").Contains("0 read(s), 0 write(s), 0 control(s)"),
+        "MTK walk timing: a mark printed before any step says zero rather than omitting the counters a reader would otherwise have to infer");
+    Check(MtkNativeBench.StreamedLine("mt6877_da1.bin", 454632, 88) ==
+          "    streamed mt6877_da1.bin (454632 bytes) in 88 ms",
+        "MTK walk timing: the blob line keeps its own wording and adds only the upload duration, so a 14 s pre-blob wait cannot be mistaken for a slow upload");
+    Check(MtkNativeBench.StreamedLine("mt6765_da1_patched.bin", 237464, 0).EndsWith(" in 0 ms"),
+        "MTK walk timing: a sub-millisecond upload is reported as 0 ms instead of being dropped, so the fast path stays visible as a control");
+
     // ---- B4.33: the payload's re-open (RUN 39, 2026-11-01) --------------------------------------------
     // RUN 39's first hardware boot with the probes answered 0000 + 64281000 and the kamakiri payload ran
     // (magic a1a2a3a4 at step 165), then died on the first post-payload d1 echo. The RUN 38 capture

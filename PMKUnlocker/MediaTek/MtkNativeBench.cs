@@ -889,6 +889,26 @@ internal static class MtkNativeBench
             ? "raw USB is the pipe every recorded boot came through"
             : "no bulk face is visible while a serial face is, so the COM port is the only pipe the phone can be reached on");
 
+    /// <summary>
+    /// One phase mark of a replayed walk, printed where the wire trace goes quiet.
+    ///
+    /// <see cref="MtkDaSession"/> stops printing individual steps after <c>WireTraceSteps</c>, which is why every
+    /// MT6877 boot so far has shown a 14 s block between the last traced step and the blob line with nothing in it:
+    /// the recipe's own step count is not a duration, and the phone was already exonerated by the recorded boot
+    /// (the accepted client moved the same DA1 through the same pipe in 0.088 s). This line says what the quiet
+    /// block was made of — how many steps, how many of them reads, and how long they actually took — in one line,
+    /// so the next hardware run attributes its own wait instead of needing a capture.
+    /// </summary>
+    internal static string WalkPhaseLine(int index, int total, long elapsedMs, long reads, long writes,
+        long controls, string nextBlob) =>
+        "[*] Walk timing: " + index + "/" + total + " step(s) in " + elapsedMs.ToString() + " ms (" +
+        reads + " read(s), " + writes + " write(s), " + controls + " control(s)) — uploading " + nextBlob + " now";
+
+    /// <summary>The same mark for one blob's own upload, appended to the line that names it, so a reader can tell
+    /// a slow step sequence apart from a slow transfer without a second instrument.</summary>
+    internal static string StreamedLine(string blobFile, int bytes, long elapsedMs) =>
+        "    streamed " + blobFile + " (" + bytes + " bytes) in " + elapsedMs + " ms";
+
     /// <summary>The one-line state the tab shows, so a screenshot of a bench run says what the session is doing.</summary>
     internal static string StatusLine(bool booted, string chipset, ushort hwCode, int partitionCount) =>
         booted
