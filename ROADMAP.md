@@ -1,9 +1,9 @@
 # PMK Unlocker — Roadmap & Work Plan
 
-**Status date: 2026-11-04.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
+**Status date: 2026-11-05.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **739 checks** (735 at `c93ea36`, +4 for the B6.10 walk-timing marks; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
+- `tests/Regression`: **739 checks at `07a8e3e`** (B6.10's four walk-timing marks, +4 over the 735 at `c93ea36`; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
 - Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
@@ -128,7 +128,7 @@
 **Still open**
 1. **MT6765 re-run after the split-framing change — DONE, and its write half closed on the MT6877 instead** (boot + geometry + live GPT 2026-11-04 10:42/11:12/11:15; `para` read → read determinism → write → `VERIFY OK` → independent re-read 2026-11-04 11:24–11:31, see B6.9). What is left of it is only the optional sacrificial **erase** + restore, and a 9A `para` dump if that unit specifically wants one.
 2. **15 s DA1 stall on MT6877 — attributed, and the phone is exonerated** (B6.10, 2026-11-04, measured from the log and from the capture the recipe was compiled from — no phone touched). It is **20–22 s in every one of the eight recorded MT6877 boots**, and the same window on MT6765 is 1–2 s. Of that, **6 s is two named, optional CDC control probes** (steps 162/163, `CtrlProbeTimeoutMs` 2,000 + `CtrlProbeAskSlackMs` 1,000 each, answered only ~300–600 s later by the abandoned transfer); ~1 s is the steps the log does show; and the remaining **~14 s is host-side per-step cost in the window the wire trace stops printing at step 220** — 4,711 reads and 2,776 writes, ≈3 ms per read, against the reference client's measured **0.834 ms per 512-byte IN and 0.093 ms per 512-byte OUT on this same phone**. What is left is not *"is the phone slow?"* (it is not) but *"what inside 221→7708 costs the 3 ms?"*, which `WalkPhaseLine` now answers from the next boot's own log.
-3. **Docs/commit of this closure batch** (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry).
+3. **Docs/commit of this closure batch — DONE.** Its docs half shipped in `c93ea36` (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry) and the B6.10 walk-timing batch was committed as `07a8e3e`; nothing from B6 is uncommitted now except the re-stated dates and baselines in this file. A push still needs its own word.
 
 **B6.6 — boot recipe = Auto (2026-11-04)**
 PMK's word: *"boot profile နေရာကိုလဲပြင်ပေးပါ auto ထားပေးပါ ခနခန သွားချိန်းနေရလို့ပါ"* — with two phones on the bench he was switching the recipe dropdown before every boot.
@@ -197,7 +197,7 @@ Open item 2 said "15 s DA1 stall", guessed at either 15 × 1 s armed-read timeou
 
 ### P0 — Finish B6 (next)
 **Why:** the MT6877 half is closed and the Auto boot has run on both phones; the write half of the MT6765 re-run is the only protocol exposure left.
-**Steps:** (1) 9A write half: dump `para` and one sacrificial write/erase with readback, through the live session already open; (2) ~~measure the 15 s DA1 stall on the MT6877 unit if it is on the bench~~ — **done from the log and the owned capture instead of the bench, see B6.10**; (3) commit this closure batch.
+**Steps:** (1) 9A write half: dump `para` and one sacrificial write/erase with readback, through the live session already open; (2) ~~measure the 15 s DA1 stall on the MT6877 unit if it is on the bench~~ — **done from the log and the owned capture instead of the bench, see B6.10**; (3) ~~commit this closure batch~~ — **done as `07a8e3e`** (739 checks, Debug/Release 0/0; a push is its own word).
 **Done when:** the `para` dump and the write/erase + readback are in `native-da.log`, regression 739, Debug/Release 0/0, docs consistent.
 
 ### P1 — Native MTK parity for the core flows (replace mtkclient for daily work)
@@ -292,7 +292,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 739 (735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 739 at `07a8e3e` (735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
@@ -301,7 +301,7 @@ dotnet run --project tests/Regression/Regression.csproj
 
 | What | Where |
 |---|---|
-| Native session log | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\native-da.log` — the 2026-11-04 MT6877 run is the 281 lines from 09:19:45 to 09:20:20, plus the reset at 09:25:03 |
+| Native session log | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\native-da.log` — MT6877 on 2026-11-04: 09:19:45→09:25:03 (the first UFS boot, B6.4/B6.5) and 11:23:39→11:33:53 (the `para` read → write → `VERIFY OK` → reset run behind B6.9). B6.10's timing table is read from all eight MT6877 boots and seventeen MT6765 boots in this one file |
 | Pacing / knobs note | `%LOCALAPPDATA%\PMKMobileTool\MediaTekSessions\native-da\pacing.txt` |
 | Startup probe | `%LOCALAPPDATA%\PMKMobileTool\pmk_startup.log` |
 | Recipe master | `%LOCALAPPDATA%\PMKMobileTool\mtk\boot-profiles` (`mt6765/`, `mt6877/`) |
