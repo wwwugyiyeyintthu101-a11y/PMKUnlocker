@@ -3,7 +3,7 @@
 **Status date: 2026-11-05.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **739 checks at `07a8e3e`** (B6.10's four walk-timing marks, +4 over the 735 at `c93ea36`; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
+- `tests/Regression`: **775 checks** — P1.1's 30 GPT-snapshot checks and P1.2's 6 backup-layout/manifest checks on top of **739 at `07a8e3e`** (that batch being B6.10's four walk-timing marks, +4 over the 735 at `c93ea36`; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`). The P1.1/P1.2 batch is **uncommitted in the working tree**.
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
 - Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
@@ -128,7 +128,7 @@
 **Still open**
 1. **MT6765 re-run after the split-framing change — DONE, and its write half closed on the MT6877 instead** (boot + geometry + live GPT 2026-11-04 10:42/11:12/11:15; `para` read → read determinism → write → `VERIFY OK` → independent re-read 2026-11-04 11:24–11:31, see B6.9). What is left of it is only the optional sacrificial **erase** + restore, and a 9A `para` dump if that unit specifically wants one.
 2. **15 s DA1 stall on MT6877 — attributed, and the phone is exonerated** (B6.10, 2026-11-04, measured from the log and from the capture the recipe was compiled from — no phone touched). It is **20–22 s in every one of the eight recorded MT6877 boots**, and the same window on MT6765 is 1–2 s. Of that, **6 s is two named, optional CDC control probes** (steps 162/163, `CtrlProbeTimeoutMs` 2,000 + `CtrlProbeAskSlackMs` 1,000 each, answered only ~300–600 s later by the abandoned transfer); ~1 s is the steps the log does show; and the remaining **~14 s is host-side per-step cost in the window the wire trace stops printing at step 220** — 4,711 reads and 2,776 writes, ≈3 ms per read, against the reference client's measured **0.834 ms per 512-byte IN and 0.093 ms per 512-byte OUT on this same phone**. What is left is not *"is the phone slow?"* (it is not) but *"what inside 221→7708 costs the 3 ms?"*, which `WalkPhaseLine` now answers from the next boot's own log.
-3. **Docs/commit of this closure batch — DONE.** Its docs half shipped in `c93ea36` (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry) and the B6.10 walk-timing batch was committed as `07a8e3e`; nothing from B6 is uncommitted now except the re-stated dates and baselines in this file. A push still needs its own word.
+3. **Docs/commit of this closure batch — DONE.** Its docs half shipped in `c93ea36` (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry) and the B6.10 walk-timing batch was committed as `07a8e3e`. What is uncommitted now is the **P1.1/P1.2 batch** (native GPT save + native partition backup) plus the re-stated dates and baselines in this file. A push still needs its own word.
 
 **B6.6 — boot recipe = Auto (2026-11-04)**
 PMK's word: *"boot profile နေရာကိုလဲပြင်ပေးပါ auto ထားပေးပါ ခနခန သွားချိန်းနေရလို့ပါ"* — with two phones on the bench he was switching the recipe dropdown before every boot.
@@ -193,7 +193,28 @@ Open item 2 said "15 s DA1 stall", guessed at either 15 × 1 s armed-read timeou
 
 ---
 
-## 5. Remaining work plan (ordered)
+## 4A. P1.1 + P1.2 — native GPT save and native partition backup (2026-11-05, code done, hardware run pending)
+
+**What the two buttons do now.** Both are the SERVICE/FLASH buttons that already existed — `📋 Save GPT` and the two `Backup` buttons — and each now asks one question first: *is a native DA session live?* If it is, the work goes through that session; if not, the unchanged `mtk.exe` route runs. No new button, no new dropdown, and the batched route stays as the fallback for a chipset with no recipe.
+
+- **P1.1 — one READ replaces one boot.** `ReadPartitionTableAsync` already reads the primary header (one block at byte `block`) and the whole entry array into memory, so the save costs exactly one extra read: the backup array and its header, at the LBA the primary header itself names. `MtkDaSession.SaveGptAsync` reuses the cached table when the boot already filled it, so a post-boot save touches the wire only for that one extent.
+- **P1.2 — six boots become six reads.** The batched path shells `mtk.exe r <name> <file>` once per partition, and each of those is a full boot (~34 s on this bench, so the six NV partitions ≈3.5 minutes of replugging). The native path does one `ReadPartitionToFileAsync` per name over the session that is already open, then writes the manifest with the same `ShopServices.WriteBackup` call and registers it with the same `RegisterBackup` — so a folder produced natively restores through the restore path that already ships, unchanged.
+- **The read list and the manifest are one map.** `MtkNativeBench.BackupLayout` takes the device's own extents and produces the `{name → size}` dictionary both the reads and `WriteBackup` consume, so the sizes recorded in the manifest *are* the extents the reads were addressed with — a second, independently derived claim about the phone would have been free to contradict the first. A name absent from the device's GPT refuses the whole operation before any frame goes out, and the refusal says how many entries were read.
+
+**The folder format is ours, and that is a provenance statement, not a shortcut.** `gpt-layout.json` / `gpt-primary-header.bin` / `gpt-primary-entries.bin` / `gpt-secondary.bin` / `gpt-sha256.txt` were recovered from this repo's own deleted `PMKUnlocker/pmk_gpt.py` (`git show 69f385a^:PMKUnlocker/pmk_gpt.py`) and cross-checked against samples that still survive under `%LOCALAPPDATA%\PMKMobileTool\Backups\preloader-<hash>\`. The field offsets and the CRC rule are the published UEFI 2.10 §5.3 layout. **No mtkclient source was read for either item.**
+
+**What refuses and what only speaks.** Geometry errors refuse the save — no `EFI PART`, a header smaller than the device's block, a `headerSize` outside the read buffer, an entry array that doesn't fit what the header claims, a header that doesn't call itself LBA 1, or a backup LBA that overlaps the primary array. The two UEFI CRC verdicts and whether the backup LBA equals the last LBA of the user area are **recorded and printed, never enforced**, because this tool has never read a UFS GPT through its own session — a mismatch on a first UFS snapshot is information about the decoder, not danger to the phone.
+
+**Two invariants the tests now hold:**
+- `EnterOperation`/`LeaveOperation` do **not** nest. `ReadPartitionTableAsync` was split into a guard wrapper plus a private `ReadPartitionTableCoreAsync` precisely so `SaveGptAsync` can hold the port and still read the table; a future caller that grabs the guard twice will fail the check, not silently double-leave it.
+- The last `await` before a `FolderBrowserDialog` must **not** use `ConfigureAwait(false)`, or the modal runs on a thread-pool thread. `NativeBackupAsync` reads the table without it for that reason, and the comment says so; `NativeSaveGptAsync` picks its folder before any await, which is the other safe order.
+
+Regression **775** (+30 P1.1, +6 P1.2): the snapshot writer's folder shape, byte-exact geometry decode, both CRC verdicts and the capacity note, every geometry refusal costing zero frames, and a successful save costing **one** read. P1.2 pins that a missing name costs zero frames, that a refusal names the count read, and that a manifest's recorded sizes equal the extents the reads were addressed with. Debug/Release **0/0**.
+
+**Not done:** the hardware run. Both flows need PMK's clicks — boot, then `📋 Save GPT` on the SERVICE page, then a `Backup` — with the save folder and the backup folder kept as evidence. Nothing in this batch is committed yet.
+
+---
+
 
 ### P0 — Finish B6 (next)
 **Why:** the MT6877 half is closed and the Auto boot has run on both phones; the write half of the MT6765 re-run is the only protocol exposure left.
@@ -203,8 +224,8 @@ Open item 2 said "15 s DA1 stall", guessed at either 15 × 1 s armed-read timeou
 ### P1 — Native MTK parity for the core flows (replace mtkclient for daily work)
 **Why:** the native session already owns the phone after one plug; the remaining daily operations still shell out to `mtk.exe`.
 **Steps:**
-1. **Native Save GPT** — write the live table to a file (same format the mtkclient flow saves).
-2. **Native backup selected partitions** — batch dump in one session, folder + manifest + SHA-256 per file.
+1. ~~**Native Save GPT** — write the live table to a file~~ — **code done** (`MtkGptBackup` + `MtkDaSession.SaveGptAsync`, wired to the SERVICE page's `📋 Save GPT`, which now takes the native route whenever a session is live and the mtkclient route otherwise). The folder is the shape this repo's own pre-native path used — `gpt-primary-header.bin`, `gpt-primary-entries.bin`, `gpt-secondary.bin`, `gpt-layout.json`, `gpt-sha256.txt` — and the cost is exactly one READ over a session whose table is already cached, because the primary header and array are bytes the boot's table read already paid for. Geometry errors refuse the save; the two UEFI CRC fields and the backup-LBA/capacity agreement are recorded and printed, never enforced (no UFS GPT has been read through this session yet). **Hardware run pending.**
+2. ~~**Native backup selected partitions** — batch dump in one session~~ — **code done** (`MtkNativeBench.BackupLayout` + the panel's `NativeBackupAsync`, wired to both `Backup` buttons the same way). One `read-to-file` per selected name, sizes taken from the device's own extents, then the existing `ShopServices.WriteBackup` manifest + `RegisterBackup` — so a native backup restores through the restore path that already ships. Six NV partitions become six reads in one boot instead of six boots (≈3.5 minutes of replugging gone). **Hardware run pending.**
 3. **Native NV Erase → Restore** — reuse the RUN 51/52 extents (`nvram, nvdata, nvcfg, proinfo, protect1, protect2`), restore only from a verified backup, hash before/after, reset at the end.
 4. **Native Format All** — whitelist from the live GPT, keep bootchain/seccfg/NV, reset.
 5. **Native multi-partition flash** — scatter images through one session (raw only; sparse stays on the mtkclient path until a sparse writer is measured).
@@ -292,7 +313,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 739 at `07a8e3e` (735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 775 (P1.1 + P1.2, uncommitted; 739 at `07a8e3e`, 735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
@@ -307,7 +328,7 @@ dotnet run --project tests/Regression/Regression.csproj
 | Recipe master | `%LOCALAPPDATA%\PMKMobileTool\mtk\boot-profiles` (`mt6765/`, `mt6877/`) |
 | NV backup used for B5.5 | `C:\Users\PMK\Desktop\New folder\20261027_165526` (6 bins + manifest, 190,701,568 B) |
 | Wire captures / spikes | `%TEMP%\mtk-da-spike\capture` (framing spec, write/erase/read transcripts, RUN B6 notes) |
-| Regression | `tests/Regression/Program.cs` (739 checks) |
+| Regression | `tests/Regression/Program.cs` (775 checks) |
 | Loader integrity | `bundled-tools/integrity.json`, `dependency-lock.json` |
 
 ---

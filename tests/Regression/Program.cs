@@ -2784,7 +2784,7 @@ try
     var logoFromLba = new MtkDaExtent("logo", 2987008, 2989055, 512);
     Check(logoFromLba.ByteOffset == LogoAt && logoFromLba.ByteLength == 0x100000,
         "MTK B3: LBA × the DA's own block size gives byte 0x5b280000 + 1 MiB — the exact extent the write capture used");
-    var probeTable = new MtkDaPartitionTable(512, new[] { logoFromLba });
+    var probeTable = new MtkDaPartitionTable(512, new[] { logoFromLba }, GptHeader(2, 1, 128), new byte[128]);
     Check(probeTable.TryFind("Logo", out MtkDaExtent probed) && probed.LastLba == 2989055 && !probeTable.TryFind("bootlog", out _),
         "MTK B3: a partition table matches names case-insensitively and says no to a name it does not hold");
 
@@ -3352,6 +3352,222 @@ try
     Check(gDev.Writes.Count == afterGpt,
         "MTK B3 GPT: all four refusals were table- and size-based, so the cached table cost the port nothing");
     gSes.Dispose();
+
+    // ---- P1.1: the live GPT saved as a folder, over the session that is already open ------------------
+    // The header fixture below is a UEFI 2.10 §5.3.2 shape with its two CRC fields computed over its own bytes,
+    // because the snapshot decoder reads them and reports on them. Everything else — the block size, the user area,
+    // the entry LBA — is the same fixture the B3.5 table run above uses, so a save is measured against geometry this
+    // harness has already proven the session can read.
+    byte[] SnapshotHeader(byte[] entries, int entryCount, long backupLba, long myLba = 1, bool crcsOk = true)
+    {
+        var h = new byte[512];
+        Encoding.ASCII.GetBytes("EFI PART").CopyTo(h, 0);
+        h[9] = 1;                                          // revision 1.0
+        BitConverter.GetBytes(92).CopyTo(h, 12);           // this header claims 92 bytes of itself
+        BitConverter.GetBytes(myLba).CopyTo(h, 24);
+        BitConverter.GetBytes(backupLba).CopyTo(h, 32);
+        BitConverter.GetBytes(34L).CopyTo(h, 40);          // first usable LBA — never the same number twice
+        new Guid("11111111-2222-3333-4444-555555555555").ToByteArray().CopyTo(h, 56);
+        BitConverter.GetBytes(2L).CopyTo(h, 72);           // entries at LBA 2, the one layout every MTK GPT read here uses
+        BitConverter.GetBytes(entryCount).CopyTo(h, 80);
+        BitConverter.GetBytes(128).CopyTo(h, 84);
+        BitConverter.GetBytes(crcsOk ? MtkGptBackup.Crc32(entries, 0, entryCount * 128) : 0xDEADBEEF).CopyTo(h, 88);
+        BitConverter.GetBytes(0u).CopyTo(h, 16);
+        if (crcsOk)
+        {
+            var head = new byte[92];
+            Array.Copy(h, head, 92);
+            BitConverter.GetBytes(MtkGptBackup.Crc32(head, 0, 92)).CopyTo(h, 16);
+        }
+        else BitConverter.GetBytes(0xDEADBEEF).CopyTo(h, 16);
+        return h;
+    }
+    var snapEntries = new byte[512];
+    GptEntry("logo", 2987008, 2989055).CopyTo(snapEntries, 0);
+    GptEntry("tee1", 34, 2081).CopyTo(snapEntries, 128);
+    GptEntry("flashinfo", 6, 33).CopyTo(snapEntries, 256);
+    // The user area the storage fixture reports is 0xE8F800000 B at 512-byte blocks, so its last LBA is 122142719.
+    const long LastLbaOfFixture = 122142719;
+
+    Check(MtkGptBackup.Crc32(Encoding.ASCII.GetBytes("123456789"), 0, 9) == 0xCBF43926u,
+        "MTK P1.1: the CRC-32 this decoder uses is the standard one (the \"123456789\" check value), which is what the " +
+        "GPT header and entry-array CRC fields are — a private variant would report every real disk as corrupt");
+
+    MtkGptLayout snap = MtkGptBackup.Inspect(SnapshotHeader(snapEntries, 3, LastLbaOfFixture), snapEntries, 512, 0xE8F800000ul);
+    Check(snap.BlockSize == 512 && snap.HeaderSize == 92 && snap.EntriesLba == 2 && snap.EntryCount == 3 &&
+              snap.EntrySize == 128 && snap.ArraySectors == 1 && snap.BackupHeaderLba == LastLbaOfFixture &&
+              snap.LastLba == LastLbaOfFixture && snap.BackupMatchesCapacity && snap.HeaderCrcOk && snap.ArrayCrcOk,
+        "MTK P1.1: every number the snapshot carries comes out of the header's own fields — block, entry array, backup LBA and both CRC verdicts");
+    Check(snap.SecondaryBytes == 1024 && snap.DiskGuid == "11111111-2222-3333-4444-555555555555",
+        "MTK P1.1: the backup pass is one entry array plus one header block, sized from the array the header describes, " +
+        "and the disk GUID is read as the lowercase form the folder's own name would use");
+    Check(snap.Describe == "block 512 B, 3 × 128-byte entries at LBA 2 (1 sector(s)), backup header at LBA 122142719, header 92 B" &&
+              snap.CrcText == "header CRC ok, entry array CRC ok",
+        "MTK P1.1: the line the operator sees states the geometry in the units the DA addresses and both verdicts, with no number missing");
+    string snapJson = snap.LayoutJson("HW 0x0766 · block 512 · user 62537072640 B · 3 partition(s)");
+    Check(snapJson.Contains("\"sector_size\": 512") && snapJson.Contains("\"entry_array_sectors\": 1") &&
+              snapJson.Contains("\"secondary_header_lba\": 122142719") && snapJson.Contains("\"header_crc_ok\": true") &&
+              snapJson.Contains("\"secondary_lba_matches_capacity\": true") &&
+              snapJson.Contains("HW 0x0766 · block 512 · user 62537072640 B"),
+        "MTK P1.1: the layout file is the geometry plus the two verdicts and the binding the table came from — the record that says whose disk this is");
+    Check(!snapJson.Contains("IMEI") && !snapJson.Contains("serial") && !snapJson.Contains("CID"),
+        "MTK P1.1: nothing in the layout file is a device identity — it is written from the header and the DA's geometry reply, and no other field reaches it");
+
+    MtkGptLayout notLast = MtkGptBackup.Inspect(SnapshotHeader(snapEntries, 3, LastLbaOfFixture - 3), snapEntries, 512, 0xE8F800000ul);
+    Check(!notLast.BackupMatchesCapacity && notLast.BackupHeaderLba == LastLbaOfFixture - 3,
+        "MTK P1.1: a backup LBA that is not the last LBA of the user area is recorded as a disagreement, not as a fault — it is the header's own number and this tool has never read a UFS GPT through its own session");
+    MtkGptLayout crcBad = MtkGptBackup.Inspect(SnapshotHeader(snapEntries, 3, LastLbaOfFixture, crcsOk: false), snapEntries, 512, 0xE8F800000ul);
+    Check(!crcBad.HeaderCrcOk && !crcBad.ArrayCrcOk &&
+              crcBad.CrcText == "header CRC MISMATCH, entry array CRC MISMATCH",
+        "MTK P1.1: both CRC fields are verified against the bytes the device sent and a mismatch is named, because a table that does not match its own checksums is a fact the operator has to see");
+    string crcLine = MtkNativeBench.GptInspectLine(crcBad, 3);
+    Check(crcLine.Contains("[*] GPT: ") && crcLine.Contains("MISMATCH") && crcLine.Contains("3 partition(s)") &&
+              !crcLine.Contains("note:"),
+        "MTK P1.1: the inspect line states the geometry, the partition count and both CRC verdicts in one line — a save is not allowed to look cleaner than the table it read");
+    Check(MtkNativeBench.GptInspectLine(notLast, 3).Contains("CRC ok") &&
+              MtkNativeBench.GptInspectLine(notLast, 3).EndsWith("note: its backup LBA is not the last LBA of the user area"),
+        "MTK P1.1: a backup LBA that disagrees with the reported capacity is the only thing the line flags, and it is flagged as a note rather than a verdict — the header's own number, not a failure this tool can judge");
+
+    string SnapInspectError(byte[] header, byte[] entries, uint block = 512)
+    {
+        try { MtkGptBackup.Inspect(header, entries, block, 0xE8F800000ul); return "(no refusal)"; }
+        catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message; }
+    }
+    Check(SnapInspectError(new byte[512], snapEntries).Contains("not a GPT header"),
+        "MTK P1.1: a block with no \"EFI PART\" signature is refused as not-a-table rather than saved as one — the DA answering bytes is not proof they are a GPT");
+    Check(SnapInspectError(SnapshotHeader(snapEntries, 3, LastLbaOfFixture), snapEntries, 4096).Contains("not one 4096-byte sector"),
+        "MTK P1.1: a header shorter than the device's own block is refused — on a 4096-byte unit a 512-byte read is a partial header, and a partial header is not a geometry");
+    byte[] oversized = SnapshotHeader(snapEntries, 3, LastLbaOfFixture);
+    BitConverter.GetBytes(600).CopyTo(oversized, 12);
+    Check(SnapInspectError(oversized, snapEntries).Contains("outside the 92..512"),
+        "MTK P1.1: a header that claims more bytes than the block it was read as is refused — its CRC field would then cover bytes nobody read");
+    byte[] zeroSize = SnapshotHeader(snapEntries, 3, LastLbaOfFixture);
+    Array.Clear(zeroSize, 84, 4);
+    Check(SnapInspectError(zeroSize, snapEntries).Contains("do not describe a readable entry array"),
+        "MTK P1.1: an entry size of 0 is refused with the field values that prove it, rather than divided by later");
+    Check(SnapInspectError(SnapshotHeader(snapEntries, 3, LastLbaOfFixture), new byte[256]).Contains("the read did not return the whole array"),
+        "MTK P1.1: a short entry array is refused — half a table written out as a GPT backup is the file an operator restores from and blames afterwards");
+    Check(SnapInspectError(SnapshotHeader(snapEntries, 3, LastLbaOfFixture, myLba: 0), snapEntries).Contains("calls itself LBA 0"),
+        "MTK P1.1: the header at LBA 1 must call itself LBA 1 — this decoder knows one primary position, and the harness's own table fixture (which leaves the field zero) is refused by it");
+    Check(SnapInspectError(SnapshotHeader(snapEntries, 3, 3), snapEntries).Contains("not past the primary array"),
+        "MTK P1.1: a backup LBA inside or beside the primary array is refused — a read there would save the primary table twice and call one of them the backup");
+
+    string snapFolder = Path.Combine(dir, "p1-snapshot");
+    byte[] secondary = new byte[1024];
+    for (int i = 0; i < secondary.Length; i++) secondary[i] = (byte)(0xA0 + i % 16);
+    IReadOnlyList<string> savedFiles = MtkGptBackup.Write(snapFolder, snap,
+        MtkNativeBench.GptBinding(0x0766, 512, 0xE8F800000ul, 3), SnapshotHeader(snapEntries, 3, LastLbaOfFixture),
+        snapEntries, secondary);
+    Check(savedFiles.SequenceEqual(new[] { "gpt-primary-header.bin", "gpt-primary-entries.bin", "gpt-secondary.bin",
+              "gpt-layout.json", "gpt-sha256.txt" }),
+        "MTK P1.1: the save is five files with the names the pre-native path already used — a backup folder an operator has seen before is one he can find again");
+    Check(File.ReadAllBytes(Path.Combine(snapFolder, "gpt-primary-header.bin")).Length == 512 &&
+              File.ReadAllBytes(Path.Combine(snapFolder, "gpt-primary-entries.bin")).SequenceEqual(snapEntries) &&
+              File.ReadAllBytes(Path.Combine(snapFolder, "gpt-secondary.bin")).SequenceEqual(secondary),
+        "MTK P1.1: the three binaries are the device's bytes verbatim — one header block, the array the header describes, and the backup pass exactly as read");
+    Check(!Directory.EnumerateFiles(snapFolder).Any(f => f.EndsWith(".tmp")),
+        "MTK P1.1: every file arrives through a temp name and a move, so a folder that completed has no half-written file in it");
+    string crcFolder = Path.Combine(dir, "p1-crc-mismatch");
+    MtkGptBackup.Write(crcFolder, crcBad, MtkNativeBench.GptBinding(0x0766, 512, 0xE8F800000ul, 3),
+        SnapshotHeader(snapEntries, 3, LastLbaOfFixture, crcsOk: false), snapEntries, secondary);
+    string crcJson = File.ReadAllText(Path.Combine(crcFolder, "gpt-layout.json"));
+    Check(crcJson.Contains("\"header_crc_ok\": false") && crcJson.Contains("\"entry_array_crc_ok\": false"),
+        "MTK P1.1: a checksum mismatch is saved and labelled, not refused — this tool has read one eMMC GPT's CRCs and no UFS one, so a snapshot the operator can inspect beats no snapshot at all");
+    string[] shaLines = File.ReadAllLines(Path.Combine(snapFolder, "gpt-sha256.txt"));
+    Check(shaLines.Length == 4 && shaLines.Select(l => l.Substring(66)).SequenceEqual(new[] { "gpt-primary-header.bin",
+              "gpt-primary-entries.bin", "gpt-secondary.bin", "gpt-layout.json" }) &&
+              shaLines.All(l => l.Length > 66 && l[64] == ' ' && l[65] == ' ' &&
+                                 Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(
+                                     Path.Combine(snapFolder, l.Substring(66))))).ToLowerInvariant() == l[..64]),
+        "MTK P1.1: the sidecar is the conventional \"<sha256>  <name>\" list over the four saved files and every line re-verifies " +
+        "against the file beside it — integrity the operator can check with any tool, not only with this one");
+    Check(MtkNativeBench.GptSavedLine("/x/gpt", 5, 3, 2960) ==
+              "[+] Native DA: GPT saved to /x/gpt — 5 file(s) for 3 partition(s), 2960 byte(s) on disk. " +
+              "Everything in it was read off this device; nothing was written.",
+        "MTK P1.1: the completion line states the folder, the file count, the partition count and the bytes on disk, and says in the same breath that the op was read-only");
+
+    // The session half: one read on top of the table the boot already cost, and no program frame anywhere.
+    byte[] okHeader = SnapshotHeader(snapEntries, 3, LastLbaOfFixture);
+    var pLines = new List<string>();
+    var (pSes, pDev) = await BootedDa(pLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(okHeader))).Concat(ReadGroup(LcHex(snapEntries))));
+    await pSes.ReadPartitionTableAsync();
+    int pStart = pDev.Writes.Count;
+    string liveFolder = Path.Combine(dir, "p1-live");
+    pDev.Append(ReadGroup(Filler(0x5A, 1024)));
+    IReadOnlyList<string> liveFiles = await pSes.SaveGptAsync(liveFolder);
+    CheckFrames(SentFrames(pDev, pStart),
+        "MTK P1.1: on a session whose table is already cached, a GPT save is exactly one READ — the backup array and its " +
+        "header, taken from the backup LBA the primary header itself names. The batched client needs a whole second boot for this",
+        ReadCmd, ExtentStruct(0xE8F7FFC00ul, 1024), ZeroWord);
+    Check(!SentFrames(pDev, pStart).Contains(WriteCmd) && !SentFrames(pDev, pStart).Contains(EraseCmd) &&
+              !SentFrames(pDev, pStart).Contains(UploadCmd) && !SentFrames(pDev, pStart).Contains(CommitCmd),
+        "MTK P1.1: a save frames no WRITE, ERASE, UPLOAD or COMMIT — the GPT names are on the never-program list precisely because a table is not something a live session overwrites");
+    Check(liveFiles.Count == 5 &&
+              File.ReadAllBytes(Path.Combine(liveFolder, "gpt-secondary.bin")).All(b => b == 0x5A) &&
+              File.ReadAllBytes(Path.Combine(liveFolder, "gpt-primary-entries.bin")).SequenceEqual(snapEntries),
+        "MTK P1.1: what lands on disk is what the DA sent — the backup pass byte for byte and the entry array the table read already cost");
+    Check(pLines.Any(l => l.Contains("[*] GPT: block 512 B, 3 × 128-byte entries at LBA 2") && l.Contains("CRC ok")) &&
+              pLines.Any(l => l.Contains("[+] Native DA: GPT saved to " + liveFolder) &&
+                              l.Contains("5 file(s) for 3 partition(s)")),
+        "MTK P1.1: the session logs the geometry it read and the folder it wrote, in that order, so a saved table can be checked against the device it came from");
+    Check(pLines.Any(l => l.Contains("[+] READ 0xe8f7ffc00 + 0x400")),
+        "MTK P1.1: the backup read is addressed at (backup LBA − array sectors) × block, the same arithmetic the primary read uses — no second source for the offset is invented");
+    pSes.Dispose();
+
+    var (noLocSes, noLocDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(liveHeader))).Concat(ReadGroup(LcHex(liveEntries))));
+    await noLocSes.ReadPartitionTableAsync();
+    int noLocStart = noLocDev.Writes.Count;
+    string refusedFolder = Path.Combine(dir, "p1-refused");
+    Check((await DaFailure(noLocSes, () => noLocSes.SaveGptAsync(refusedFolder))).Contains("declares itself 0 bytes"),
+        "MTK P1.1: the harness's own table fixture — a header whose size and self-position fields are zero — reads a partition table fine and is refused as a snapshot, which is the difference between the two decoders stated in one refusal");
+    Check(noLocDev.Writes.Count == noLocStart && !Directory.Exists(refusedFolder),
+        "MTK P1.1: a refused save costs the port not one frame and the disk not one file — the geometry is checked before the backup read is asked for and before any folder is created");
+    noLocSes.Dispose();
+
+    // ---- P1.2: several partitions in one session, and the manifest the existing restore reads back ------
+    var (bkTab, bkEnt) = SeccfgTable(("nvram", 100, 100), ("logo", 2987008, 2987009));
+    var (bkSes, bkDev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(bkTab))).Concat(ReadGroup(LcHex(bkEnt))));
+    MtkDaPartitionTable bkTable = await bkSes.ReadPartitionTableAsync();
+
+    Dictionary<string, long> bkLayout = MtkNativeBench.BackupLayout(bkTable, new[] { "NVRAM", "logo", "logo" },
+        "Select partitions in Flash first.", out string bkRefusal);
+    Check(bkRefusal == null && bkLayout.Count == 2 && bkLayout["nvram"] == 512 && bkLayout["logo"] == 1024,
+        "MTK P1.2: the read list and the manifest layout are the same map — the byte lengths recorded are the extents " +
+        "the reads are addressed by, names fold case-insensitively and a name ticked twice is read once");
+    Check(MtkNativeBench.BackupLayout(bkTable, new[] { "nvram", "boot" }, "x", out string missingName) == null &&
+              missingName.Contains("no partition named 'boot'") && missingName.Contains("2 entries read"),
+        "MTK P1.2: a name the device's own GPT does not have stops the whole backup with the entry count that proves it was checked — a manifest listing a partition that was never read is a lie on disk");
+    Check(MtkNativeBench.BackupLayout(bkTable, Array.Empty<string>(), "Select partitions in Flash first.", out string noneChosen) == null &&
+              noneChosen == "Select partitions in Flash first." &&
+              MtkNativeBench.BackupLayout(bkTable, new[] { "", "  " }, "none of the six NV partitions", out string blanks) == null &&
+              blanks.Contains("none of the six NV partitions"),
+        "MTK P1.2: an empty selection is the caller's own reason, and blank names are not silently counted as a selection — NV and Flash refuse with different words because they mean different things");
+
+    string nativeBackupDir = Path.Combine(dir, "p1-native-backup");
+    int bkStart = bkDev.Writes.Count;
+    bkDev.Append(ReadGroup(Filler(0x11, 512)));
+    await bkSes.ReadPartitionToFileAsync("nvram", Path.Combine(nativeBackupDir, "nvram.bin"), null, default);
+    bkDev.Append(ReadGroup(Filler(0x22, 1024)));
+    await bkSes.ReadPartitionToFileAsync("logo", Path.Combine(nativeBackupDir, "logo.bin"), null, default);
+    CheckFrames(SentFrames(bkDev, bkStart),
+        "MTK P1.2: two partitions are two reads and nothing else — the table, the geometry and the limits all stay cached, " +
+        "which is the six-boots-per-NV-backup the batched client spends gone",
+        ReadCmd, ExtentStruct(100 * 512, 512), ZeroWord,
+        ReadCmd, ExtentStruct(LogoAt, 1024), ZeroWord);
+    ShopServices.WriteBackup(nativeBackupDir, "MTK", bkLayout, bkLayout.Keys, "test");
+    var bkManifest = ShopServices.VerifyBackup(nativeBackupDir);
+    Check(bkManifest.Platform == "MTK" && bkManifest.Files.Count == 2 &&
+              bkManifest.Files.Sum(f => f.Bytes) == 1536 && bkManifest.DeviceIdentity.StartsWith("Unknown") &&
+              bkManifest.Files.All(f => f.File == f.Partition + ".bin" &&
+                  File.ReadAllBytes(Path.Combine(nativeBackupDir, f.File)).All(b => b == (f.Partition == "nvram" ? 0x11 : 0x22))),
+        "MTK P1.2: a native backup is the folder the existing restore already reads — same manifest schema, same sizes, verified by the same call, with the device's bytes in the files");
+    Check(!SentFrames(bkDev, bkStart).Contains(WriteCmd) && !SentFrames(bkDev, bkStart).Contains(EraseCmd) &&
+              !SentFrames(bkDev, bkStart).Contains(CommitCmd),
+        "MTK P1.2: the batch backup is reads only — no WRITE, ERASE or COMMIT frame appears anywhere in a two-partition run");
+    bkSes.Dispose();
 
     // ---- B3.6: the guards that must fire before the extent reaches the device ------------------------
     var (oSes, oDev) = await BootedDa(null, StorageQuery());

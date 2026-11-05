@@ -928,6 +928,54 @@ internal static class MtkNativeBench
         " B · " + partitionCount + " partition(s)";
 
     /// <summary>
+    /// What the device's own GPT header says about itself, printed before the save runs. The two CRC verdicts are
+    /// always stated because they are the difference between a folder an operator can restore from and one he has to
+    /// re-derive — and neither one refuses the save, since this tool has never read a UFS GPT through its own session
+    /// and a mismatch on a snapshot is information, not a danger.
+    /// </summary>
+    internal static string GptInspectLine(MtkGptLayout layout, int partitionCount) =>
+        "[*] GPT: " + layout.Describe + " — " + partitionCount + " partition(s) — " + layout.CrcText +
+        (layout.BackupMatchesCapacity ? "" : "; note: its backup LBA is not the last LBA of the user area");
+
+    /// <summary>The save's own line: where the folder is, and the fact that the port only ever carried reads.</summary>
+    internal static string GptSavedLine(string folder, int fileCount, int partitionCount, long totalBytes) =>
+        "[+] Native DA: GPT saved to " + folder + " — " + fileCount + " file(s) for " + partitionCount +
+        " partition(s), " + totalBytes + " byte(s) on disk. Everything in it was read off this device; nothing was written.";
+
+    /// <summary>
+    /// P1.2 — what one native backup will read: every requested name resolved against the device's own GPT, mapped to
+    /// the byte length its extent reports. The map is both the read list and the manifest layout, so the sizes written
+    /// into <c>backup-manifest.json</c> are the same extents the reads were addressed with rather than a second claim
+    /// about the device. Names are folded case-insensitively, which is how the live table itself matches them.
+    ///
+    /// Null means nothing is read, and <paramref name="refusal"/> says why: a name the device does not have (backing
+    /// up what is not there would write a manifest that lies) or an empty selection.
+    /// </summary>
+    internal static Dictionary<string, long> BackupLayout(MtkDaPartitionTable table, IEnumerable<string> requested,
+        string emptyReason, out string refusal)
+    {
+        refusal = null;
+        var layout = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in requested)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!table.TryFind(name, out MtkDaExtent extent))
+            {
+                refusal = "The device's own GPT has no partition named '" + name + "' (" + table.Extents.Count +
+                    " entries read), so it cannot be backed up. Nothing was read.";
+                return null;
+            }
+            if (!layout.ContainsKey(extent.Name)) layout[extent.Name] = (long)extent.ByteLength;
+        }
+        if (layout.Count == 0)
+        {
+            refusal = emptyReason;
+            return null;
+        }
+        return layout;
+    }
+
+    /// <summary>
     /// The INFO tab's device status line, built only from what the live session read: the chipset the recipe was
     /// proven on, the BROM's own HW code, the eMMC part number out of the storage descriptor and the user-area
     /// size the DA advertises. A missing part number shows as nothing rather than a placeholder — an invented

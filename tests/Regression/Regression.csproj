@@ -17,6 +17,8 @@
     <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCommands.cs" Link="MediaTek/MtkDaCommands.cs" />
     <!-- B5: the seccfg config-block decoder the state query runs on — measured bytes, no hardware needed. -->
     <Compile Include="../../PMKUnlocker/MediaTek/MtkSeccfg.cs" Link="MediaTek/MtkSeccfg.cs" />
+    <!-- P1.1: the GPT snapshot writer — folder shape, UEFI geometry and CRCs, all assertable from bytes. -->
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkGptBackup.cs" Link="MediaTek/MtkGptBackup.cs" />
     <!-- The NATIVE tab's hardware-free gates (dump path, boot blocker, never-program, confirm text). -->
     <Compile Include="../../PMKUnlocker/MediaTek/MtkNativeBench.cs" Link="MediaTek/MtkNativeBench.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />

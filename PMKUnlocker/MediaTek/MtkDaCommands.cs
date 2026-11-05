@@ -70,15 +70,22 @@ internal sealed record MtkDaExtent(string Name, long FirstLba, long LastLba, uin
     }
 }
 
-/// <summary>A GPT read from the live device, kept on the session so the cable is touched once.</summary>
+/// <summary>
+/// A GPT read from the live device, kept on the session so the cable is touched once. The raw header and entry
+/// array travel with it: they are the bytes the read already cost, and the only honest source for a GPT snapshot —
+/// a save written from the decoded extents alone would be a summary labelled as a backup.
+/// </summary>
 internal sealed class MtkDaPartitionTable
 {
     private readonly Dictionary<string, MtkDaExtent> _byName;
 
-    internal MtkDaPartitionTable(uint blockSize, IReadOnlyList<MtkDaExtent> extents)
+    internal MtkDaPartitionTable(uint blockSize, IReadOnlyList<MtkDaExtent> extents, byte[] rawHeader,
+        byte[] rawEntries)
     {
         BlockSize = blockSize;
         Extents = extents;
+        RawHeader = rawHeader;
+        RawEntries = rawEntries;
         _byName = new Dictionary<string, MtkDaExtent>(StringComparer.OrdinalIgnoreCase);
         foreach (MtkDaExtent extent in extents)
             if (!_byName.ContainsKey(extent.Name)) _byName[extent.Name] = extent;
@@ -86,6 +93,8 @@ internal sealed class MtkDaPartitionTable
 
     internal uint BlockSize { get; }
     internal IReadOnlyList<MtkDaExtent> Extents { get; }
+    internal byte[] RawHeader { get; }
+    internal byte[] RawEntries { get; }
     internal bool TryFind(string name, out MtkDaExtent extent) => _byName.TryGetValue(name ?? "", out extent);
 }
 
@@ -532,24 +541,67 @@ internal sealed partial class MtkDaSession
         EnterOperation("partition table");
         try
         {
+            return await ReadPartitionTableCoreAsync(ct).ConfigureAwait(false);
+        }
+        finally { LeaveOperation(); }
+    }
+
+    /// <summary>The GPT pass without the operation guard: an op that reads the table as one step of a bigger job —
+    /// the GPT save — already holds the port, and this session carries one operation at a time.</summary>
+    private async Task<MtkDaPartitionTable> ReadPartitionTableCoreAsync(CancellationToken ct)
+    {
+        MtkStorageInfo storage = await QueryStorageAsync(ct).ConfigureAwait(false);
+        uint block = storage.BlockSize;
+
+        byte[] header = await ReadExtentToBufferAsync(block, block, ct).ConfigureAwait(false);
+        var (entryCount, entrySize, entryLba) = GptParser.HeaderInfo(header);
+        long entryBytes = checked((long)entryCount * entrySize);
+        ulong entrySpan = (ulong)((entryBytes + block - 1) / block * block);
+        byte[] entries = await ReadExtentToBufferAsync((ulong)entryLba * block, entrySpan, ct).ConfigureAwait(false);
+
+        var extents = new List<MtkDaExtent>();
+        foreach (GptPartition p in GptParser.ParseEntries(header, entries))
+            extents.Add(new MtkDaExtent(p.Name, p.FirstLba, p.LastLba, block));
+        if (extents.Count == 0)
+            throw new InvalidDataException("The device GPT parsed but named no partition, so no extent can be resolved. Nothing was written.");
+
+        Partitions = new MtkDaPartitionTable(block, extents, header, entries);
+        Say("[+] Live GPT: " + extents.Count + " partition(s), block " + block + " B — resolved once, no further replug needed.");
+        return Partitions;
+    }
+
+    /// <summary>
+    /// P1.1 — write the device's own GPT to a folder over the session that is already open.
+    ///
+    /// The primary header and entry array are bytes the table read already cost, so this op adds exactly one read:
+    /// the backup array and its header, taken from the backup LBA the primary header itself names. Nothing here
+    /// frames a WRITE or an ERASE — the GPT names sit on <see cref="NeverProgramNames"/>, so a save is the only way
+    /// this session ever touches those sectors.
+    /// </summary>
+    internal async Task<IReadOnlyList<string>> SaveGptAsync(string folder, CancellationToken ct = default)
+    {
+        RequireReady();
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        EnterOperation("GPT save");
+        try
+        {
+            MtkDaPartitionTable table = Partitions ?? await ReadPartitionTableCoreAsync(ct).ConfigureAwait(false);
             MtkStorageInfo storage = await QueryStorageAsync(ct).ConfigureAwait(false);
-            uint block = storage.BlockSize;
+            MtkGptLayout layout = MtkGptBackup.Inspect(table.RawHeader, table.RawEntries, storage.BlockSize,
+                storage.UserAreaSize);
+            Say(MtkNativeBench.GptInspectLine(layout, table.Extents.Count));
 
-            byte[] header = await ReadExtentToBufferAsync(block, block, ct).ConfigureAwait(false);
-            var (entryCount, entrySize, entryLba) = GptParser.HeaderInfo(header);
-            long entryBytes = checked((long)entryCount * entrySize);
-            ulong entrySpan = (ulong)((entryBytes + block - 1) / block * block);
-            byte[] entries = await ReadExtentToBufferAsync((ulong)entryLba * block, entrySpan, ct).ConfigureAwait(false);
+            long backupEntriesLba = layout.BackupHeaderLba - layout.ArraySectors;
+            byte[] secondary = await ReadExtentToBufferAsync(checked((ulong)backupEntriesLba * storage.BlockSize),
+                (ulong)layout.SecondaryBytes, ct).ConfigureAwait(false);
 
-            var extents = new List<MtkDaExtent>();
-            foreach (GptPartition p in GptParser.ParseEntries(header, entries))
-                extents.Add(new MtkDaExtent(p.Name, p.FirstLba, p.LastLba, block));
-            if (extents.Count == 0)
-                throw new InvalidDataException("The device GPT parsed but named no partition, so no extent can be resolved. Nothing was written.");
-
-            Partitions = new MtkDaPartitionTable(block, extents);
-            Say("[+] Live GPT: " + extents.Count + " partition(s), block " + block + " B — resolved once, no further replug needed.");
-            return Partitions;
+            string binding = MtkNativeBench.GptBinding(DeviceHwCode, storage.BlockSize, storage.UserAreaSize,
+                table.Extents.Count);
+            IReadOnlyList<string> files = MtkGptBackup.Write(folder, layout, binding, table.RawHeader,
+                table.RawEntries, secondary);
+            long bytes = files.Sum(name => new FileInfo(Path.Combine(folder, name)).Length);
+            Say(MtkNativeBench.GptSavedLine(folder, files.Count, table.Extents.Count, bytes));
+            return files;
         }
         finally { LeaveOperation(); }
     }

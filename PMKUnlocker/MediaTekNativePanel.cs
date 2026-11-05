@@ -837,6 +837,77 @@ public partial class Form1
         NativeSay("[*] Native DA: that is a read of the state only. This tool does not lock or unlock seccfg over a DA session — the unlock payload has never been measured, and a guessed one silently changes a lock policy instead of failing.");
     }
 
+    /// <summary>
+    /// P1.1 — Save GPT over the session that is already open. The primary header and entry array are bytes the boot's
+    /// table read already cost, so the whole save is one extra READ: the backup array and its header, at the LBA the
+    /// primary header itself names. The batched client needs a second boot for the same folder.
+    /// Read-only by construction — <c>MtkDaSession.NeverProgramNames</c> keeps pgpt/sgpt/gpt off every program path.
+    /// </summary>
+    private async Task NativeSaveGptAsync()
+    {
+        RequireNativeSession();
+        string destination;
+        using (var pick = new FolderBrowserDialog { Description = "Save GPT backup" })
+        {
+            if (pick.ShowDialog(this) != DialogResult.OK)
+            {
+                NativeSay("[*] Native DA: GPT save declined — no folder was chosen, so nothing was read.");
+                return;
+            }
+            destination = Path.Combine(pick.SelectedPath, "GPT-" + Guid.NewGuid().ToString("N"));
+        }
+        await nativeDa.SaveGptAsync(destination, nativeCancel.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// P1.2 — the partition backup over the live session: one boot, then one READ per partition. What the operator
+    /// gets is the same folder the batched path produces — one <c>&lt;name&gt;.bin</c> per partition plus
+    /// <c>backup-manifest.json</c> with the sizes and SHA-256 — and the manifest is written by the same
+    /// <see cref="ShopServices"/> call, so a native backup restores through the existing restore path unchanged.
+    /// Every extent comes from the device's own GPT, and the sizes the manifest records are the same extents the
+    /// reads were addressed with.
+    /// </summary>
+    private async Task NativeBackupAsync(bool nvOnly)
+    {
+        RequireNativeSession();
+        // No ConfigureAwait here on purpose: the folder dialog below has to run on the UI thread, and this is the
+        // last await before it.
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+
+        Dictionary<string, long> layout = MtkNativeBench.BackupLayout(table,
+            nvOnly ? NvPartitions : SelectedMediaTekNames(),
+            nvOnly ? "This device's GPT names none of the six NV partitions (" + table.Extents.Count +
+                " entries read). Nothing was read."
+                   : "Select partitions in Flash first.",
+            out string refusal);
+        if (layout == null) throw new InvalidOperationException(refusal);
+
+        string dir;
+        using (var pick = new FolderBrowserDialog { Description = "Select backup destination" })
+        {
+            if (pick.ShowDialog(this) != DialogResult.OK)
+            {
+                NativeSay("[*] Native DA: backup declined — no folder was chosen, nothing was read.");
+                return;
+            }
+            dir = Path.Combine(pick.SelectedPath, "MTK-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+        }
+
+        NativeSay("[*] Native DA: " + layout.Count + " partition(s) to read over the session already open — one boot, " +
+                  "no replug between partitions.");
+        foreach ((string name, long size) in layout)
+        {
+            NativeSay("[*] Native DA: reading " + name + " (" + MtkDaExtent.SizeText((ulong)size) + ")...");
+            await nativeDa.ReadPartitionToFileAsync(name, Path.Combine(dir, name + ".bin"),
+                p => NativeProgress("backup " + name, p), nativeCancel.Token).ConfigureAwait(false);
+        }
+        ShopServices.WriteBackup(dir, "MTK", layout, layout.Keys, Application.ProductVersion);
+        RegisterBackup(dir);
+        NativeSay("[OK] Native DA: " + layout.Count + " partition(s) backed up to " + dir +
+                  " — sizes and SHA-256 recorded in the manifest, and the phone was never replugged for it.");
+    }
+
     private void NativeClose()
     {
         if (nativeDa == null) return;

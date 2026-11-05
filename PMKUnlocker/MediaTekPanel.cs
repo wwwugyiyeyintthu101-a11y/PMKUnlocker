@@ -1624,7 +1624,11 @@ public partial class Form1
             Log("[!] Auto-reboot no response — unplug and power on the phone manually.", Color.Orange);
         }
     }
-    private Task SaveMediaTekGptAsync() => RunMediaTekWorkflowAsync(async () =>
+    private Task SaveMediaTekGptAsync() => nativeDa != null
+        // A live session already holds the device's own header and entry array, so the native route is the same
+        // folder for one extra read instead of a second full boot.
+        ? NativeGuarded("GPT save", NativeSaveGptAsync)
+        : RunMediaTekWorkflowAsync(async () =>
     {
         using var pick = new FolderBrowserDialog { Description = "Save GPT backup" };
         if (pick.ShowDialog(this) != DialogResult.OK) return;
@@ -1634,7 +1638,12 @@ public partial class Form1
         Log("[OK] GPT files saved: " + dir, Color.LightGreen);
     });
     private Task BackupMediaTekAsync() => BackupMediaTekAsync(false);
-    private Task BackupMediaTekAsync(bool nvOnly) => RunMediaTekWorkflowAsync(async () =>
+    private Task BackupMediaTekAsync(bool nvOnly) => nativeDa != null
+        // The batched client needs one full boot per partition — six NV partitions is six boots, about three and a
+        // half minutes of replugging. A live session reads them all in one, through the framing the dump button
+        // already proved.
+        ? NativeGuarded("partition backup", () => NativeBackupAsync(nvOnly))
+        : RunMediaTekWorkflowAsync(async () =>
     {
         var selected = SelectedMediaTekNames();
         var table = await GetMediaTekTableAsync();
