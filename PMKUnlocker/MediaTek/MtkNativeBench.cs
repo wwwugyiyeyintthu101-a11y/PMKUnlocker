@@ -1,5 +1,6 @@
 #nullable disable
 using System.Text;
+using PMKUnlocker.MtkFirmware;
 
 namespace PMKUnlocker.MediaTek;
 
@@ -973,6 +974,177 @@ internal static class MtkNativeBench
             return null;
         }
         return layout;
+    }
+
+    /// <summary>
+    /// P1.4 — the rows that turn a dump folder into a firmware package. Every offset is the device's own GPT
+    /// converted to bytes (the same conversion the DA's extent structs use), and a name a live session may never
+    /// program still gets dumped but is marked <c>is_download: false</c>, because a package that offers to rewrite
+    /// the chip identity is a package that bricks the phone it came from.
+    ///
+    /// UFS is refused rather than guessed: the region word of a UFS scatter has never been read off a real one on
+    /// this bench, and an invented region string is exactly the kind of unmeasured byte this project does not send.
+    /// </summary>
+    internal static IReadOnlyList<ScatterRow> ScatterRows(MtkDaPartitionTable table, IEnumerable<string> dumped,
+        MtkStorageInfo storage, out string refusal)
+    {
+        refusal = null;
+        if (storage != null && !storage.IsEmmcUserAddressed)
+        {
+            refusal = "this device addresses its user area as " + storage.StorageName + " and the region word a " +
+                "scatter carries for it has never been read off a real UFS package on this bench — the images and " +
+                "the manifest are saved, no scatter is written.";
+            return null;
+        }
+        var rows = new List<ScatterRow>();
+        foreach (string name in dumped)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!table.TryFind(name, out MtkDaExtent extent))
+            {
+                refusal = "'" + name + "' was read but the live GPT does not report it, so no scatter is written — " +
+                    "a row with an invented offset is a write list aimed at the wrong bytes.";
+                return null;
+            }
+            rows.Add(new ScatterRow(extent.Name, extent.Name + ".bin", (long)extent.ByteOffset,
+                (long)extent.ByteLength, ScatterWriter.EmmcUserRegion, ProgramAllowed(extent.Name, out _)));
+        }
+        if (rows.Count == 0)
+        {
+            refusal = "nothing was dumped, so there is no package to describe.";
+            return null;
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// P1.3 — what one native NV erase wipes: every requested name resolved to the extent the device's own GPT
+    /// reports, in the order given, duplicates folded. All or nothing, exactly like <see cref="BackupLayout"/>:
+    /// a set that names a partition this device does not have, or one a live session may never program, erases
+    /// nothing at all instead of four of six and then throwing mid-run with the phone half-wiped.
+    /// </summary>
+    internal static IReadOnlyList<MtkDaExtent> NvErasePlan(MtkDaPartitionTable table, IEnumerable<string> requested,
+        string emptyReason, out string refusal)
+    {
+        refusal = null;
+        var plan = new List<MtkDaExtent>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in requested)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!table.TryFind(name, out MtkDaExtent extent))
+            {
+                refusal = "The device's own GPT has no partition named '" + name + "' (" + table.Extents.Count +
+                    " entries read), so this set is not erased. Nothing was sent to the device.";
+                return null;
+            }
+            if (!ProgramAllowed(extent.Name, out string reason))
+            {
+                refusal = reason + " Nothing in this set was erased — the whole set is refused before the first frame.";
+                return null;
+            }
+            if (seen.Add(extent.Name)) plan.Add(extent);
+        }
+        if (plan.Count == 0)
+        {
+            refusal = emptyReason;
+            return null;
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// One partition of a verified backup, matched to the extent it belongs in. The path is already containment-
+    /// checked against the backup folder, and the hash is the manifest's own claim about the bytes at that path.
+    /// </summary>
+    internal sealed record NvRestoreItem(MtkDaExtent Extent, string ImagePath, string Sha256);
+
+    /// <summary>
+    /// P1.3 — what one native NV restore writes: the backup's manifest entries that name a requested partition,
+    /// each matched to the device's own extent, with exact byte equality as the gate.
+    ///
+    /// <para>
+    /// The equality test replaces the manifest's <c>LayoutHash</c> comparison, which cannot be used here: an
+    /// mtkclient NV backup records the hash of the whole 43-partition layout it read, while a native NV backup can
+    /// only ever record the six it read — so a six-name layout would reject a backup that is good. What both kinds
+    /// do agree on is the per-partition extent, and that is the number a write is addressed by, so that is what
+    /// this checks. Entries for partitions outside <paramref name="requested"/> are not an error, they are simply
+    /// not restored — which is what lets a full-layout backup serve the six NV names.
+    /// </para>
+    ///
+    /// Null means nothing is written, and <paramref name="refusal"/> says which partition broke the match. A
+    /// caller that gets a plan back has already had every file hash-checked on disk.
+    /// </summary>
+    internal static IReadOnlyList<NvRestoreItem> NvRestorePlan(MtkDaPartitionTable table, string sourceDirectory,
+        IReadOnlyCollection<ShopServices.BackupFile> manifestFiles, IEnumerable<string> requested, out string refusal)
+    {
+        refusal = null;
+        var byName = new Dictionary<string, ShopServices.BackupFile>(StringComparer.OrdinalIgnoreCase);
+        foreach (ShopServices.BackupFile entry in manifestFiles)
+            if (!byName.ContainsKey(entry.Partition)) byName[entry.Partition] = entry;
+
+        var plan = new List<NvRestoreItem>();
+        foreach (string name in requested)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!byName.TryGetValue(name, out ShopServices.BackupFile file)) continue;
+            if (!table.TryFind(name, out MtkDaExtent extent))
+            {
+                refusal = "This backup carries " + name + " (" + file.Bytes + " byte(s)), but the device's own GPT has no " +
+                    "partition named '" + name + "' (" + table.Extents.Count + " entries read) — it is not this phone's " +
+                    "layout, so nothing was written.";
+                return null;
+            }
+            if (extent.ByteLength != (ulong)file.Bytes)
+            {
+                refusal = name + " is " + file.Bytes + " byte(s) in this backup and " + extent.ByteLength +
+                    " byte(s) on this device. A backup whose extent does not match the device is not restored over it — " +
+                    "nothing was written.";
+                return null;
+            }
+            if (!ProgramAllowed(extent.Name, out string reason))
+            {
+                refusal = reason + " Nothing in this set was written.";
+                return null;
+            }
+            plan.Add(new NvRestoreItem(extent, ShopServices.SafeChild(sourceDirectory, file.File), file.Sha256));
+        }
+        if (plan.Count == 0)
+        {
+            refusal = "This backup's manifest records none of the NV partitions this tool restores (" +
+                manifestFiles.Count + " file(s) recorded). Pick the folder an NV backup wrote, or Eject and restore a " +
+                "folder of raw dumps through mtkclient. Nothing was written.";
+            return null;
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// The native NV restore's confirmation. The button shows one dialog, not six, and it is shown only after the
+    /// manifest has been hash-checked and every extent matched — so the dialog can say those two things as facts
+    /// about work already done rather than as promises about work about to start.
+    /// </summary>
+    internal static string NvRestoreConfirmText(IReadOnlyList<NvRestoreItem> plan, string sourceDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return "Restore " + plan.Count + " partition(s) through the live DA session?\n\n" +
+            string.Join("\n", plan.Select(i => "  " + i.Extent.Describe + "  <-  " + Path.GetFileName(i.ImagePath))) +
+            "\n\nFrom: " + sourceDirectory +
+            "\n\nEvery file was hash-checked against the backup manifest before this dialog, and each extent matches " +
+            "this device byte for byte. The bytes are written raw over what is there now — no erase first, which is " +
+            "what the mtkclient restore does too — then each whole range is read back and compared. The phone is " +
+            "rebooted once, after the last partition.";
+    }
+
+    /// <summary>
+    /// The names in <paramref name="requested"/> a plan does not cover, in the caller's own order. A partial restore
+    /// is legitimate — an NV backup of a device that has no proinfo is a five-partition folder — but it is never
+    /// left unsaid, because the operator needs to know which NV partitions are still whatever the phone held.
+    /// </summary>
+    internal static string MissingFromPlan(IEnumerable<string> requested, IEnumerable<string> planned)
+    {
+        var have = new HashSet<string>(planned, StringComparer.OrdinalIgnoreCase);
+        return string.Join(", ", requested.Where(n => !string.IsNullOrWhiteSpace(n) && !have.Contains(n)));
     }
 
     /// <summary>

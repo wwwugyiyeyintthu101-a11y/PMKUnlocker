@@ -4,9 +4,13 @@ namespace PMKUnlocker.MtkFirmware;
 
 internal static class ScatterParser
 {
+    /// <summary>The region word an eMMC user-area row carries. One constant, because a writer that emits a string
+    /// the reader does not know produces a package that cannot be flashed — the exact failure the writer guards.</summary>
+    internal const string EmmcUserRegion = "EMMC_USER";
+
     private static readonly HashSet<string> KnownRegions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "EMMC_USER", "EMMC_BOOT1_BOOT2", "EMMC_BOOT1", "EMMC_BOOT2", "USERDATA", "EMMC_USERDATA"
+        EmmcUserRegion, "EMMC_BOOT1_BOOT2", "EMMC_BOOT1", "EMMC_BOOT2", "USERDATA", "EMMC_USERDATA"
     };
 
     private static readonly HashSet<string> KnownStorage = new(StringComparer.OrdinalIgnoreCase)

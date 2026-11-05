@@ -916,6 +916,131 @@ public partial class Form1
         RegisterBackup(dir);
         NativeSay("[OK] Native DA: " + layout.Count + " partition(s) backed up to " + dir +
                   " — sizes and SHA-256 recorded in the manifest, and the phone was never replugged for it.");
+        // The NV set keeps its own folder shape (six images and a manifest is not a firmware package); everything
+        // else this button reads is one, and the scatter is what makes it flashable.
+        if (!nvOnly) TryWriteFirmwareScatter(dir, table, layout.Keys);
+    }
+
+    /// <summary>
+    /// P1.4 — the folder a firmware dump lands in gets a scatter beside it, so the bytes that cost one boot can go
+    /// back as a package. It describes only what was actually written next to it, at the offsets this device's own
+    /// GPT reported, and names the FLASH tab's own load pattern so the file is not invisible to the flow it feeds.
+    /// </summary>
+    private void TryWriteFirmwareScatter(string dir, MtkDaPartitionTable table, IEnumerable<string> dumped)
+    {
+        IReadOnlyList<ScatterRow> rows = MtkNativeBench.ScatterRows(table, dumped,
+            nativeDa != null ? nativeDa.Storage : null, out string refusal);
+        if (rows == null)
+        {
+            NativeSay("[*] Native DA: no scatter written — " + refusal);
+            return;
+        }
+        string chipset = nativeDa.RecipeChipset;
+        try
+        {
+            string path = Path.Combine(dir, ScatterWriter.DefaultFileName(chipset));
+            File.WriteAllText(path, ScatterWriter.Build(chipset, "PMK-device-dump", "EMMC", rows));
+            NativeSay("[+] Native DA: firmware package written — " + Path.GetFileName(path) + " with " +
+                      rows.Count(r => r.IsDownload) + " flashable row(s) of " + rows.Count);
+            NativeSay("[*] Native DA: load that file on the FLASH tab to re-flash this layout — the names a live " +
+                      "session may never program (otp, flashinfo, seccfg) carry is_download: false.");
+        }
+        catch (Exception ex)
+        {
+            // The images and the manifest are already on disk; losing the index must not throw the run away.
+            NativeSay("[!] Native DA: dumps saved, scatter NOT written: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// P1.3 — the NV erase over the live session: all six extents resolved against the device's own GPT, one ERASE
+    /// per partition, then a single reset at the end. This is the mtkclient <c>e nvram,nvdata,…;reset</c> flow with
+    /// the batched boot taken out of it — and a name the device does not carry stops the run before the first frame
+    /// instead of after four partitions are already gone.
+    /// </summary>
+    private async Task NativeNvEraseAsync() => await NativeEraseSetAsync(NvPartitions, "NV erase");
+
+    /// <summary>NV Reset over the live session — the same flow, one partition (nvdata).</summary>
+    private async Task NativeNvResetAsync() => await NativeEraseSetAsync(new[] { "nvdata" }, "NV reset");
+
+    /// <summary>
+    /// The set-erase flow every native NV wipe shares. The confirmation is the button's own, on either route — one
+    /// dialog per operation — so what happens here is the decision a name list cannot make: the extents are resolved
+    /// against the device's own GPT, and a name the device does not have throws before the first frame.
+    /// </summary>
+    private async Task NativeEraseSetAsync(string[] names, string label)
+    {
+        RequireNativeSession();
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+        IReadOnlyList<MtkDaExtent> plan = MtkNativeBench.NvErasePlan(table, names,
+            "This device's GPT names none of the partitions to erase.", out string refusal);
+        if (plan == null) throw new InvalidOperationException(refusal);
+
+        NativeSay("[*] Native DA: " + label + " of " + plan.Count + " partition(s) " +
+                  string.Join(", ", plan.Select(p => p.Name)) + ", over the session already open.");
+        foreach (MtkDaExtent extent in plan)
+        {
+            NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
+            await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
+        }
+        NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased in one session. The phone is rebooting — this " +
+                  "session closes with it, so an NV backup goes back over a new one: plug the phone in again and press NV Restore.");
+        // The reset is the mtkclient flow's trailing `;reset`, and it spends this session: the phone is on its way
+        // down, so NativeRebootAsync asks NativeGuarded to close the port when the operation returns.
+        await NativeRebootAsync();
+    }
+
+    /// <summary>
+    /// P1.3 — NV Restore over the live session. The folder must be a verified backup: its manifest is hash-checked
+    /// on disk first, then every NV entry it records is matched to the device's own extent byte for byte, and only
+    /// then does anything reach the port. That per-extent equality is what stands in for the manifest's
+    /// <c>LayoutHash</c>, which cannot be compared here — a native NV backup hashes the six names it read and an
+    /// mtkclient NV backup hashes the whole partition table, so the two kinds of folder would fail each other's
+    /// check while being equally good to restore from.
+    /// <para>
+    /// <paramref name="srcDir"/> comes from the shared folder picker in <c>NvRestoreAsync</c>; the confirmation, the
+    /// writes and the reset are all this method's, so the operator sees one dialog whichever route the button took.
+    /// </para>
+    /// </summary>
+    private async Task NativeNvRestoreAsync(string srcDir)
+    {
+        RequireNativeSession();
+        if (!File.Exists(Path.Combine(srcDir, "backup-manifest.json")))
+            throw new InvalidDataException("A live session restores only from a verified backup, and " + srcDir +
+                " has no backup-manifest.json. Pick the folder an NV backup wrote, or press Eject Device and restore " +
+                "a folder of raw dumps through mtkclient. Nothing was sent to the device.");
+
+        var manifest = ShopServices.VerifyBackup(srcDir);
+        NativeSay("[*] Native DA: backup verified, " + manifest.Files.Count + " file(s) hash-checked on disk (SHA-256) from " + srcDir + ".");
+
+        // Again no ConfigureAwait before the dialog: the table read has to come back to the UI thread.
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+        IReadOnlyList<MtkNativeBench.NvRestoreItem> plan = MtkNativeBench.NvRestorePlan(table, srcDir,
+            manifest.Files, NvPartitions, out string refusal);
+        if (plan == null) throw new InvalidOperationException(refusal);
+
+        string notRestoring = MtkNativeBench.MissingFromPlan(NvPartitions, plan.Select(p => p.Extent.Name));
+        if (notRestoring.Length > 0)
+            NativeSay("[*] Native DA: this backup holds " + plan.Count + " of the six NV partitions — not restoring " +
+                      notRestoring + ".");
+
+        if (MessageBox.Show(this, MtkNativeBench.NvRestoreConfirmText(plan, srcDir), "Native DA NV restore",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            NativeSay("[*] Native DA: NV restore declined by the operator — nothing was sent.");
+            return;
+        }
+
+        foreach (MtkNativeBench.NvRestoreItem item in plan)
+        {
+            NativeSay("[*] Native DA: writing " + item.Extent.Name + " from " + Path.GetFileName(item.ImagePath) +
+                      " (sha256 " + item.Sha256.Substring(0, 12).ToLowerInvariant() + "...)...");
+            await nativeDa.WritePartitionAsync(item.Extent.Name, item.ImagePath,
+                p => NativeProgress("restore " + item.Extent.Name, p), verify: true,
+                ct: nativeCancel.Token).ConfigureAwait(false);
+        }
+        NativeSay("[OK] Native DA: " + plan.Count + " partition(s) restored and read back byte-identical in one session. The phone is rebooting. Check the IMEI in the dialer once it is up.");
+        await NativeRebootAsync();
     }
 
     private void NativeClose()

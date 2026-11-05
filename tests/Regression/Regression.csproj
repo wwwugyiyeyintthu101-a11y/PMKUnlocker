@@ -29,6 +29,7 @@
     <Compile Include="../../PMKUnlocker/MiFlash.cs" Link="MiFlash.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterModels.cs" Link="MtkFirmware/ScatterModels.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterParser.cs" Link="MtkFirmware/ScatterParser.cs" />
+    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterWriter.cs" Link="MtkFirmware/ScatterWriter.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/FirmwarePreflight.cs" Link="MtkFirmware/FirmwarePreflight.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />

@@ -206,7 +206,7 @@ public partial class Form1
 
         Button btnMtkNvRestore = Create3DButton("⬆️ NV Restore", UiX(1), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkNvRestore.Click += async (_, _) => { try { await NvRestoreAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkNvRestore, "NV backup folder → write + reset in ONE plug cycle. Sizes pre-checked against cached GPT; otherwise printgpt in the same run verifies them.");
+        if (toolTipMain != null) Tip(btnMtkNvRestore, "NV backup folder → write + reset in ONE session. Live native DA: manifest hash-checked and every extent matched to this device byte for byte before anything is sent. No session: mtkclient, sizes pre-checked against the cached GPT.");
 
         Button btnMtkNvReset = Create3DButton("📶 NV Reset", UiX(0), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Cyan);
         btnMtkNvReset.Click += async (_, _) =>
@@ -214,17 +214,22 @@ public partial class Form1
             // The same confirmation NV Erase asks for. This one erases a single partition, but it still cannot be
             // undone from the PC without an NV backup, and the operator should see which five are NOT touched.
             if (MessageBox.Show(this, "Reset NV data?\n\nErases: nvdata (only).\nNot touched: nvram, nvcfg, proinfo, protect1, protect2.\n\nThe modem rebuilds nvdata on the next boot. If this device carried a patched NV, restore an NV backup afterwards.", "NV Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("nvdata", "[OK] NV data erased — IMEI/baseband reset. Restore NV backup after.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
+            // One dialog, then whichever session is open. The native route re-resolves nvdata against the device's
+            // own GPT and erases nothing at all if the phone does not report that partition.
+            try { if (nativeDa != null) { await NativeGuarded("NV reset", NativeNvResetAsync); return; } await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("nvdata", "[OK] NV data erased — IMEI/baseband reset. Restore NV backup after.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
         };
-        if (toolTipMain != null) Tip(btnMtkNvReset, "mtkclient e nvdata + reset in ONE session — erases nvdata ONLY (nvram/nvcfg/proinfo/protect1/protect2 untouched). Run NV Backup first.");
+        if (toolTipMain != null) Tip(btnMtkNvReset, "e nvdata + reset in ONE session, over the live native DA when one is open — erases nvdata ONLY (nvram/nvcfg/proinfo/protect1/protect2 untouched). Run NV Backup first.");
 
         Button btnMtkNvErase = Create3DButton("🗑 NV Erase", UiX(1), UiY(4), UiBtnW, UiBtnH, ButtonTheme.Red);
         btnMtkNvErase.Click += async (_, _) =>
         {
             if (MessageBox.Show(this, "Erase ALL NV partitions?\n\n" + string.Join(", ", NvPartitions) + "\n\nIMEI/baseband will be lost — restore an NV backup afterwards.", "NV Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync(string.Join(",", NvPartitions), "[OK] NV erased — all NV partitions wiped. Restore NV backup now.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
+            // The same one-dialog rule as NV Reset: the dialog is about the operation, the route only decides which
+            // session carries it. Over a live session all six are resolved against the device's own GPT first, so a
+            // phone missing one of them has nothing erased rather than five of six.
+            try { if (nativeDa != null) { await NativeGuarded("NV erase", NativeNvEraseAsync); return; } await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync(string.Join(",", NvPartitions), "[OK] NV erased — all NV partitions wiped. Restore NV backup now.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
         };
-        if (toolTipMain != null) Tip(btnMtkNvErase, "mtkclient e nvram,nvdata,nvcfg,proinfo,protect1,protect2 + reset in ONE session. DESTRUCTIVE — backup first.");
+        if (toolTipMain != null) Tip(btnMtkNvErase, "e nvram,nvdata,nvcfg,proinfo,protect1,protect2 + reset in ONE session. Over the live native DA all six are resolved against the device's own GPT first, so a phone missing one erases nothing at all. DESTRUCTIVE — backup first.");
 
         Panel grpNv = CreateGroupPanel("NV BACKUP / RESTORE", UiX(0), UiY(4), 2, btnMtkNvBackup, btnMtkNvRestore);
         // The two wipes sit in their own frame, side by side with the frames above: NV Reset is one partition
@@ -273,7 +278,7 @@ public partial class Form1
         {
             Location = new Point(UiX(0), UiY(10)),
             Size = new Size(850, 30),
-            Text = "Every op runs in ONE mtkclient session (native + fallback + reset) — one plug cycle, auto-retry once. NV Reset erases nvdata only; NV Erase wipes all six NV — run NV Backup first. Format All erases OS + user data, keeps bootchain/seccfg/NV. IMEI Read works offline from a backup.",
+            Text = "Each op runs in ONE session and needs one plug cycle: with a live native DA the NV ops go through it, otherwise mtkclient (native + fallback + reset, auto-retry once). NV Reset erases nvdata only; NV Erase wipes all six NV — run NV Backup first. NV Restore writes only from a hash-verified backup folder and reads every partition back. Format All erases OS + user data, keeps bootchain/seccfg/NV. IMEI Read works offline from a backup.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 7.5f),
             AutoEllipsis = true
@@ -299,7 +304,7 @@ public partial class Form1
             // that starts within its width, and the first words of the hint are painted over.
             Location = new Point(UiX(0), UiY(0) + 74),
             Size = new Size(850, 40),
-            Text = "Tick partitions on the FLASH tab, then Backup Selected. Backups are checked against live partition sizes and stored in a new folder. Restore writes one selected USER partition (exact-size raw backup only). The six NV partitions have their own button on the UNLOCK tab.",
+            Text = "Tick partitions on the FLASH tab, then Backup Selected: one native DA session reads them all and writes <chipset>_scatter.txt beside the images, so the folder is a firmware package the FLASH tab can re-flash. It needs a booted DA — the batched client pays one boot and one replug per partition. Restore writes one selected USER partition (exact-size raw backup only). The six NV partitions have their own button on the UNLOCK tab.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
             AutoEllipsis = false
@@ -1653,29 +1658,17 @@ public partial class Form1
         if (!Directory.EnumerateFiles(dir).Any(f => new FileInfo(f).Length > 0)) throw new IOException("GPT backup files were not produced.");
         Log("[OK] GPT files saved: " + dir, Color.LightGreen);
     });
-    private Task BackupMediaTekAsync() => nativeDa != null
-        // The batched client pays one full boot per partition; a live session reads them all in one, through the
-        // framing the dump button already proved.
-        ? NativeGuarded("partition backup", () => NativeBackupAsync(false))
-        : RunMediaTekWorkflowAsync(async () =>
+    private Task BackupMediaTekAsync()
     {
-        var selected = SelectedMediaTekNames();
-        var table = await GetMediaTekTableAsync();
-        if (selected.Count == 0) throw new InvalidOperationException("Select partitions in Flash first.");
-        using var pick = new FolderBrowserDialog { Description = "Select backup destination" };
-        if (pick.ShowDialog(this) != DialogResult.OK) return;
-        string dir = Path.Combine(pick.SelectedPath, "MTK-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
-        foreach (string name in selected)
-        {
-            var part = table.Single(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            string file = Path.Combine(dir, name + ".bin");
-            var result = await MediaTekCommandAsync(new[] { "r", name, file }); result.RequireSuccess();
-            if (!File.Exists(file) || new FileInfo(file).Length != part.Length) throw new IOException("Backup incomplete: " + name);
-            Log("[OK] Backup " + name, Color.LightGreen);
-        }
-        ShopServices.WriteBackup(dir, "MTK", table.ToDictionary(p => p.Name, p => p.Length), selected, Application.ProductVersion);
-        RegisterBackup(dir); Log("[OK] Backup sizes and SHA-256 recorded: " + dir, Color.LightGreen);
-    });
+        // The batched client pays one full boot per partition; a live session reads them all in one, through the
+        // framing the dump button already proved — and only a live session can carry the scatter the package needs.
+        if (nativeDa != null) return NativeGuarded("partition backup", () => NativeBackupAsync(false));
+        int count = SelectedMediaTekNames().Count;
+        Log("[!] Firmware backup needs a live native DA session: the batched client pays one full BROM boot and one " +
+            "replug per partition, so " + count + " partition(s) would mean " + count + " boots. Press Boot Device " +
+            "on the INFO tab and run this again.", Color.Orange);
+        return Task.CompletedTask;
+    }
 
     private static readonly string[] NvPartitions = { "nvram", "nvdata", "nvcfg", "proinfo", "protect1", "protect2" };
     private const string MtkNvBackupRootKey = "MtkNvBackupRoot";
@@ -1828,6 +1821,15 @@ public partial class Form1
         string srcDir = pick.SelectedPath;
         var files = NvPartitions.Where(n => File.Exists(Path.Combine(srcDir, n + ".bin"))).ToList();
         if (files.Count == 0) throw new InvalidOperationException("No NV backup files (nvram.bin, nvdata.bin …) in the selected folder.");
+        // One NV restore button, two routes — the same rule as NV Backup. A live session hash-checks the manifest,
+        // matches every extent to this device byte for byte and writes over the session it already has; without one
+        // the batched client still runs its single `multi` session. Each route asks its own confirmation, so the
+        // operator sees exactly one dialog, and sees it with the facts the route actually checked.
+        if (nativeDa != null)
+        {
+            await NativeGuarded("NV restore", () => NativeNvRestoreAsync(srcDir));
+            return;
+        }
         string detail = string.Join("\n", files.Select(f => f + ".bin"));
         if (MessageBox.Show(this, "Restore NV backup?\n\n" + detail + "\n\nfrom:\n" + srcDir, "NV Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         await RunMediaTekWorkflowAsync(async () =>

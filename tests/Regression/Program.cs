@@ -3586,6 +3586,256 @@ try
         "MTK P1.2: the batch backup is reads only — no WRITE, ERASE or COMMIT frame appears anywhere in a two-partition run");
     bkSes.Dispose();
 
+    // ---- P1.3: the NV erase set and the NV restore plan, both decided before the port is touched ------
+    // The risk this stage adds is not a new frame shape — ERASE and WRITE+verify are both hardware-proven — it is
+    // a BATCH: six partitions are resolved, confirmed and then sent, so the decision that stops a half-done wipe
+    // or a restore from a folder that belongs to another phone has to be made on the host, from the device's own
+    // GPT and the backup's own manifest, with zero frames already spent.
+    IReadOnlyList<MtkDaExtent> epSet = MtkNativeBench.NvErasePlan(bkTable, new[] { "NVRAM", "logo", "nvram" },
+        "Nothing to erase.", out string epRefusal);
+    Check(epRefusal == null && epSet.Count == 2 && epSet[0].Name == "nvram" && epSet[1].Name == "logo",
+        "MTK P1.3 ERASE: the set is the device's own extents in the order asked — names fold case-insensitively and one asked twice is erased once, because the button carries six names and the phone decides six extents");
+    Check(MtkNativeBench.NvErasePlan(bkTable, new[] { "nvram", "boot" }, "x", out string epMissing) == null &&
+              epMissing.Contains("no partition named 'boot'") && epMissing.Contains("2 entries read") &&
+              epMissing.Contains("Nothing was sent to the device"),
+        "MTK P1.3 ERASE: a name this device's own GPT does not report refuses the whole set with the entry count that proves it was checked — five of six gone and a throw at the sixth is the failure an all-or-nothing plan cannot have");
+    var guardedTable = new MtkDaPartitionTable(512, new[]
+    {
+        new MtkDaExtent("nvram", 100, 100, 512),
+        new MtkDaExtent("gpt", 1, 63, 512),
+        new MtkDaExtent("seccfg", 2310144, 2326527, 512),
+    }, null, null);
+    Check(MtkNativeBench.NvErasePlan(guardedTable, new[] { "nvram", "gpt" }, "x", out string epTable) == null &&
+              epTable.Contains("partition table or the chip identity") &&
+              epTable.Contains("whole set is refused before the first frame"),
+        "MTK P1.3 ERASE: a set that carries the partition table is refused by the same never-program gate the single-partition erase obeys — batching does not inherit a wider permission");
+    Check(MtkNativeBench.NvErasePlan(guardedTable, new[] { "nvram", "seccfg" }, "x", out string epSeccfg) == null &&
+              epSeccfg.Contains("program payload has never been measured"),
+        "MTK P1.3 ERASE: seccfg inside an erase set is refused too — wiping the lock policy is not part of an NV job, and a batch is exactly where it could slip through");
+    Check(MtkNativeBench.NvErasePlan(bkTable, new[] { "", "  " }, "Nothing to erase.", out string epBlank) == null &&
+              epBlank == "Nothing to erase.",
+        "MTK P1.3 ERASE: blank names are not counted as a set, and an empty set is the caller's own reason rather than a silent success");
+
+    var (p3Tab, p3Ent) = SeccfgTable(("nvram", 100, 100), ("logo", 2987008, 2987009));
+    var (p3Ses, p3Dev) = await BootedDa(null, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(p3Tab))).Concat(ReadGroup(LcHex(p3Ent))));
+    MtkDaPartitionTable p3Table = await p3Ses.ReadPartitionTableAsync();
+    int p3RefusedStart = p3Dev.Writes.Count;
+    Check(MtkNativeBench.NvErasePlan(p3Table, new[] { "nvram", "boot" }, "x", out _) == null &&
+              p3Dev.Writes.Count == p3RefusedStart,
+        "MTK P1.3 ERASE: with the table cached, a refused set costs the port not one frame — the refusal is a decision, not a transaction");
+    IReadOnlyList<MtkDaExtent> p3Set = MtkNativeBench.NvErasePlan(p3Table, new[] { "nvram", "logo" }, "x", out _);
+    string NvramStruct = ExtentStruct(100 * 512, 512);
+    string P3LogoStruct = ExtentStruct(LogoAt, 1024);   // this fixture's logo is two LBAs, so 1024 byte(s) — not the 0x1000 the B3 fixture uses
+    int p3Start = p3Dev.Writes.Count;
+    p3Dev.Append(new[] { Status, Status, DaFrame("04000440"), DaFrame("64000000"), DaFrame("05000440") }
+        .Concat(new[] { Status, Status, DaFrame("04000440"), DaFrame("64000000"), DaFrame("05000440") }));
+    foreach (MtkDaExtent extent in p3Set)
+        await p3Ses.ErasePartitionAsync(extent.Name, default);
+    CheckFrames(SentFrames(p3Dev, p3Start),
+        "MTK P1.3 ERASE: the set is two bare erase groups and nothing else — no second table read, no geometry, no limits, no preamble",
+        EraseCmd, NvramStruct, ZeroWord, EraseCmd, P3LogoStruct, ZeroWord);
+    p3Ses.Dispose();
+
+    // The backup folder the restore is given: two real files and the manifest the backup path itself writes.
+    string nvSrc = Path.Combine(dir, "p13-nv-backup");
+    Directory.CreateDirectory(nvSrc);
+    File.WriteAllBytes(Path.Combine(nvSrc, "nvram.bin"), Enumerable.Repeat((byte)0x01, 512).ToArray());
+    File.WriteAllBytes(Path.Combine(nvSrc, "logo.bin"), Enumerable.Repeat((byte)0x02, 1024).ToArray());
+    Dictionary<string, long> nvSrcLayout = MtkNativeBench.BackupLayout(bkTable, new[] { "nvram", "logo" }, "x", out _);
+    ShopServices.WriteBackup(nvSrc, "MTK", nvSrcLayout, nvSrcLayout.Keys, "test");
+    var nvManifest = ShopServices.VerifyBackup(nvSrc);
+    IReadOnlyList<MtkNativeBench.NvRestoreItem> rp = MtkNativeBench.NvRestorePlan(bkTable, nvSrc, nvManifest.Files,
+        new[] { "nvram", "nvcfg", "LOGO" }, out string rpRefusal);
+    Check(rpRefusal == null && rp.Count == 2 && rp[0].Extent.Name == "nvram" && rp[1].Extent.Name == "logo" &&
+              rp[0].ImagePath == Path.Combine(nvSrc, "nvram.bin") &&
+              rp[0].Sha256 == nvManifest.Files.Single(f => f.Partition == "nvram").Sha256,
+        "MTK P1.3 RESTORE: the plan is the manifest's own entries matched to the device's own extents, in the order the six are asked, with the image path contained by the backup folder and the hash travelling with it");
+    Check(MtkNativeBench.MissingFromPlan(new[] { "nvram", "nvcfg", "logo" }, rp.Select(i => i.Extent.Name)) == "nvcfg",
+        "MTK P1.3 RESTORE: a partition the backup does not carry is named as not restored — a five-partition folder is legal, an unspoken one is not");
+    var shrunkTable = new MtkDaPartitionTable(512, new[]
+    { new MtkDaExtent("nvram", 100, 100, 512), new MtkDaExtent("logo", 2987008, 2987008, 512) }, null, null);
+    Check(MtkNativeBench.NvRestorePlan(shrunkTable, nvSrc, nvManifest.Files, new[] { "nvram", "logo" },
+        out string rpSize) == null &&
+              rpSize.Contains("logo is 1024 byte(s) in this backup and 512 byte(s) on this device") &&
+              rpSize.Contains("nothing was written"),
+        "MTK P1.3 RESTORE: exact byte equality per extent is the gate, and it names both numbers — the size the backup claims and the size the device reports, because a partial overlap would silently leave old NV bytes behind");
+    var oneNameTable = new MtkDaPartitionTable(512,
+        new[] { new MtkDaExtent("nvram", 100, 100, 512) }, null, null);
+    Check(MtkNativeBench.NvRestorePlan(oneNameTable, nvSrc, nvManifest.Files, new[] { "nvram", "logo" },
+        out string rpName) == null &&
+              rpName.Contains("This backup carries logo (1024 byte(s))") && rpName.Contains("1 entries read"),
+        "MTK P1.3 RESTORE: a backup that names a partition this phone's GPT does not have is another phone's layout, and the whole set is refused before the first write");
+    Check(MtkNativeBench.NvRestorePlan(bkTable, nvSrc, nvManifest.Files, new[] { "nvdata", "proinfo" },
+        out string rpNone) == null &&
+              rpNone.Contains("records none of the NV partitions") && rpNone.Contains("2 file(s) recorded"),
+        "MTK P1.3 RESTORE: a folder with no NV partition in it is refused with what it does hold, and points at the route that can still serve raw dumps");
+    var otherNames = new[]
+    {
+        new ShopServices.BackupFile("nvram", "nvram.bin", 512, "AA"),
+        new ShopServices.BackupFile("logo", "logo.bin", 1024, "BB"),
+        new ShopServices.BackupFile("boot", "boot.bin", 2048, "CC"),
+    };
+    IReadOnlyList<MtkNativeBench.NvRestoreItem> rpMixed = MtkNativeBench.NvRestorePlan(bkTable, nvSrc, otherNames,
+        new[] { "nvram", "nvdata", "nvcfg", "proinfo", "protect1", "protect2" }, out string rpMixedRefusal);
+    Check(rpMixedRefusal == null && rpMixed.Count == 1 && rpMixed[0].Extent.Name == "nvram",
+        "MTK P1.3 RESTORE: entries outside the six are ignored, not refused — which is what lets a 43-partition mtkclient manifest and a six-name native manifest both serve the same NV restore");
+
+    string rpConfirm = MtkNativeBench.NvRestoreConfirmText(rp, nvSrc);
+    Check(rpConfirm.Contains("Restore 2 partition(s)") && rpConfirm.Contains(nvSrc) &&
+              rpConfirm.Contains("hash-checked against the backup manifest") &&
+              rpConfirm.Contains("read back and compared") && rpConfirm.Contains("rebooted once"),
+        "MTK P1.3 RESTORE: the one dialog says what was already proved (hash-checked, extents matched) and what will be done (raw write, full read-back, one reboot) — each of those is a fact about code paths that exist, not a promise");
+    Check(MtkNativeBench.NvRestoreConfirmText(new[] { rp[0] }, nvSrc).Contains("Restore 1 partition(s)"),
+        "MTK P1.3 RESTORE: the dialog counts what it lists, so a partial restore is not presented as a whole one");
+
+    var (rpTab, rpEnt) = SeccfgTable(("nvram", 100, 100), ("logo", 2987008, 2987009));
+    var rpLines = new List<string>();
+    var (rpSes, rpDev) = await BootedDa(rpLines, StorageQuery().Concat(LimitsQuery())
+        .Concat(ReadGroup(LcHex(rpTab))).Concat(ReadGroup(LcHex(rpEnt)))
+        .Concat(Enumerable.Repeat(Status, 7)).Concat(ReadGroup(Filler(0x01, 512)))
+        .Concat(Enumerable.Repeat(Status, 7)).Concat(ReadGroup(Filler(0x02, 1024))));
+    await rpSes.ReadPartitionTableAsync();
+    int rpStart = rpDev.Writes.Count;
+    foreach (MtkNativeBench.NvRestoreItem item in rp)
+        await rpSes.WritePartitionAsync(item.Extent.Name, item.ImagePath, null, verify: true, default);
+    CheckFrames(SentFrames(rpDev, rpStart),
+        "MTK P1.3 RESTORE: the planned set goes out as one WRITE + read-back per partition — the bytes are the backup's own files, and the cached table, geometry and limits mean the cable carries nothing else",
+        WriteCmd, NvramStruct, ZeroWord, "00020000", Filler(0x01, 512), PreFrame, CommitCmd,
+        ReadCmd, NvramStruct, ZeroWord,
+        WriteCmd, P3LogoStruct, ZeroWord, "00080000", Filler(0x02, 1024), PreFrame, CommitCmd,
+        ReadCmd, P3LogoStruct, ZeroWord);
+    Check(rpLines.Count(l => l.Contains("VERIFY OK")) == 2,
+        "MTK P1.3 RESTORE: every partition in the set is read back and compared on its own — one verified write is not a verified set");
+    rpSes.Dispose();
+
+    // ---- P1.4: the scatter this tool writes beside its own firmware dump ------------------------------
+    static bool Throws(Action build)
+    {
+        try { build(); } catch (InvalidDataException) { return true; }
+        return false;
+    }
+
+    // The risk here is a file the FLASH tab reads back as a WRITE LIST: an offset printed as an LBA, a name that
+    // breaks the key/value grammar, or a table area marked downloadable is a package that programs the wrong bytes.
+    // So every check is the round trip — build rows from the device's own extents, render, then re-read with the
+    // parser the FLASH tab uses and see which rows THAT calls flashable.
+    var swTable = new MtkDaPartitionTable(512, new[]
+    {
+        new MtkDaExtent("nvram", 0x297400, 0x2b73ff, 512),
+        new MtkDaExtent("boot", 0x2b9400, 0x2d93ff, 512),
+        new MtkDaExtent("seccfg", 2310144, 2326527, 512),
+        new MtkDaExtent("otp", 0x745a401, 0x746fc00, 512),
+    }, null, null);
+    MtkStorageInfo swEmmc = MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(0xE8F800000ul)));
+    MtkStorageInfo swUfs = MtkStorageInfo.ParseUfs(Convert.FromHexString(UfsGeometryPayload()));
+    IReadOnlyList<ScatterRow> swRows = MtkNativeBench.ScatterRows(swTable,
+        new[] { "nvram", "boot", "seccfg", "otp" }, swEmmc, out string swRefusal);
+    Check(swRefusal == null && swRows.Count == 4 && swRows.All(r => r.Region == "EMMC_USER"),
+        "MTK P1.4 SCATTER: one row per dumped partition, all in the region a GPT user area lives in");
+    Check(swRows.Single(r => r.Name == "boot") is { FileName: "boot.bin", ByteOffset: 0x57280000, ByteLength: 0x4000000 },
+        "MTK P1.4 SCATTER: the extent is carried in BYTES (LBA 0x2b9400 × 512 = 0x57280000, 64 MiB) and named boot.bin — " +
+        "the file the backup loop actually wrote, and the unit a scatter addresses in");
+    Check(swRows.Single(r => r.Name == "boot").IsDownload && swRows.Single(r => r.Name == "nvram").IsDownload &&
+          !swRows.Single(r => r.Name == "otp").IsDownload && !swRows.Single(r => r.Name == "seccfg").IsDownload,
+        "MTK P1.4 SCATTER: the chip identity and the lock policy are dumped but marked is_download false — the same " +
+        "gate the single-partition write and the erase set obey, so a package cannot offer what a session refuses");
+    Check(MtkNativeBench.ScatterRows(swTable, new[] { "nvram", "tee1" }, swEmmc, out string swMissing) == null &&
+          swMissing.Contains("tee1") && swMissing.Contains("no scatter is written"),
+        "MTK P1.4 SCATTER: a name the live GPT does not report stops the file instead of inventing an offset for it");
+    Check(MtkNativeBench.ScatterRows(swTable, new[] { "nvram" }, swUfs, out string swUfsRefusal) == null &&
+          swUfsRefusal.Contains("UFS") && swUfsRefusal.Contains("no scatter is written"),
+        "MTK P1.4 SCATTER: a UFS device gets its images and manifest but no scatter — the region word of a UFS " +
+        "package has never been read off one here, and an invented region is unmeasured bytes in a write list");
+    Check(MtkNativeBench.ScatterRows(swTable, Array.Empty<string>(), swEmmc, out string swEmpty) == null &&
+          swEmpty.Contains("nothing was dumped"),
+        "MTK P1.4 SCATTER: an empty dump does not produce an empty package file");
+    Check(ScatterWriter.DefaultFileName("MT6765") == "MT6765_scatter.txt" &&
+          ScatterWriter.DefaultFileName("MT 67/65!").EndsWith("scatter.txt", StringComparison.Ordinal),
+        "MTK P1.4 SCATTER: the package is named so the FLASH tab's own *scatter*.txt filter shows it, and a messy " +
+        "chipset string cannot make an unusable file name");
+
+    string swDir = Path.Combine(Path.GetTempPath(), "pmk-scatter-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(swDir);
+    try
+    {
+        foreach (ScatterRow r in swRows) File.WriteAllBytes(Path.Combine(swDir, r.FileName), new byte[4096]);
+        string swText = ScatterWriter.Build("MT6765", "PMK-device-dump", "EMMC", swRows);
+        string swPath = Path.Combine(swDir, ScatterWriter.DefaultFileName("MT6765"));
+        File.WriteAllText(swPath, swText);
+        FirmwarePackage swPkg = ScatterParser.Load(swPath);
+        Check(swText.StartsWith(ScatterWriter.Header + "\r\n- general:", StringComparison.Ordinal) &&
+              swPkg.FormatSupported && swPkg.Platform == "MT6765" && swPkg.Entries.Count == 4,
+        "MTK P1.4 SCATTER: what the writer emits, the reader accepts — four rows, platform MT6765");
+        Check(swPkg.Find("boot") is { LinearStart: 0x57280000, Size: 0x4000000, NumbersValid: true, Region: StorageRegion.EmmcUser },
+        "MTK P1.4 SCATTER: the offset and size survive the hex round trip (the failure this check exists for is an " +
+        "LBA written where a byte address belongs — every row would then program a different partition)");
+        Check(swPkg.Find("boot") is { PhysicalStart: 0x57280000 },
+            "MTK P1.4 SCATTER: physical_start_addr carries the same byte offset as the linear one — the reader treats " +
+            "a number without 0x as decimal, so a missing prefix would silently aim the row at a different byte");
+        Check(swPkg.FlashableEntries.Count() == 2 &&
+              swPkg.Find("boot") is { Selectable: true, ImageExists: true } &&
+              swPkg.Find("nvram") is { Selectable: true } &&
+              swPkg.Find("otp") is { Selectable: false } && swPkg.Find("seccfg") is { Selectable: false },
+        "MTK P1.4 SCATTER: re-parsed, exactly the dumped-and-allowed rows are the ones the FLASH grid can select");
+        Check(!swPkg.Issues.Any(i => i.Severity == IssueSeverity.Error) &&
+              !swPkg.Issues.Any(i => i.Code == "address-overlap") && !swPkg.HasBlockingErrors,
+        "MTK P1.4 SCATTER: the generated package carries no error and no overlap — a device's own extents cannot " +
+        "overlap, and if the reader ever says otherwise the dump was not the table it claimed");
+        Check(FirmwarePreflight.Run(swPkg, new[] { "boot", "nvram" }, null,
+                  new BackendCapabilities { Name = "mtkclient", SupportsFlash = true })
+              .Checks.Single(c => c.Name == "Scatter structure").State == VerifyState.VerifiedCompatible,
+        "MTK P1.4 SCATTER: the preflight the flash button runs accepts a self-made package");
+        Check(FirmwarePreflight.Run(swPkg, new[] { "otp" }, null,
+                  new BackendCapabilities { Name = "mtkclient", SupportsFlash = true })
+              .Checks.Single(c => c.Name == "Selected image files").State == VerifyState.Mismatch,
+        "MTK P1.4 SCATTER: selecting the never-program row anyway is blocked by preflight — the reader never maps a " +
+        "row it excludes, so its image counts as missing");
+    }
+    finally { try { Directory.Delete(swDir, true); } catch { } }
+
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC",
+              new[] { new ScatterRow("bad:name", "x.bin", 0, 0x1000, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: a partition name carrying a colon is refused — the reader splits on the first colon, so " +
+        "one line would become two keys");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC",
+              new[] { new ScatterRow("a\r\n- partition_index: SYS999", "x.bin", 0, 0x1000, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: a name carrying a newline cannot inject a row into the package it is written into");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC",
+              new[] { new ScatterRow("boot", "..\\escape.bin", 0, 0x1000, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: a file name that could leave the package folder is refused at build, before a reader has to block it");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC", new[]
+              {
+                  new ScatterRow("boot", "boot.bin", 0, 0x1000, "EMMC_USER", true),
+                  new ScatterRow("BOOT", "boot2.bin", 0x1000, 0x1000, "EMMC_USER", true),
+              })),
+        "MTK P1.4 SCATTER: a duplicated partition name is refused — the reader drops its second row, so the image " +
+        "pointed at there would silently never be written");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC", new[]
+              {
+                  new ScatterRow("boot", "boot.bin", 0, 0x2000, "EMMC_USER", true),
+                  new ScatterRow("nvram", "nvram.bin", 0x1000, 0x1000, "EMMC_USER", true),
+              })),
+        "MTK P1.4 SCATTER: two rows sharing bytes are refused instead of becoming a write list with an order " +
+        "dependency nobody chose");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC",
+              new[] { new ScatterRow("boot", "boot.bin", 0, 0, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: a zero-length extent has no place in a scatter (the reader would mark the row invalid)");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "EMMC",
+              new[] { new ScatterRow("boot", "boot.bin", 0, 0x1000, "UFS_LU0", true) })),
+        "MTK P1.4 SCATTER: a region our own reader does not know is refused at build — the package would be " +
+        "unselectable on the very tab it is written for");
+    Check(Throws(() => ScatterWriter.Build("", "p", "EMMC",
+              new[] { new ScatterRow("boot", "boot.bin", 0, 0x1000, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: no chipset, no package — an empty platform makes the reader reject the whole file as an " +
+        "unsupported scatter");
+    Check(Throws(() => ScatterWriter.Build("MT6765", "p", "UFS",
+              new[] { new ScatterRow("boot", "boot.bin", 0, 0x1000, "EMMC_USER", true) })) &&
+          Throws(() => ScatterWriter.Build("MT6765", "p", "HW_STORAGE_EMMC",
+              new[] { new ScatterRow("boot", "boot.bin", 0, 0x1000, "EMMC_USER", true) })),
+        "MTK P1.4 SCATTER: the general storage word is the reader's own EMMC — a UFS or an entry-level word is " +
+        "refused here, because the writer can only describe the one storage it measured");
+
     // ---- B3.6: the guards that must fire before the extent reaches the device ------------------------
     var (oSes, oDev) = await BootedDa(null, StorageQuery());
     int oStart = oDev.Writes.Count;
