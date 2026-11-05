@@ -10,7 +10,7 @@
     <PlatformTarget>x86</PlatformTarget>
     <Version>7.3.5</Version>
     <FileVersion>7.3.5.0</FileVersion>
-    <InformationalVersion>7.3.5-preview</InformationalVersion>
+    <InformationalVersion>7.3.5</InformationalVersion>
     <Product>PMK Mobile Tool</Product>
     <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
     <ApplicationIcon>pmk.ico</ApplicationIcon>
