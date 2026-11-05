@@ -3,7 +3,7 @@
 **Status date: 2026-11-05.** This file is the single plan of record: what the tool can actually do today, what was proven on hardware, what is uncommitted, and the ordered list of work that remains. Detailed RUN logs are summarised here; the raw evidence stays in the files named in §9.
 
 **Current baseline**
-- `tests/Regression`: **775 checks** — P1.1's 30 GPT-snapshot checks and P1.2's 6 backup-layout/manifest checks on top of **739 at `07a8e3e`** (that batch being B6.10's four walk-timing marks, +4 over the 735 at `c93ea36`; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`). The P1.1/P1.2 batch is **uncommitted in the working tree**.
+- `tests/Regression`: **775 checks at `e3045f5`** — P1.1's 30 GPT-snapshot checks and P1.2's 6 backup-layout/manifest checks on top of **739 at `07a8e3e`** (that batch being B6.10's four walk-timing marks, +4 over the 735 at `c93ea36`; 722 before the B6.7 auto-pipe wiring, 703 before the B6.6 auto-recipe wiring, 700 at `7bc88a5`).
 - Desktop Debug and Release: **0 warnings / 0 errors**; solution build (desktop + license server + admin + regression): **0/0**.
 - Native MTK DA session is hardware-proven on **MT6765 (HW 0x0766)** and **MT6877 (HW 0x0959)**; every other chipset is first-run risk.
 - Recipes (`mtk/boot-profiles`) are untracked licensing-sensitive artefacts; without them the NATIVE tab is deliberately absent.
@@ -128,7 +128,7 @@
 **Still open**
 1. **MT6765 re-run after the split-framing change — DONE, and its write half closed on the MT6877 instead** (boot + geometry + live GPT 2026-11-04 10:42/11:12/11:15; `para` read → read determinism → write → `VERIFY OK` → independent re-read 2026-11-04 11:24–11:31, see B6.9). What is left of it is only the optional sacrificial **erase** + restore, and a 9A `para` dump if that unit specifically wants one.
 2. **15 s DA1 stall on MT6877 — attributed, and the phone is exonerated** (B6.10, 2026-11-04, measured from the log and from the capture the recipe was compiled from — no phone touched). It is **20–22 s in every one of the eight recorded MT6877 boots**, and the same window on MT6765 is 1–2 s. Of that, **6 s is two named, optional CDC control probes** (steps 162/163, `CtrlProbeTimeoutMs` 2,000 + `CtrlProbeAskSlackMs` 1,000 each, answered only ~300–600 s later by the abandoned transfer); ~1 s is the steps the log does show; and the remaining **~14 s is host-side per-step cost in the window the wire trace stops printing at step 220** — 4,711 reads and 2,776 writes, ≈3 ms per read, against the reference client's measured **0.834 ms per 512-byte IN and 0.093 ms per 512-byte OUT on this same phone**. What is left is not *"is the phone slow?"* (it is not) but *"what inside 221→7708 costs the 3 ms?"*, which `WalkPhaseLine` now answers from the next boot's own log.
-3. **Docs/commit of this closure batch — DONE.** Its docs half shipped in `c93ea36` (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry) and the B6.10 walk-timing batch was committed as `07a8e3e`. What is uncommitted now is the **P1.1/P1.2 batch** (native GPT save + native partition backup) plus the re-stated dates and baselines in this file. A push still needs its own word.
+3. **Docs/commit of this closure batch — DONE.** Its docs half shipped in `c93ea36` (0x0959 in `BootProvenOnHardware`, KiB size text, simple-log screen, log retry) and the B6.10 walk-timing batch was committed as `07a8e3e`. The **P1.1/P1.2 batch** then shipped as `e3045f5` (775 checks, Debug/Release 0/0); the working tree holds no uncommitted code. A push still needs its own word.
 
 **B6.6 — boot recipe = Auto (2026-11-04)**
 PMK's word: *"boot profile နေရာကိုလဲပြင်ပေးပါ auto ထားပေးပါ ခနခန သွားချိန်းနေရလို့ပါ"* — with two phones on the bench he was switching the recipe dropdown before every boot.
@@ -211,7 +211,7 @@ Open item 2 said "15 s DA1 stall", guessed at either 15 × 1 s armed-read timeou
 
 Regression **775** (+30 P1.1, +6 P1.2): the snapshot writer's folder shape, byte-exact geometry decode, both CRC verdicts and the capacity note, every geometry refusal costing zero frames, and a successful save costing **one** read. P1.2 pins that a missing name costs zero frames, that a refusal names the count read, and that a manifest's recorded sizes equal the extents the reads were addressed with. Debug/Release **0/0**.
 
-**Not done:** the hardware run. Both flows need PMK's clicks — boot, then `📋 Save GPT` on the SERVICE page, then a `Backup` — with the save folder and the backup folder kept as evidence. Nothing in this batch is committed yet.
+**Not done:** the hardware run. Both flows need PMK's clicks — boot, then `📋 Save GPT` on the SERVICE page, then a `Backup` — with the save folder and the backup folder kept as evidence. The code itself is committed as `e3045f5`; a hardware run does not depend on it being pushed.
 
 ---
 
@@ -313,7 +313,7 @@ dotnet run --project tests/Regression/Regression.csproj
 ```
 
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
-- Debug and Release must both be 0/0; the regression baseline is 775 (P1.1 + P1.2, uncommitted; 739 at `07a8e3e`, 735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
+- Debug and Release must both be 0/0; the regression baseline is 775 at `e3045f5` (739 at `07a8e3e`, 735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.
 
 ---
