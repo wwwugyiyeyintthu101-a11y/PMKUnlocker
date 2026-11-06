@@ -530,11 +530,11 @@ namespace PMKUnlocker
                 Text = "👤 " + email + plan + exp + days,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
-                Padding = new Padding(0, 0, 12, 0),
+                Padding = new Padding(0, 0, 4, 0),
                 AutoEllipsis = true,
                 BackColor = Color.Transparent,
                 ForeColor = Color.FromArgb(235, 225, 255),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 9.75f, FontStyle.Bold)
             };
             if (toolTipMain != null)
                 Tip(lbl,
@@ -699,8 +699,14 @@ namespace PMKUnlocker
                 Dock = DockStyle.Right,
                 Width = 500,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 10, 12, 6)
+                Padding = new Padding(0, 10, 10, 6)
             };
+            // badge စာတန်း အပြည့်ပေါ်ဖို့: panel ကို text အရှည်နဲ့ တိုင်းချိန် (AutoEllipsis "…" မကျအောင်)
+            // email ရှည်တဲ့ account အတွက်ပဲ — window design width 1310 က ဘယ်ဘက် cluster 758 ကို နှုတ်ထားတဲ့ အများဆုံး
+            int badgeNeed = TextRenderer.MeasureText(lblLicenseInfo.Text, lblLicenseInfo.Font).Width + 26;
+            int badgeMax = 1310 - 758;   // 552
+            if (badgeNeed > panelRightInfo.Width)
+                panelRightInfo.Width = Math.Max(panelRightInfo.Width, Math.Min(badgeNeed, badgeMax));
             // Dock order: last added = outermost/top → license above clock
             panelRightInfo.Controls.Add(lblClock);          // Fill (below)
             panelRightInfo.Controls.Add(panelLicenseBadge); // Top
@@ -1975,7 +1981,7 @@ namespace PMKUnlocker
             };
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // progress strip
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));   // progress strip
             panelTopHeader.Dock = DockStyle.Fill;
             rootLayout.Controls.Add(panelTopHeader, 0, 0);
             rootLayout.Controls.Add(splitMain, 0, 1);
@@ -2267,15 +2273,17 @@ namespace PMKUnlocker
             if (panelProgress == null || lblProgressTitle == null) return;
             int w = panelProgress.ClientSize.Width;
             if (w < 100) return;
-            lblProgressTitle.Bounds = new Rectangle(0, 2, w, 14);
-            lblProgressPercent.Bounds = new Rectangle(0, 15, w, 16);
-            pbarTrack.Bounds = new Rectangle(8, 33, Math.Max(40, w - 16), 14);
-            lblStatusCaption.Location = new Point(10, 53);
-            lblProgressStatus.Location = new Point(56, 52);
+            // text height တွေ တိုင်းထားတာ (96 dpi): title 15, percent 17, bar 14, Status/Speed 17
+            // strip 72→80px — 72 မှာ အောက်တန်း bottom margin 3px ပဲကျလို့ Ready/Speed က အောက်နားကို ထိနေတယ်
+            lblProgressTitle.Bounds = new Rectangle(0, 2, w, 15);
+            lblProgressPercent.Bounds = new Rectangle(0, 17, w, 17);
+            pbarTrack.Bounds = new Rectangle(8, 36, Math.Max(40, w - 16), 14);
+            lblStatusCaption.Location = new Point(10, 55);
+            lblProgressStatus.Location = new Point(56, 54);
             int speedW = 195;
-            lblSpeedBadge.Bounds = new Rectangle(w - speedW - 8, 52, speedW, 17);
+            lblSpeedBadge.Bounds = new Rectangle(w - speedW - 8, 54, speedW, 17);
             int ticksL = 150, ticksR = w - speedW - 16;
-            pbarTicks.Bounds = new Rectangle(ticksL, 55, Math.Max(30, ticksR - ticksL), 12);
+            pbarTicks.Bounds = new Rectangle(ticksL, 57, Math.Max(30, ticksR - ticksL), 12);
         }
 
         private static GraphicsPath RoundRectPath(Rectangle r, int rad)
