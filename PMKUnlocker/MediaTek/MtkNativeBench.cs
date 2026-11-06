@@ -976,11 +976,21 @@ internal static class MtkNativeBench
         return layout;
     }
 
+    /// <summary>Table-level names the flasher rebuilds itself; they are not partitions a scatter row can carry.</summary>
+    private static readonly HashSet<string> GptHeaderNames =
+        new(StringComparer.OrdinalIgnoreCase) { "pgpt", "sgpt", "gpt" };
+
     /// <summary>
     /// P1.4 — the rows that turn a dump folder into a firmware package. Every offset is the device's own GPT
     /// converted to bytes (the same conversion the DA's extent structs use), and a name a live session may never
     /// program still gets dumped but is marked <c>is_download: false</c>, because a package that offers to rewrite
     /// the chip identity is a package that bricks the phone it came from.
+    ///
+    /// Every extent of the live table gets a row, not only the dumped ones. <c>wfscatter</c> rebuilds the GPT from
+    /// the rows it parses and prints "device partitions not in scatter will be removed" for the rest, so a package
+    /// holding just the three partitions somebody ticked would rewrite the phone's table down to those three. The
+    /// undumped extents travel as RESERVED rows (no image, extent from the scatter, re-read from the live table by
+    /// the client), which keeps the rebuilt table identical to the one the dump was taken from.
     ///
     /// UFS is refused rather than guessed: the region word of a UFS scatter has never been read off a real one on
     /// this bench, and an invented region string is exactly the kind of unmeasured byte this project does not send.
@@ -996,22 +1006,35 @@ internal static class MtkNativeBench
                 "the manifest are saved, no scatter is written.";
             return null;
         }
-        var rows = new List<ScatterRow>();
-        foreach (string name in dumped)
+        var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in dumped ?? Array.Empty<string>())
+            if (!string.IsNullOrWhiteSpace(name)) wanted.Add(name.Trim());
+        foreach (string name in wanted)
         {
-            if (string.IsNullOrWhiteSpace(name)) continue;
-            if (!table.TryFind(name, out MtkDaExtent extent))
-            {
-                refusal = "'" + name + "' was read but the live GPT does not report it, so no scatter is written — " +
-                    "a row with an invented offset is a write list aimed at the wrong bytes.";
-                return null;
-            }
-            rows.Add(new ScatterRow(extent.Name, extent.Name + ".bin", (long)extent.ByteOffset,
-                (long)extent.ByteLength, ScatterWriter.EmmcUserRegion, ProgramAllowed(extent.Name, out _)));
+            if (table.TryFind(name, out _)) continue;
+            refusal = "'" + name + "' was read but the live GPT does not report it, so no scatter is written — " +
+                "a row with an invented offset is a write list aimed at the wrong bytes.";
+            return null;
+        }
+        if (wanted.Count == 0)
+        {
+            refusal = "nothing was dumped, so there is no package to describe.";
+            return null;
+        }
+        var rows = new List<ScatterRow>(table.Extents.Count);
+        foreach (MtkDaExtent extent in table.Extents)
+        {
+            // The flasher writes the GPT headers itself at the standard LBAs and skips these names when it builds
+            // the table, so a row for them would be a row nothing reads.
+            if (extent.ByteLength == 0 || GptHeaderNames.Contains(extent.Name)) continue;
+            bool isDumped = wanted.Contains(extent.Name);
+            rows.Add(new ScatterRow(extent.Name, isDumped ? extent.Name + ".bin" : "NONE",
+                (long)extent.ByteOffset, (long)extent.ByteLength, ScatterWriter.EmmcUserRegion,
+                isDumped && ProgramAllowed(extent.Name, out _), !isDumped));
         }
         if (rows.Count == 0)
         {
-            refusal = "nothing was dumped, so there is no package to describe.";
+            refusal = "the live GPT reports no user-area partition, so there is no package to describe.";
             return null;
         }
         return rows;

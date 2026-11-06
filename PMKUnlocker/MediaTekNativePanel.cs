@@ -923,8 +923,10 @@ public partial class Form1
 
     /// <summary>
     /// P1.4 — the folder a firmware dump lands in gets a scatter beside it, so the bytes that cost one boot can go
-    /// back as a package. It describes only what was actually written next to it, at the offsets this device's own
-    /// GPT reported, and names the FLASH tab's own load pattern so the file is not invisible to the flow it feeds.
+    /// back as a package. It describes what was written next to it at the offsets this device's own GPT reported,
+    /// and every other live extent as a reserved row: the flasher rebuilds the GPT from the rows it parses, so a
+    /// package holding only the dumped partitions would delete the rest of the phone's table. The file also names
+    /// the FLASH tab's own load pattern so it is not invisible to the flow it feeds.
     /// </summary>
     private void TryWriteFirmwareScatter(string dir, MtkDaPartitionTable table, IEnumerable<string> dumped)
     {
@@ -940,10 +942,12 @@ public partial class Form1
         {
             string path = Path.Combine(dir, ScatterWriter.DefaultFileName(chipset));
             File.WriteAllText(path, ScatterWriter.Build(chipset, "PMK-device-dump", "EMMC", rows));
-            NativeSay("[+] Native DA: firmware package written — " + Path.GetFileName(path) + " with " +
-                      rows.Count(r => r.IsDownload) + " flashable row(s) of " + rows.Count);
-            NativeSay("[*] Native DA: load that file on the FLASH tab to re-flash this layout — the names a live " +
-                      "session may never program (otp, flashinfo, seccfg) carry is_download: false.");
+            NativeSay("[+] Native DA: firmware package written — " + Path.GetFileName(path) + ": " +
+                      rows.Count(r => r.IsDownload) + " flashable row(s) of " + rows.Count + " — the " +
+                      rows.Count(r => r.IsReserved) + " rows without an image keep the rest of the live table.");
+            NativeSay("[*] Native DA: load that file on the FLASH tab to re-flash these images; the reserved rows " +
+                      "stop the GPT rebuild from deleting partitions this dump did not read. The names a live session " +
+                      "may never program (otp, flashinfo, seccfg) carry is_download: false.");
         }
         catch (Exception ex)
         {

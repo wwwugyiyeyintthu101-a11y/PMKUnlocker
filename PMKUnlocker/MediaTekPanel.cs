@@ -56,6 +56,10 @@ public partial class Form1
     private long mtkProgressBytes, mtkPrepTotal, mtkProgressCurTotal;
     // first Write line မှာ speed-denominator watch ကို restart — DA handshake ကို speed ထဲ မထည့်ချင်လို့
     private bool mtkWriteWatchArmed;
+    // PMK reset က TOPRGU stub နဲ့ chip ကို reset လုပ်တဲ့အခါ USB link က mid-handshake ပြတ်တယ်; mtkclient ရဲ့
+    // DAXFlash က အဲဒီနောက် "Stage was't executed. Maybe dram issue ?." ဆိုတဲ့ generic error ကို ပြတယ်.
+    // ဒါက 2.2.9 မှာ expected reset handshake အနေနဲ့ မှတ်ထားပြီးသား — raw transcript ထဲ ရှိဆဲ, screen ပေါ်မှာပဲ မပြ.
+    private volatile bool mtkResetStarted;
     private readonly Dictionary<string, long> mtkProgressSizes = new(StringComparer.OrdinalIgnoreCase);
     // tee1/tee2 (scp1/scp2, sspm_1/sspm_2) တွေက image file တူတယ် — token တစ်ခုကို script order
     // အတိုင်း queue လုပ်ထားပြီး Wrote line တိုင်းမှာ တစ်ခုတစ်လေ ပြန်ထုတ်သုံးတယ်
@@ -787,6 +791,7 @@ public partial class Form1
                 mediaTekWriteActive = false; mediaTekCancel = null;
                 mtkProgressTotal = 0; mtkProgressDone = 0; mtkProgressBytes = 0;
                 mtkPrepTotal = 0; mtkProgressCurTotal = 0; mtkWriteWatchArmed = false;
+                mtkResetStarted = false;
                 mtkProgressWatch = null;
                 mtkProgressSizes.Clear(); mtkProgressNameQueue.Clear(); mtkProgressOrder.Clear();
             }
@@ -797,6 +802,8 @@ public partial class Form1
         if (stopRequested) throw new OperationCanceledException();
         mstSearching = mstHwInfo = mstStorage = mstInternal = false;
         mstStorageBuf.Clear();
+        // reset မရှိသေးတဲ့ run မှာ "Stage was't executed" က တကယ့် stage2 failure — ဒါကို မဖျောက်ရ
+        mtkResetStarted = false;
         // attempt ပါရင် caller က ကိုယ်တိုင် header ရိုက်ထားပြီး — ထပ်မရိုက်နှင့်
         if (attempt == null)
             Log($" Operation : {MtkOperationName(args)}", Color.White);
@@ -882,12 +889,29 @@ public partial class Form1
     private void LogMtkLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return;
+        // mtkclient prints its own reason through its logger, coloured: red = error, yellow = warning. The mapper
+        // below is a milestone table and used to drop those, which is how a failed flash showed "[FAIL] write not
+        // confirmed" with no cause on screen (2026-11-05 run: "DaHandler - [LIB]: Scatter has no partitions.").
+        bool libError = line.Contains("[LIB]", StringComparison.Ordinal) &&
+                        line.Contains("\u001b[31m", StringComparison.Ordinal);
+        bool libWarn = line.Contains("[LIB]", StringComparison.Ordinal) &&
+                       line.Contains("\u001b[33m", StringComparison.Ordinal);
         string raw = Regex.Replace(line, @"\x1B\[[0-9;]*[a-zA-Z]", "");
         if (string.IsNullOrWhiteSpace(raw)) return;
         string display = raw.Trim();
+        // PMK reset က နောက်ဆုံး step; chip reset က USB link ကို ဖြတ်တာမို့ mtkclient က "Stage was't executed"
+        // ကို ပြတယ်. 2.2.9 lock note နဲ့ 2026-11-06 08:40 run နှစ်ခုလုံးမှာ reset ပြီးမှ ပေါ်တာကို တွေ့ရတယ် —
+        // ဒါကြောင့် PMK reset line နောက်မှာလာတဲ့ ဒီ line တစ်ကြောင်းကိုပဲ ဖျောက်တယ် (raw log ထဲ ရှိဆဲ).
+        if (display.Contains("PMK reset:", StringComparison.Ordinal)) mtkResetStarted = true;
+        if (mtkResetStarted && display.Contains("Stage was't executed", StringComparison.Ordinal)) return;
         TrackMtkWriteProgress(display);
         var mapped = MapMtkMstLine(display);
-        if (mapped.HasValue) Log(mapped.Value.text, mapped.Value.color);
+        if (mapped.HasValue) { Log(mapped.Value.text, mapped.Value.color); return; }
+        if (libError || libWarn)
+        {
+            FlushMtkStorage();
+            Log("  ! " + display, libError ? Color.OrangeRed : Color.Orange);
+        }
     }
 
     // mtkclient ရဲ့ per-file `Wrote <path> to sector <n> with sector count <m>.` (evidence နဲ့ ကိုက်တဲ့ raw format)

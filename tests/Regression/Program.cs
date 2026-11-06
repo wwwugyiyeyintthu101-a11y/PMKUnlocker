@@ -3716,6 +3716,32 @@ try
         return false;
     }
 
+    // The bundled wfscatter's own reader, reduced to its grammar: a stripped line starting with
+    // "- partition_index" opens a block; any other line splits on the FIRST colon and the key is kept VERBATIM
+    // (it is not trimmed of a leading dash). That is the whole difference between a package the client reads and
+    // "Scatter has no partitions." — the 2026-11-05 flash failed on exactly that, so the writer is checked with
+    // the client's grammar, not only with our own lenient parser.
+    static List<Dictionary<string, string>> WfScatterRead(string text)
+    {
+        var parts = new List<Dictionary<string, string>>();
+        Dictionary<string, string>? cur = null;
+        foreach (string line in text.Split('\n'))
+        {
+            string s = line.Trim();
+            if (s.StartsWith("- partition_index", StringComparison.Ordinal))
+            {
+                if (cur != null) parts.Add(cur);
+                cur = new Dictionary<string, string>(StringComparer.Ordinal);
+                continue;
+            }
+            if (cur == null || !s.Contains(':') || s.StartsWith("#", StringComparison.Ordinal)) continue;
+            int colon = s.IndexOf(':');
+            cur[s[..colon].Trim()] = s[(colon + 1)..].Trim();
+        }
+        if (cur != null) parts.Add(cur);
+        return parts;
+    }
+
     // The risk here is a file the FLASH tab reads back as a WRITE LIST: an offset printed as an LBA, a name that
     // breaks the key/value grammar, or a table area marked downloadable is a package that programs the wrong bytes.
     // So every check is the round trip — build rows from the device's own extents, render, then re-read with the
@@ -3755,6 +3781,23 @@ try
         "MTK P1.4 SCATTER: the package is named so the FLASH tab's own *scatter*.txt filter shows it, and a messy " +
         "chipset string cannot make an unusable file name");
 
+    // wfscatter rebuilds the GPT from the rows it parsed and drops every live partition that has no row. A dump of
+    // one partition must therefore still describe the whole table, or "flash this dump back" repartitions the phone.
+    IReadOnlyList<ScatterRow> swPartial = MtkNativeBench.ScatterRows(swTable, new[] { "boot" }, swEmmc,
+        out string swPartialRefusal);
+    Check(swPartialRefusal == null && swPartial.Count == swTable.Extents.Count &&
+          swPartial.Single(r => r.Name == "boot") is { IsDownload: true, IsReserved: false, FileName: "boot.bin" } &&
+          swPartial.Where(r => r.Name != "boot")
+                   .All(r => r.IsReserved && !r.IsDownload && r.FileName == "NONE" && r.ByteLength > 0),
+        "MTK P1.4 SCATTER: a partial dump still lists every live extent — the dumped one as an image, the rest as " +
+        "reserved rows carrying their own extent, so the rebuilt GPT keeps all four partitions");
+    string swPartialText = ScatterWriter.Build("MT6765", "PMK-device-dump", "EMMC", swPartial);
+    Check(swPartialText.Contains("  partition_name: boot\r\n", StringComparison.Ordinal) &&
+          swPartialText.Contains("  is_reserved: true\r\n  operation_type: RESERVED\r\n", StringComparison.Ordinal) &&
+          swPartialText.Contains("  file_name: NONE\r\n", StringComparison.Ordinal),
+        "MTK P1.4 SCATTER: a reserved row is written in the keys wfscatter reads for it (is_reserved, " +
+        "operation_type RESERVED, no image) — that is what makes the client re-read the extent from the live table");
+
     string swDir = Path.Combine(Path.GetTempPath(), "pmk-scatter-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(swDir);
     try
@@ -3764,9 +3807,21 @@ try
         string swPath = Path.Combine(swDir, ScatterWriter.DefaultFileName("MT6765"));
         File.WriteAllText(swPath, swText);
         FirmwarePackage swPkg = ScatterParser.Load(swPath);
-        Check(swText.StartsWith(ScatterWriter.Header + "\r\n- general:", StringComparison.Ordinal) &&
+        Check(swText.StartsWith(ScatterWriter.Header + "\r\n- general: MTK_PLATFORM_CFG", StringComparison.Ordinal) &&
               swPkg.FormatSupported && swPkg.Platform == "MT6765" && swPkg.Entries.Count == 4,
         "MTK P1.4 SCATTER: what the writer emits, the reader accepts — four rows, platform MT6765");
+        List<Dictionary<string, string>> wfParts = WfScatterRead(swText);
+        Check(wfParts.Count == 4 &&
+              wfParts.All(p => p.ContainsKey("partition_name") && p.ContainsKey("partition_size") &&
+                               p.ContainsKey("region") && p["region"] == "EMMC_USER") &&
+              wfParts.Single(p => p["partition_name"] == "boot")["physical_start_addr"] == "0x57280000",
+        "MTK P1.4 SCATTER: the bundled wfscatter's own grammar finds every row at the same byte offset — it keeps " +
+        "the key verbatim, so a list-style '- partition_name' line parses as zero partitions and the flash writes " +
+        "nothing (2026-11-05 hardware run)");
+        Check(!swText.Contains("  - partition_name", StringComparison.Ordinal) &&
+              !swText.Contains("  - physical_start_addr", StringComparison.Ordinal),
+        "MTK P1.4 SCATTER: no entry key carries a list dash — the one byte that made the client's parser see an " +
+        "empty scatter");
         Check(swPkg.Find("boot") is { LinearStart: 0x57280000, Size: 0x4000000, NumbersValid: true, Region: StorageRegion.EmmcUser },
         "MTK P1.4 SCATTER: the offset and size survive the hex round trip (the failure this check exists for is an " +
         "LBA written where a byte address belongs — every row would then program a different partition)");
@@ -3791,6 +3846,16 @@ try
               .Checks.Single(c => c.Name == "Selected image files").State == VerifyState.Mismatch,
         "MTK P1.4 SCATTER: selecting the never-program row anyway is blocked by preflight — the reader never maps a " +
         "row it excludes, so its image counts as missing");
+        string swPartialPath = Path.Combine(swDir, "MT6765_partial_scatter.txt");
+        File.WriteAllText(swPartialPath, swPartialText);
+        FirmwarePackage swPartialPkg = ScatterParser.Load(swPartialPath);
+        Check(swPartialPkg.FormatSupported && swPartialPkg.Entries.Count == swPartial.Count &&
+              swPartialPkg.FlashableEntries.Count() == 1 &&
+              swPartialPkg.Find("boot") is { Selectable: true, ImageExists: true } &&
+              swPartialPkg.Find("nvram") is { Selectable: false, IsDownload: false } &&
+              !swPartialPkg.Issues.Any(i => i.Code == "missing-image"),
+        "MTK P1.4 SCATTER: the FLASH tab reads the partial package as one flashable row plus reserved rows, with no " +
+        "missing-image noise for images the dump never claimed to have");
     }
     finally { try { Directory.Delete(swDir, true); } catch { } }
 
