@@ -138,6 +138,13 @@ internal static class ShopServices
         return manifest;
     }
 
+    internal static bool IsSparseImage(string path)
+    {
+        using var stream = File.OpenRead(path);
+        Span<byte> head = stackalloc byte[4];
+        return stream.Read(head) == 4 && BitConverter.ToUInt32(head) == 0xed26ff3a;
+    }
+
     internal static long ExpandedImageSize(string path)
     {
         using var reader = new BinaryReader(File.OpenRead(path));

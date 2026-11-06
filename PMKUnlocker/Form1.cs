@@ -446,6 +446,21 @@ namespace PMKUnlocker
             FitToScreen();         // မျက်နှာပြင် သေးတဲ့ PC ဆိုရင် အချိုးကျ ကျုံ့
             VerifyBundledTools();  // adb/fastboot/heimdall စသည် ရှိ/မရှိ startup check
 
+            // Failed mtkclient runs leave GUID session folders behind (the staged .bin dumps in them once grew
+            // this tree to 52 GB). Background so startup never waits on it; only GUID-shaped folders are ever
+            // touched, so seccfg-backup / native-da / archives cannot be pruned by construction.
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var (pruned, bytes) = MediaTek.MtkSessionPrune.Prune(ShopServices.DataDirectory);
+                    if (pruned > 0)
+                        Log("[OK] Pruned " + pruned + " old MediaTek session folder(s) — " +
+                            FormatBytesLong(bytes) + " freed.", Color.LightGreen);
+                }
+                catch { }
+            });
+
             // App ပိတ်ရင် running child process + poll timer ကို ရှင်း
             this.FormClosing += (s, e) =>
             {
@@ -1940,16 +1955,14 @@ namespace PMKUnlocker
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 2,
                 BackColor = Color.FromArgb(18, 20, 24)
             };
             logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));   // STOP / Clear Log (ခလုတ် အပြည့်မြင်ရဖို့)
             logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));   // LOG
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // progress — ဘယ်ဘက်အောက်ဆုံး (title+percent+bar+status)
 
             logLayout.Controls.Add(panelLogButtons, 0, 0);
             logLayout.Controls.Add(rtbLog, 0, 1);
-            logLayout.Controls.Add(panelProgress, 0, 2);   // bottom-left
             splitMain.Panel1.Controls.Add(logLayout);   // ဘယ်ဘက်တိုင် — LOG (UNLOCKTOOL)
 
             // Root layout — header (80px = panelTopHeader နဲ့ တူရမည်; 60F ဆိုရင် row2 labels ဖြတ်) + split
@@ -1957,14 +1970,16 @@ namespace PMKUnlocker
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 3,
                 BackColor = Color.FromArgb(18, 20, 24)
             };
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // progress strip
             panelTopHeader.Dock = DockStyle.Fill;
             rootLayout.Controls.Add(panelTopHeader, 0, 0);
             rootLayout.Controls.Add(splitMain, 0, 1);
+            rootLayout.Controls.Add(panelProgress, 0, 2);   // bottom strip — spans both columns
 
             this.Controls.Add(rootLayout);
         }

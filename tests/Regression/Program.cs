@@ -778,6 +778,64 @@ try
           FlashRisk.Classify(dataPkg.Find("mystery")!) == RiskLevel.HighRisk,
         "risk: userdata + nvram + PROTECTED op all high-risk");
 
+    Check(sp.Find("vendor2")!.ImageIsSparse, "sparse: the parser marks a sparse-magic image as sparse");
+    Check(!good.Find("boot")!.ImageIsSparse && !good.Find("preloader")!.ImageIsSparse,
+        "sparse: a raw image is not flagged sparse");
+
+    Check(FlashRow.StatusText(good.Find("boot")!, true) == "Ready · raw",
+        "row: normal raw image reads \"Ready · raw\"");
+    Check(FlashRow.StatusText(good.Find("preloader")!, true) == "High risk · raw",
+        "row: high-risk raw image reads \"High risk · raw\"");
+    Check(FlashRow.StatusText(sp.Find("vendor2")!, true) == "Ready · sparse",
+        "row: sparse image reads \"Ready · sparse\" — the route differs before the click");
+    Check(FlashRow.StatusText(dataPkg.Find("userdata")!, true) == "High risk · no file",
+        "row: a named-but-absent image says the file is missing, not \"raw\"");
+    Check(FlashRow.StatusText(good.Find("pgpt")!, false) == "Unavailable",
+        "row: a non-flashable row says nothing about routes it cannot take");
+
+    Check(FlashRow.StatusTip(good.Find("preloader")!, true).StartsWith("bootloader — wrong image can prevent boot.") &&
+          FlashRow.StatusTip(good.Find("preloader")!, true).Contains("Raw image"),
+        "row tip: high risk names WHY before the route");
+    Check(FlashRow.StatusTip(good.Find("boot")!, true).StartsWith("Raw image:") &&
+          !FlashRow.StatusTip(good.Find("boot")!, true).Contains("risk"),
+        "row tip: a normal row carries no risk sentence");
+    Check(FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("needs the mtkclient route") &&
+          FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("Eject Device first"),
+        "row tip: a sparse row says the live native session cannot write it");
+    Check(FlashRow.StatusTip(dataPkg.Find("userdata")!, true).Contains("user data erasure") &&
+          FlashRow.StatusTip(dataPkg.Find("userdata")!, true).Contains("not on disk"),
+        "row tip: risk reason and missing file both reach the tip");
+    Check(FlashRow.StatusTip(good.Find("pgpt")!, false).Contains("Nothing is written to it"),
+        "row tip: non-flashable says plainly that nothing is written");
+
+    Check(FlashRow.SummaryText(0, 0, true) == "0 selected · nothing will be written",
+        "summary: zero selection says nothing will be written");
+    Check(FlashRow.SummaryText(3, 5L * 1024 * 1024, false).Contains("3 selected") &&
+          FlashRow.SummaryText(3, 5L * 1024 * 1024, false).Contains("5.00 MB to write") &&
+          FlashRow.SummaryText(3, 5L * 1024 * 1024, false).Contains("route: mtkclient") &&
+          FlashRow.SummaryText(3, 5L * 1024 * 1024, false).Contains("rebuilds the GPT"),
+        "summary: mtkclient route names bytes and GPT rebuild");
+    Check(FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("1.00 GB to write") &&
+          FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("route: native DA session") &&
+          FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("raw images only"),
+        "summary: live native route says raw-only and no GPT rebuild");
+    Check(FlashRow.Bytes(900) == "900 B" && FlashRow.Bytes(2048) == "2.00 KB",
+        "summary: byte formatting keeps both small units");
+
+    // The scatter file's own facts, shown on the line above the selection summary.
+    Check(FlashRow.PackageText(null).StartsWith("No scatter file"),
+        "package facts: no scatter says so instead of inventing a table");
+    Check(FlashRow.PackageText(bad) == "Not a scatter file this tool can read — nothing will be written from it",
+        "package facts: an unreadable file says nothing will be written");
+    string factsGood = FlashRow.PackageText(good);
+    Check(factsGood == "MT6765 · dandelion · V1.1.5 · EMMC · 4 rows · 3 flashable · 3 images on disk · " +
+          "7.00 KB · 0 errors, 1 warning",
+        "package facts: header + row/flashable/image counts + total bytes + issue counts, singular warning");
+    string factsData = FlashRow.PackageText(dataPkg);
+    Check(factsData.Contains("3 rows") && factsData.Contains("0 images on disk"),
+        "package facts: images counted only when they are actually on disk");
+    Check(FlashRow.PackageText(good).Length < 140, "package facts: one 856px label line still fits");
+
     var capsOk = new BackendCapabilities { Name = "test-backend", SupportsFlash = true };
     var capsNo = new BackendCapabilities { Name = "test-no-flash", SupportsFlash = false };
 
@@ -4096,6 +4154,180 @@ try
     Check(!MtkNativeBench.DumpMatchesPartition(null, "logo") && !MtkNativeBench.DumpMatchesPartition(@"C:\d\x.img", "") &&
           !MtkNativeBench.DumpMatchesPartition(@"C:\d\x.img", "!!!"),
         "MTK B4: a missing or unusable partition name matches nothing — the grid write falls through to the explicit no-image refusal, never to a guess");
+
+    // ---- P1.5: the multi-partition write list and the fallback's scatter --------------------------------
+    // A native flash never rebuilds the GPT, so the package row is only allowed to name an extent the live table
+    // already reports at the same bytes. These checks pin every refusal before the first frame, not after a write.
+    var nfTable = new MtkDaPartitionTable(512, new[]
+    {
+        new MtkDaExtent("boot", 0x1000, 0x1fff, 512),
+        new MtkDaExtent("nvram", 0x2000, 0x200f, 512),
+        new MtkDaExtent("otp", 0x2010, 0x201f, 512),
+    }, null, null);
+    MtkDaExtent nfBoot = nfTable.Extents.Single(e => e.Name == "boot");
+    MtkDaExtent nfNvram = nfTable.Extents.Single(e => e.Name == "nvram");
+    MtkDaExtent nfOtp = nfTable.Extents.Single(e => e.Name == "otp");
+    string nfBootFile = Path.Combine(dir, "p15-boot.bin");
+    string nfLargeFile = Path.Combine(dir, "p15-large.bin");
+    string nfSparseFile = Path.Combine(dir, "p15-sparse.bin");
+    string nfMissingFile = Path.Combine(dir, "p15-missing.bin");
+    File.WriteAllBytes(nfBootFile, new byte[512]);
+    File.WriteAllBytes(nfLargeFile, new byte[(int)nfNvram.ByteLength + 1]);
+    var nfSparseBytes = new byte[1024];
+    nfSparseBytes[0] = 0x3A; nfSparseBytes[1] = 0xFF; nfSparseBytes[2] = 0x26; nfSparseBytes[3] = 0xED;
+    File.WriteAllBytes(nfSparseFile, nfSparseBytes);
+
+    var nfPlan = MtkNativeBench.NativeFlashPlan(nfTable,
+        new[] { ("boot", nfBootFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength) }, out string nfPlanRefusal);
+    Check(nfPlanRefusal == null && nfPlan.Count == 1 && nfPlan[0].Extent == nfBoot &&
+          nfPlan[0].ImagePath == nfBootFile && nfPlan[0].ImageLength == 512,
+        "MTK P1.5 FLASH: a row whose offset and length equal the live extent resolves to that extent — the write is " +
+        "addressed by the device's own bytes, not by the scatter's claim");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("boot", nfBootFile, (long)nfBoot.ByteOffset + 512, (long)nfBoot.ByteLength) },
+              out string nfOffsetRefusal) == null &&
+          nfOffsetRefusal.Contains("different layout") && nfOffsetRefusal.Contains("Nothing was written"),
+        "MTK P1.5 FLASH: a package row at a different offset is refused before the port — the native path writes by " +
+        "name and never rebuilds the GPT, so a foreign layout has no meaning here");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("boot", nfBootFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength + 512) },
+              out string nfSizeRefusal) == null && nfSizeRefusal.Contains("different layout"),
+        "MTK P1.5 FLASH: a row whose length disagrees with the live extent is refused too — an equal start is not an " +
+        "equal extent");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("boot", nfSparseFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength) },
+              out string nfSparseRefusal) == null &&
+          nfSparseRefusal.Contains("sparse") && nfSparseRefusal.Contains("wfscatter"),
+        "MTK P1.5 FLASH: a sparse image is refused by name and sent to the mtkclient path — the DA writes raw bytes, " +
+        "and a sparse container written raw is corruption");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("otp", nfBootFile, (long)nfOtp.ByteOffset, (long)nfOtp.ByteLength) },
+              out string nfNeverRefusal) == null && nfNeverRefusal.Contains("bricks"),
+        "MTK P1.5 FLASH: a never-program name stops the whole set before the first frame, with the same brick " +
+        "reason the single-partition write gives");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("nvram", nfLargeFile, (long)nfNvram.ByteOffset, (long)nfNvram.ByteLength) },
+              out string nfLargeRefusal) == null && nfLargeRefusal.Contains("run into the next partition"),
+        "MTK P1.5 FLASH: an image larger than its extent is refused instead of running into the next partition");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("tee1", nfBootFile, 0L, 0L) }, out string nfNameRefusal) == null &&
+          nfNameRefusal.Contains("no partition named 'tee1'"),
+        "MTK P1.5 FLASH: a name the live GPT does not report stops the set — no write list is invented for it");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable,
+              new[] { ("boot", nfMissingFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength) },
+              out string nfFileRefusal) == null && nfFileRefusal.Contains("is missing"),
+        "MTK P1.5 FLASH: a missing image is refused before the port, not discovered after three partitions were written");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable, new[]
+              {
+                  ("boot", nfBootFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength),
+                  ("BOOT", nfBootFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength),
+              }, out string nfDuplicateRefusal) == null && nfDuplicateRefusal.Contains("appears twice"),
+        "MTK P1.5 FLASH: the same partition twice is refused — one session writes each extent once, and a duplicate " +
+        "row would mean a second, unexplained write");
+    Check(MtkNativeBench.NativeFlashPlan(nfTable, Array.Empty<(string, string, long, long)>(),
+              out string nfEmptyRefusal) == null && nfEmptyRefusal.Contains("nothing to write"),
+        "MTK P1.5 FLASH: an empty selection produces no dialog and no write list");
+    string nfConfirm = MtkNativeBench.NativeFlashConfirmText(nfPlan);
+    Check(nfConfirm.Contains("boot") && nfConfirm.Contains(Path.GetFileName(nfBootFile)) &&
+          nfConfirm.Contains("not rebuilt") && nfConfirm.Contains("read back"),
+        "MTK P1.5 FLASH: the one dialog names the extent and image and says both facts the native route changes — " +
+        "no GPT rebuild, and every write is read back");
+
+    var nfLive = nfTable.Extents
+        .Select(e => new MtkPartition(e.Name, (long)e.ByteOffset, (long)e.ByteLength)).ToList();
+    IReadOnlyList<ScatterRow> nfRows = MtkNativeBench.ScatterRowsFromGpt(nfLive, new[] { "boot" }, "EMMC",
+        out string nfScatterRefusal);
+    Check(nfScatterRefusal == null && nfRows.Count == nfLive.Count &&
+          nfRows.Single(r => r.Name == "boot") is { IsDownload: true, IsReserved: false, FileName: "boot.bin" } &&
+          nfRows.Where(r => r.Name != "boot").All(r => r.IsReserved && !r.IsDownload && r.FileName == "NONE"),
+        "MTK P1.5 BACKUP: the fallback's GPT produces the same full-layout package — the dumped partition as an " +
+        "image, every other live extent as a reserved row that keeps the rebuilt table whole");
+    Check(MtkNativeBench.ScatterRowsFromGpt(nfLive, new[] { "boot" }, "UFS", out string nfUfsRefusal) == null &&
+          nfUfsRefusal.Contains("UFS") && nfUfsRefusal.Contains("no scatter is written"),
+        "MTK P1.5 BACKUP: a UFS run gets its images and manifest but no scatter — the region word has never been " +
+        "read off a real UFS package on this bench");
+    Check(MtkNativeBench.ScatterRowsFromGpt(nfLive, new[] { "boot" }, "", out string nfNoStorageRefusal) == null &&
+          nfNoStorageRefusal.Contains("did not report"),
+        "MTK P1.5 BACKUP: a run that never says whether the user area is eMMC or UFS is refused the same way — an " +
+        "invented region word is unmeasured bytes in a write list");
+    Check(MtkNativeBench.ScatterRowsFromGpt(nfLive, new[] { "tee1" }, "EMMC", out string nfScatterMissing) == null &&
+          nfScatterMissing.Contains("tee1"),
+        "MTK P1.5 BACKUP: a dumped name the GPT does not report stops the scatter instead of inventing an offset for it");
+    Check(MtkNativeBench.ScatterRowsFromGpt(Array.Empty<MtkPartition>(), new[] { "boot" }, "EMMC",
+              out string nfEmptyLive) == null && nfEmptyLive.Contains("live GPT is empty"),
+        "MTK P1.5 BACKUP: an empty GPT produces no scatter file");
+
+    // ---- P1.6: the startup prune of failed-session folders (the 52 GB class) -----------------------------
+    string pruneData = Path.Combine(dir, "prune-data");
+    string pruneRoot = PMKUnlocker.MediaTek.MtkSessionPrune.SessionsRoot(pruneData);
+    Directory.CreateDirectory(pruneRoot);
+    Directory.CreateDirectory(Path.Combine(pruneRoot, "seccfg-backup"));
+    Directory.CreateDirectory(Path.Combine(pruneRoot, "seccfg-backup", "archive-20261013"));
+    Directory.CreateDirectory(Path.Combine(pruneRoot, "native-da"));
+    File.WriteAllText(Path.Combine(pruneRoot, "native-da", "pacing.txt"), "0 0 0 n");
+    Guid[] pruneGuids =
+    {
+        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()
+    };
+    for (int i = 0; i < pruneGuids.Length; i++)
+    {
+        string g = Path.Combine(pruneRoot, pruneGuids[i].ToString("N"));
+        Directory.CreateDirectory(g);
+        File.WriteAllText(Path.Combine(g, "last-run.raw.log"), "x");
+        File.WriteAllText(Path.Combine(g, "logo.bin"), new string('a', 1024));
+        Directory.SetLastWriteTimeUtc(g, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(i));
+    }
+    var (pruneCount, pruneBytes) = PMKUnlocker.MediaTek.MtkSessionPrune.Prune(pruneData, keep: 2);
+    Check(pruneCount == 3 && pruneBytes == 3 * (1024 + 1),
+        "P1.6 PRUNE: only the newest 2 GUID session folders survive a startup prune, and the bytes freed are every " +
+        "staged byte that was in them (the raw log and the .bin)");
+    Check(Directory.Exists(Path.Combine(pruneRoot, "seccfg-backup")) &&
+          Directory.Exists(Path.Combine(pruneRoot, "seccfg-backup", "archive-20261013")) &&
+          Directory.Exists(Path.Combine(pruneRoot, "native-da")) &&
+          File.Exists(Path.Combine(pruneRoot, "native-da", "pacing.txt")),
+        "P1.6 PRUNE: seccfg-backup, its archive and the native-da bench folder are untouched — a non-GUID name can never be a prune candidate");
+    Check(Directory.Exists(Path.Combine(pruneRoot, pruneGuids[3].ToString("N"))) &&
+          Directory.Exists(Path.Combine(pruneRoot, pruneGuids[4].ToString("N"))),
+        "P1.6 PRUNE: the newest folders are the ones kept, by write time");
+    Check(!Directory.Exists(Path.Combine(pruneRoot, pruneGuids[0].ToString("N"))) &&
+          !Directory.Exists(Path.Combine(pruneRoot, pruneGuids[1].ToString("N"))),
+        "P1.6 PRUNE: the oldest folders are the ones deleted");
+    var (pruneAgain, pruneAgainBytes) = PMKUnlocker.MediaTek.MtkSessionPrune.Prune(pruneData, keep: 2);
+    Check(pruneAgain == 0 && pruneAgainBytes == 0,
+        "P1.6 PRUNE: a second startup prune with nothing to do deletes nothing and frees nothing");
+    string pruneMissing = Path.Combine(dir, "no-such-data");
+    var (missingCount, missingBytes) = PMKUnlocker.MediaTek.MtkSessionPrune.Prune(pruneMissing, keep: 2);
+    Check(missingCount == 0 && missingBytes == 0,
+        "P1.6 PRUNE: a data directory that has never held a session is not an error");
+    var (negCount, negBytes) = PMKUnlocker.MediaTek.MtkSessionPrune.Prune(pruneData, keep: -1);
+    Check(negCount == 0 && negBytes == 0,
+        "P1.6 PRUNE: a negative keep is refused rather than deleting every folder");
+
+    // ---- P1.7: the one Format All resolver both routes share --------------------------------
+    string[] fmtDevice = { "preloader_a", "lk", "seccfg", "gpt", "nvram", "nvdata", "proinfo", "boot", "SYSTEM",
+        "userdata", "vendor", "vbmeta", "unknown_new_partition", "boot", "misc" };
+    string[] fmtNv = { "nvram", "nvdata", "nvcfg", "proinfo", "protect1", "protect2" };
+    var fmt = PMKUnlocker.MediaTek.MtkNativeBench.FormatAllTargets(fmtDevice, fmtNv).ToList();
+    Check(fmt.SequenceEqual(new[] { "boot", "misc", "SYSTEM", "userdata", "vbmeta", "vendor" }),
+        "P1.7 FORMAT ALL: whitelist ∩ device GPT only, case-folded, duplicates gone, alphabetical — the erase list " +
+        "is a deterministic function of the device's own names");
+    Check(!fmt.Contains("preloader_a") && !fmt.Contains("lk") && !fmt.Contains("seccfg") && !fmt.Contains("gpt") &&
+        !fmt.Contains("nvram") && !fmt.Contains("nvdata") && !fmt.Contains("proinfo") &&
+        !fmt.Contains("unknown_new_partition"),
+        "P1.7 FORMAT ALL: bootchain, seccfg, GPT, NV and names the whitelist never heard of are kept by construction");
+    var fmtNvConflict = PMKUnlocker.MediaTek.MtkNativeBench.FormatAllTargets(
+        new[] { "userdata", "boot" }, new[] { "userdata" });
+    Check(fmtNvConflict.Count == 1 && fmtNvConflict[0] == "boot",
+        "P1.7 FORMAT ALL: a whitelist name the NV set claims is still refused — the two guards stack, not either/or");
+    var fmtEmpty = PMKUnlocker.MediaTek.MtkNativeBench.FormatAllTargets(
+        new[] { "preloader", "lk", "seccfg" }, fmtNv);
+    Check(fmtEmpty.Count == 0,
+        "P1.7 FORMAT ALL: a device whose GPT names nothing erasable formats nothing — empty, not null, not an error");
+    Check(PMKUnlocker.MediaTek.MtkNativeBench.FormatAllEraseable
+            .Intersect(PMKUnlocker.MediaTek.MtkNativeBench.FormatAllProtected, StringComparer.OrdinalIgnoreCase)
+            .Count() == 0,
+        "P1.7 FORMAT ALL: no name sits in both the eraseable whitelist and the protected bootchain list — the two " +
+        "arrays stay mutually exclusive");
 
     Console.WriteLine($"{passed} regression checks passed.");
 

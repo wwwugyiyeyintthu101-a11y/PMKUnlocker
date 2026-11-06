@@ -21,6 +21,8 @@
     <Compile Include="../../PMKUnlocker/MediaTek/MtkGptBackup.cs" Link="MediaTek/MtkGptBackup.cs" />
     <!-- The NATIVE tab's hardware-free gates (dump path, boot blocker, never-program, confirm text). -->
     <Compile Include="../../PMKUnlocker/MediaTek/MtkNativeBench.cs" Link="MediaTek/MtkNativeBench.cs" />
+    <!-- P1.6: the startup prune — GUID-only candidates, keep-newest, pure IO. -->
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkSessionPrune.cs" Link="MediaTek/MtkSessionPrune.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />

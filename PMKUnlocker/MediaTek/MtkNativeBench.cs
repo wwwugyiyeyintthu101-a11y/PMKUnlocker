@@ -15,8 +15,48 @@ namespace PMKUnlocker.MediaTek;
 /// </summary>
 internal static class MtkNativeBench
 {
-    /// <summary>Dumps go under their own folder so a native-session dump can never overwrite an mtkclient recording.</summary>
+    /// <summary>Dump folder name under MediaTekSessions (dumps get their own folder so a native dump can never overwrite an mtkclient recording).</summary>
     internal const string DumpFolder = "native-da";
+
+    /// <summary>
+    /// The partitions Format All may erase. The set is a whitelist on purpose: anything the device names that is
+    /// not in this list is kept by construction, so a future GPT name the list never heard of is never erased.
+    /// Bootchain, seccfg and NV are absent from the list on purpose (never-erase-by-omission, not by subtraction).
+    /// </summary>
+    internal static readonly string[] FormatAllEraseable =
+    {
+        "super", "system", "systemex", "vendor", "product", "system_ext", "odm", "oem",
+        "boot", "boot_a", "boot_b", "dtbo", "dtbo_a", "dtbo_b", "recovery", "recovery_a", "recovery_b",
+        "vbmeta", "vbmeta_system", "vbmeta_vendor", "vbmeta_system_a", "vbmeta_system_b",
+        "userdata", "cache", "metadata", "md_udc",
+        "frp", "persist", "cust", "custom", "preload", "preas", "misc", "rescue", "minidump",
+        "splash", "logo", "logdump", "dump", "expdb", "para", "param", "carrier", "epo", "oemkeystore"
+    };
+
+    /// <summary>Defense-in-depth: never erased even if a future edit adds the name to the whitelist.</summary>
+    internal static readonly string[] FormatAllProtected =
+    {
+        "preloader", "gpt", "pgpt", "sgpt", "otp", "flashinfo", "seccfg",
+        "lk", "lk2", "uboot", "tee1", "tee2", "tz", "boot_para",
+        "scp1", "scp2", "sspm_1", "sspm_2", "spmfw", "mcupm", "dpm_1", "dpm_2", "gz1", "gz2"
+    };
+
+    /// <summary>
+    /// The erase list both Format All routes share: whitelist ∩ device GPT, minus the protected bootchain set and
+    /// the NV set, distinct, in a deterministic order. The same resolver feeds the mtkclient route and the native
+    /// one, so the two routes can never be talked into erasing different partitions on the same phone.
+    /// </summary>
+    internal static IReadOnlyList<string> FormatAllTargets(IEnumerable<string> deviceNames, IReadOnlyCollection<string> nvNames)
+    {
+        return deviceNames
+            .Where(n => FormatAllEraseable.Contains(n, StringComparer.OrdinalIgnoreCase))
+            .Where(n => !FormatAllProtected.Contains(n, StringComparer.OrdinalIgnoreCase))
+            .Where(n => !nvNames.Contains(n, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
 
     /// <summary>
     /// Recipes are not shipped: the DA images come from unlicensed packs, so the honest default is no recipe and
@@ -790,6 +830,119 @@ internal static class MtkNativeBench
     }
 
     /// <summary>
+    /// P1.5 — one partition of a native multi-partition flash. The extent is the live GPT's own, not the scatter's:
+    /// the package has already been checked against it, and the write is addressed by these bytes.
+    /// </summary>
+    internal sealed record NativeFlashItem(MtkDaExtent Extent, string ImagePath, long ImageLength);
+
+    /// <summary>
+    /// P1.5 — the write list for one native multi-partition flash, resolved before a single frame is sent.
+    ///
+    /// The native path writes by partition name and never rebuilds the GPT, so a package from another layout is not
+    /// a smaller version of this job — it is a write list aimed at bytes this device may not own. Every row therefore
+    /// has to agree with the live table in both offset and length, the image has to fit, the name has to pass the
+    /// never-program gate, and a sparse image is refused outright: the DA writes raw bytes, and a sparse container
+    /// written raw is corruption. Null means nothing was written, and <paramref name="refusal"/> says which row broke
+    /// the match.
+    /// </summary>
+    internal static IReadOnlyList<NativeFlashItem> NativeFlashPlan(MtkDaPartitionTable table,
+        IEnumerable<(string Name, string Path, long Start, long Size)> files, out string refusal)
+    {
+        refusal = null;
+        if (table == null)
+        {
+            refusal = "No live partition table is available, so no write list can be resolved. Nothing was written.";
+            return null;
+        }
+        var plan = new List<NativeFlashItem>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files ?? Array.Empty<(string Name, string Path, long Start, long Size)>())
+        {
+            string name = (file.Name ?? "").Trim();
+            if (name.Length == 0) continue;
+            if (!seen.Add(name))
+            {
+                refusal = name + " appears twice in this selection — a native flash writes each partition once, so " +
+                    "nothing was written.";
+                return null;
+            }
+            if (!table.TryFind(name, out MtkDaExtent extent))
+            {
+                refusal = "This device's GPT has no partition named '" + name + "' (" + table.Extents.Count +
+                    " entries read), so the image cannot be aimed at an extent. Nothing was written.";
+                return null;
+            }
+            if (!ProgramAllowed(extent.Name, out string reason))
+            {
+                refusal = reason + " Nothing in this set was written.";
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(file.Path) || !File.Exists(file.Path))
+            {
+                refusal = "The image for " + extent.Name + " is missing" +
+                    (string.IsNullOrWhiteSpace(file.Path) ? "" : " (" + file.Path + ")") + ". Nothing was written.";
+                return null;
+            }
+            long imageLength;
+            try { imageLength = new FileInfo(file.Path).Length; }
+            catch (Exception ex)
+            {
+                refusal = "The image for " + extent.Name + " could not be read (" + ex.Message + "). Nothing was written.";
+                return null;
+            }
+            if (imageLength <= 0)
+            {
+                refusal = "The image for " + extent.Name + " is empty. Nothing was written.";
+                return null;
+            }
+            if (ReviewSafety.IsAndroidSparse(file.Path))
+            {
+                refusal = Path.GetFileName(file.Path) + " is a sparse image and the native session writes raw bytes " +
+                    "only. Press Eject Device and flash this selection through the mtkclient wfscatter path; nothing " +
+                    "was written.";
+                return null;
+            }
+            if (imageLength > (long)extent.ByteLength)
+            {
+                refusal = extent.Name + " holds " + extent.ByteLength + " byte(s) and " + Path.GetFileName(file.Path) +
+                    " is " + imageLength + ". Writing it here would run into the next partition, so it was refused " +
+                    "before the port was touched. Nothing was written.";
+                return null;
+            }
+            if (file.Start != (long)extent.ByteOffset || file.Size != (long)extent.ByteLength)
+            {
+                refusal = "The package's " + extent.Name + " row is at 0x" + file.Start.ToString("x") + " + 0x" +
+                    file.Size.ToString("x") + ", while this device reports 0x" + extent.ByteOffset.ToString("x") +
+                    " + 0x" + extent.ByteLength.ToString("x") + ". The native path writes by name and does not rebuild " +
+                    "the GPT, so a package from a different layout is refused before the port is touched. Nothing was written.";
+                return null;
+            }
+            plan.Add(new NativeFlashItem(extent, file.Path, imageLength));
+        }
+        if (plan.Count == 0)
+        {
+            refusal = "No partition with an image was selected, so there is nothing to write.";
+            return null;
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// The one confirmation a native multi-partition flash asks. It names every extent and image, and says the two
+    /// facts the native route changes: no GPT rebuild, and one readback per write before the single trailing reset.
+    /// </summary>
+    internal static string NativeFlashConfirmText(IReadOnlyList<NativeFlashItem> plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return "Write " + plan.Count + " partition(s) through the live DA session?\n\n" +
+            string.Join("\n", plan.Select(i => "  " + i.Extent.Describe + "  <-  " + Path.GetFileName(i.ImagePath))) +
+            "\n\nThe images are written raw, one after another, over the session already open — the GPT is not " +
+            "rebuilt and the phone is not replugged. Every write is read back and compared byte for byte; a mismatch " +
+            "stops the run at that partition and the rest of the set is not written. The phone is rebooted once, " +
+            "after the last partition.";
+    }
+
+    /// <summary>
     /// The BROM HW codes this tool has booted to a live DA on real hardware, from its own runs. MT6765 (0x0766) got
     /// there on 2026-11-02 (RUN 42, and four clean boots after it). MT6877 (0x0959) followed on 2026-11-04: the UFS
     /// recipe replayed to a live DA, 0x40004 answered the 208-byte UFS geometry, the live GPT listed 77 extents at
@@ -1006,12 +1159,54 @@ internal static class MtkNativeBench
                 "the manifest are saved, no scatter is written.";
             return null;
         }
+        var extents = new List<MtkPartition>(table.Extents.Count);
+        foreach (MtkDaExtent extent in table.Extents)
+            extents.Add(new MtkPartition(extent.Name, (long)extent.ByteOffset, (long)extent.ByteLength));
+        return ScatterRowsCore(extents, dumped, out refusal);
+    }
+
+    /// <summary>
+    /// The same full-layout package, built from a GPT that came off mtkclient's <c>printgpt</c> instead of a live
+    /// session. The fallback dump already paid one boot for that table, so the package can be written from the same
+    /// run; <paramref name="storageName"/> is the word this run reported, and anything but <c>EMMC</c> is refused
+    /// rather than guessed. A null/empty word means the run did not say, which is also a refusal: an invented region
+    /// word is exactly the unmeasured byte a scatter must not carry.
+    /// </summary>
+    internal static IReadOnlyList<ScatterRow> ScatterRowsFromGpt(IReadOnlyList<MtkPartition> live,
+        IEnumerable<string> dumped, string storageName, out string refusal)
+    {
+        refusal = null;
+        if (live == null || live.Count == 0)
+        {
+            refusal = "the live GPT is empty, so there is no package to describe.";
+            return null;
+        }
+        if (!string.Equals((storageName ?? "").Trim(), "EMMC", StringComparison.OrdinalIgnoreCase))
+        {
+            refusal = string.IsNullOrWhiteSpace(storageName)
+                ? "this run did not report whether the user area is eMMC or UFS, and the region word a scatter " +
+                  "carries for an unmeasured storage has never been read off a real package on this bench — the " +
+                  "images and the manifest are saved, no scatter is written."
+                : "this device addresses its user area as " + storageName + " and the region word a scatter carries " +
+                  "for it has never been read off a real UFS package on this bench — the images and the manifest " +
+                  "are saved, no scatter is written.";
+            return null;
+        }
+        return ScatterRowsCore(live, dumped, out refusal);
+    }
+
+    /// <summary>The one row builder both GPT sources share: every live extent, dumped ones as images, the rest as
+    /// reserved rows that keep the rebuilt table whole.</summary>
+    private static IReadOnlyList<ScatterRow> ScatterRowsCore(IReadOnlyList<MtkPartition> extents,
+        IEnumerable<string> dumped, out string refusal)
+    {
+        refusal = null;
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string name in dumped ?? Array.Empty<string>())
             if (!string.IsNullOrWhiteSpace(name)) wanted.Add(name.Trim());
         foreach (string name in wanted)
         {
-            if (table.TryFind(name, out _)) continue;
+            if (extents.Any(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
             refusal = "'" + name + "' was read but the live GPT does not report it, so no scatter is written — " +
                 "a row with an invented offset is a write list aimed at the wrong bytes.";
             return null;
@@ -1021,15 +1216,15 @@ internal static class MtkNativeBench
             refusal = "nothing was dumped, so there is no package to describe.";
             return null;
         }
-        var rows = new List<ScatterRow>(table.Extents.Count);
-        foreach (MtkDaExtent extent in table.Extents)
+        var rows = new List<ScatterRow>(extents.Count);
+        foreach (MtkPartition extent in extents)
         {
             // The flasher writes the GPT headers itself at the standard LBAs and skips these names when it builds
             // the table, so a row for them would be a row nothing reads.
-            if (extent.ByteLength == 0 || GptHeaderNames.Contains(extent.Name)) continue;
+            if (extent.Length <= 0 || GptHeaderNames.Contains(extent.Name)) continue;
             bool isDumped = wanted.Contains(extent.Name);
             rows.Add(new ScatterRow(extent.Name, isDumped ? extent.Name + ".bin" : "NONE",
-                (long)extent.ByteOffset, (long)extent.ByteLength, ScatterWriter.EmmcUserRegion,
+                extent.Offset, extent.Length, ScatterWriter.EmmcUserRegion,
                 isDumped && ProgramAllowed(extent.Name, out _), !isDumped));
         }
         if (rows.Count == 0)

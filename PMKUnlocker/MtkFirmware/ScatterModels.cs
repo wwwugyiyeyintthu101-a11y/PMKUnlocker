@@ -42,6 +42,7 @@ internal sealed class ScatterEntry
 
     public string? ResolvedPath { get; set; }
     public bool ImageExists { get; set; }
+    public bool ImageIsSparse { get; set; }
     public long? EffectiveImageSize { get; set; }
     public string? ImageError { get; set; }
     public string? LoadError { get; set; }
@@ -127,6 +128,81 @@ internal static class FlashRisk
 
     internal static bool DefaultSelected(ScatterEntry entry) =>
         entry.IsDownload && entry.HasFile && entry.NumbersValid && Classify(entry) == RiskLevel.Normal;
+}
+
+// The FLASH grid's Status column and its bottom summary line are both written here, so what a row claims and what
+// the line under the grid claims come from one place: a row the live session cannot write says so before the click
+// instead of in the refusal after it.
+internal static class FlashRow
+{
+    internal static string StatusText(ScatterEntry entry, bool flashable)
+    {
+        if (!flashable) return "Unavailable";
+        string risk = FlashRisk.Classify(entry) == RiskLevel.HighRisk ? "High risk" : "Ready";
+        string kind = !entry.ImageExists ? "no file" : entry.ImageIsSparse ? "sparse" : "raw";
+        return risk + " · " + kind;
+    }
+
+    internal static string StatusTip(ScatterEntry entry, bool flashable)
+    {
+        if (!flashable)
+            return "Not flashable — " + (entry.ImageError ?? entry.LoadError ??
+                "this row has no downloadable image that fits its partition") + ". Nothing is written to it.";
+
+        string? risk = FlashRisk.Reason(entry);
+        if (!entry.ImageExists)
+            return Add(risk, "the scatter names " + entry.FileName + " but it is not on disk — selecting this row " +
+                "blocks the flash until the file is there");
+        string route = entry.ImageIsSparse
+            ? "sparse image: the native DA session writes raw bytes only, so this row needs the mtkclient route " +
+              "(press Eject Device first)"
+            : "raw image: a live native DA session can write it, and mtkclient can too";
+        return Add(risk, route);
+    }
+
+    private static string Add(string? reason, string tail) => reason == null ? Tail(tail) : reason + ". " + Tail(tail);
+    private static string Tail(string s) => s[..1].ToUpperInvariant() + s[1..] + ".";
+
+    // The scatter file's own facts — what the grid's rows cannot show at a glance: which platform/project/build
+    // the file claims, how much of it is actually on disk, and whether reading it found anything wrong.
+    internal static string PackageText(FirmwarePackage? pkg)
+    {
+        if (pkg == null)
+            return "No scatter file selected — the rows can only be the live device GPT, which has no image files on disk";
+        if (!pkg.FormatSupported)
+            return "Not a scatter file this tool can read — nothing will be written from it";
+
+        int flashable = pkg.FlashableEntries.Count();
+        int images = pkg.Entries.Count(e => e.ImageExists);
+        long bytes = pkg.FlashableEntries.Where(e => e.EffectiveImageSize.HasValue)
+            .Sum(e => e.EffectiveImageSize!.Value);
+        int errors = pkg.Issues.Count(i => i.Severity == IssueSeverity.Error);
+        int warnings = pkg.Issues.Count(i => i.Severity == IssueSeverity.Warning);
+        string head = string.Join(" · ", new[] { pkg.Platform, pkg.Project, pkg.ConfigVersion, pkg.Storage }
+            .Where(x => !string.IsNullOrWhiteSpace(x)));
+        string issues = errors == 0 && warnings == 0
+            ? "no issues"
+            : errors + Count(errors, " error") + ", " + warnings + Count(warnings, " warning");
+        return head + " · " + pkg.Entries.Count + " rows · " + flashable + " flashable · " + images +
+            " images on disk · " + Bytes(bytes) + " · " + issues;
+    }
+
+    private static string Count(int n, string word) => n == 1 ? word : word + "s";
+
+    internal static string SummaryText(int count, long bytes, bool nativeSessionLive) =>
+        count == 0
+            ? "0 selected · nothing will be written"
+            : count + " selected · " + Bytes(bytes) + " to write · " + (nativeSessionLive
+                ? "route: native DA session — raw images only, the GPT is not rebuilt"
+                : "route: mtkclient — rebuilds the GPT from the scatter, sparse-aware");
+
+    internal static string Bytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return ((double)bytes / (1024L * 1024 * 1024)).ToString("F2") + " GB";
+        if (bytes >= 1024L * 1024) return ((double)bytes / (1024L * 1024)).ToString("F2") + " MB";
+        if (bytes >= 1024L) return (bytes / 1024.0).ToString("F2") + " KB";
+        return bytes + " B";
+    }
 }
 
 internal sealed class PreflightCheck

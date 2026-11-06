@@ -347,6 +347,48 @@ public partial class Form1
         NativeSay("[OK] Native DA: " + extent.Name + " written from " + Path.GetFileName(image) + " and read back identical.");
     }
 
+    /// <summary>
+    /// P1.5 — scatter images through the session that is already open. The package is resolved against the device's
+    /// own GPT before the dialog: every row must agree with the live extent in offset and length (the native path
+    /// never rebuilds the table, so a package from another layout has no meaning here), every name must pass the
+    /// never-program gate, and every image must be raw and fit its extent. Sparse images stay on the mtkclient
+    /// wfscatter path — the DA writes raw bytes, and a sparse container written raw is corruption.
+    /// <para>
+    /// One dialog covers the whole set, then the writes run one after another with the proven per-write readback.
+    /// The phone is rebooted once at the end, exactly like the NV restore and the mtkclient wfscatter flow.
+    /// </para>
+    /// </summary>
+    private async Task NativeFlashAsync(MtkFlashStep step)
+    {
+        RequireNativeSession();
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+        IReadOnlyList<MtkNativeBench.NativeFlashItem> plan =
+            MtkNativeBench.NativeFlashPlan(table, step.Files, out string refusal);
+        if (plan == null) throw new InvalidOperationException(refusal);
+
+        if (MessageBox.Show(this, MtkNativeBench.NativeFlashConfirmText(plan), "Native DA flash",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            NativeSay("[*] Native DA: flash declined by the operator — nothing was sent.");
+            return;
+        }
+
+        NativeSay("[*] Native DA: " + plan.Count + " partition(s) to write over the session already open — no GPT " +
+                  "rebuild, no replug between partitions.");
+        foreach (MtkNativeBench.NativeFlashItem item in plan)
+        {
+            NativeSay("[*] Native DA: writing " + item.Extent.Name + " from " + Path.GetFileName(item.ImagePath) +
+                      " (" + MtkDaExtent.SizeText((ulong)item.ImageLength) + ")...");
+            await nativeDa.WritePartitionAsync(item.Extent.Name, item.ImagePath,
+                p => NativeProgress("flash " + item.Extent.Name, p), verify: true,
+                ct: nativeCancel.Token).ConfigureAwait(false);
+            NativeSay("[OK] Native DA: " + item.Extent.Name + " written and read back identical.");
+        }
+        NativeSay("[OK] Native DA: " + plan.Count + " partition(s) flashed in one session. The phone is rebooting — " +
+                  "this session closes with it.");
+        await NativeRebootAsync();
+    }
+
     /// <summary>ERASE one named partition over the live session — the NATIVE tab textbox and the FLASH grid share it.</summary>
     private async Task NativeGridEraseAsync(string name)
     {
@@ -991,6 +1033,35 @@ public partial class Form1
                   "session closes with it, so an NV backup goes back over a new one: plug the phone in again and press NV Restore.");
         // The reset is the mtkclient flow's trailing `;reset`, and it spends this session: the phone is on its way
         // down, so NativeRebootAsync asks NativeGuarded to close the port when the operation returns.
+        await NativeRebootAsync();
+    }
+
+    /// <summary>
+    /// Format All over the live session: the same whitelist resolver and the same one dialog as the mtkclient
+    /// route, then the proven set-erase machinery. The phone keeps its bootchain, seccfg and NV/IMEI, and the
+    /// trailing reset spends this session.
+    /// </summary>
+    private async Task NativeFormatAllAsync()
+    {
+        RequireNativeSession();
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+        var targets = MtkNativeBench.FormatAllTargets(table.Extents.Select(p => p.Name), NvPartitions).ToList();
+        if (!ConfirmFormatAll(targets)) { NativeSay("[*] Native DA: format all cancelled."); return; }
+
+        IReadOnlyList<MtkDaExtent> plan = MtkNativeBench.NvErasePlan(table, targets,
+            "This device's GPT names none of the partitions to erase.", out string refusal);
+        if (plan == null) throw new InvalidOperationException(refusal);
+
+        NativeSay("[*] Native DA: format all of " + plan.Count + " partition(s) " +
+                  string.Join(", ", plan.Select(p => p.Name)) + ", over the session already open.");
+        foreach (MtkDaExtent extent in plan)
+        {
+            NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
+            await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
+        }
+        NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased in one session — bootchain, " +
+                  "seccfg and NV/IMEI are kept. The phone is rebooting — flash full firmware to recover; this " +
+                  "session closes with it.");
         await NativeRebootAsync();
     }
 

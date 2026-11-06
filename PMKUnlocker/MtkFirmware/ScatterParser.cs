@@ -268,6 +268,7 @@ internal static class ScatterParser
                 });
                 return;
             }
+            e.ImageIsSparse = ShopServices.IsSparseImage(resolved);
             e.EffectiveImageSize = ShopServices.ExpandedImageSize(resolved);
             if (e.EffectiveImageSize > e.Size)
             {

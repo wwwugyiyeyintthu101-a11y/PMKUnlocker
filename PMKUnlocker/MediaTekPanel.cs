@@ -112,7 +112,9 @@ public partial class Form1
         mtkModes = new TabControl()
         {
             Location = new Point(15, 93),
-            Size = new Size(880, 482),
+            // 482 clipped the FLASH page: its summary label sits at design y 455..477 while the page client area
+            // ended at ~444, so the line under the grid was never painted. 522 gives it 40 px of room.
+            Size = new Size(880, 522),
             Appearance = TabAppearance.Normal,
             DrawMode = TabDrawMode.Normal,
             Font = new Font("Segoe UI", 9f, FontStyle.Bold)
@@ -246,7 +248,7 @@ public partial class Form1
 
         Button btnMtkFormatAll = Create3DButton("🗑 Format All", UiX(1), UiY(6), UiBtnW, UiBtnH, ButtonTheme.Red);
         btnMtkFormatAll.Click += async (_, _) => { try { await FormatAllAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkFormatAll, "Erase OS + user data partitions (whitelist ∩ live GPT) + reset in ONE session. Bootchain (preloader/lk/uboot/tee), seccfg and NV/IMEI are kept. Phone will not boot — reflash full firmware afterwards.");
+        if (toolTipMain != null) Tip(btnMtkFormatAll, "Erase OS + user data partitions (whitelist ∩ live GPT) + reset in ONE session, over the live native DA when one is open and the batched client otherwise. Bootchain (preloader/lk/uboot/tee), seccfg and NV/IMEI are kept. Phone will not boot — reflash full firmware afterwards.");
 
         // Two frames, same 325 px width and gutter as the NV row above: a 1-column frame is 170 px, and at
         // Segoe UI 8.5 Bold these titles measure 161 and 167 px — the closing bracket gets clipped.
@@ -308,7 +310,7 @@ public partial class Form1
             // that starts within its width, and the first words of the hint are painted over.
             Location = new Point(UiX(0), UiY(0) + 74),
             Size = new Size(850, 40),
-            Text = "Tick partitions on the FLASH tab, then Backup Selected: one native DA session reads them all and writes <chipset>_scatter.txt beside the images, so the folder is a firmware package the FLASH tab can re-flash. It needs a booted DA — the batched client pays one boot and one replug per partition. Restore writes one selected USER partition (exact-size raw backup only). The six NV partitions have their own button on the UNLOCK tab.",
+            Text = "Tick partitions on the FLASH tab, then Backup Selected: one session reads them all — a live native DA when one is booted, otherwise mtkclient's single multi script — and writes <chipset>_scatter.txt beside the images, so the folder is a firmware package the FLASH tab can re-flash. Restore writes one selected USER partition (exact-size raw backup only). The six NV partitions have their own button on the UNLOCK tab.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
             AutoEllipsis = false
@@ -411,17 +413,21 @@ public partial class Form1
         btnMtkFlash.Click += async (_, _) => { try { await FlashMediaTekAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
         if (toolTipMain != null) Tip(btnMtkFlash, "Rebuild GPT from the scatter file, then write the checked partitions (sparse-aware, one plug cycle). Unchecked partitions — including preloader — are skipped.");
 
+        // Two lines: what the loaded scatter file says about itself, then what the current tick set would write and
+        // through which route. 36px holds both 8pt lines inside the FLASH page (which clips at ~494 design px).
         mediaTekSummary = new Label
         {
-            Location = new Point(0, 455),
-            Size = new Size(856, 22),
+            Location = new Point(0, 452),
+            Size = new Size(856, 36),
             Text = "Ready · no firmware selected",
-            AutoEllipsis = true,
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f)
         };
 
         flashTab.Controls.AddRange(new Control[] { mediaTekSkipUserdata, mediaTekFlashableOnly, mediaTekVerifyReadback, btnMtkClearSel, btnMtkFlash, mediaTekSummary });
+        // The label is created with a design-time string, so paint the real two lines now — a tool that opens on
+        // the FLASH page must already say what the grid is before anyone loads a scatter or ticks a row.
+        RefreshMediaTekSummary();
 
         // ---- NATIVE tab (Phase 1.75 Path B bench harness) — only when a boot recipe is actually present ----
         BuildNativeDaTab();
@@ -739,10 +745,12 @@ public partial class Form1
                 bool supported = IsMediaTekUserImage(entry);
                 if (flashableOnly && !supported) continue;
                 int i = mediaTekGrid.Rows.Add(supported && mediaTekChecked.Contains(entry.Name), entry.Name, entry.FileName,
-                    entry.StartHex, FormatBytesLong(entry.Size),
-                    !supported ? "Unavailable" : FlashRisk.Classify(entry) == RiskLevel.HighRisk ? "High risk" : "Ready");
+                    entry.StartHex, FormatBytesLong(entry.Size), FlashRow.StatusText(entry, supported));
                 mediaTekGrid.Rows[i].Tag = entry;
                 mediaTekGrid.Rows[i].Cells[0].ReadOnly = !supported;
+                // The status cell names the risk and the route that can actually write the row, so a row the live
+                // native session cannot write says so before the click instead of in the refusal after it.
+                mediaTekGrid.Rows[i].Cells[5].ToolTipText = FlashRow.StatusTip(entry, supported);
             }
         }
         finally { EndMediaTekGridFill(); }
@@ -766,7 +774,19 @@ public partial class Form1
     }
     private void RefreshMediaTekSummary()
     {
-        if (mediaTekSummary != null) mediaTekSummary.Text = $"{SelectedMediaTekNames().Count} selected · {mediaTekPackage?.Platform ?? "Live device"} · {mediaTekPackage?.Storage ?? "GPT"}";
+        if (mediaTekSummary == null) return;
+        int count = SelectedMediaTekNames().Count;
+        if (mediaTekPackage == null)
+        {
+            mediaTekSummary.Text = FlashRow.PackageText(null) + "\n" + FlashRow.SummaryText(count, 0, nativeDa != null);
+            return;
+        }
+        long bytes = 0;
+        foreach (DataGridViewRow r in mediaTekGrid.Rows)
+            if (r.Cells[0].Value is true && r.Tag is ScatterEntry e && e.EffectiveImageSize is { } len)
+                bytes += len;
+        mediaTekSummary.Text = FlashRow.PackageText(mediaTekPackage) + "\n" +
+            FlashRow.SummaryText(count, bytes, nativeDa != null);
     }
     private async Task RunMediaTekWorkflowAsync(Func<Task> operation)
     {
@@ -854,6 +874,13 @@ public partial class Form1
             if (c.Contains("e nvram")) return "NV ERASE (all NV partitions)";
             if (c.Contains("w nvram")) return "NV RESTORE (backup images)";
             if (c.Contains("r nvram")) return "NV BACKUP (nvram/nvdata/nvcfg/proinfo/protect)";
+            // The firmware backup's own shape: printgpt + one `r` per ticked partition, all in one multi session.
+            // It sits after the NV checks so the six-partition NV script keeps its own title.
+            if (c.StartsWith("printgpt;r ", StringComparison.Ordinal))
+            {
+                int n = Regex.Matches(c, @";r ").Count;
+                return "MEDIATEK FIRMWARE BACKUP (" + n + " partition" + (n == 1 ? "" : "s") + ")";
+            }
             var m = Regex.Match(c, @"^e ([^;]+)");
             if (m.Success)
             {
@@ -1376,34 +1403,42 @@ public partial class Form1
     // Format All — erase OS + data (whitelist ∩ live GPT), keep bootchain/seccfg/NV, then reset.
     private async Task FormatAllAsync()
     {
+        if (nativeDa != null)
+        {
+            await NativeGuarded("format all", NativeFormatAllAsync);
+            return;
+        }
         await RunMediaTekWorkflowAsync(async () =>
         {
             var table = await GetMediaTekTableAsync();
-            var targets = table
-                .Select(p => p.Name)
-                .Where(n => FormatAllEraseable.Contains(n, StringComparer.OrdinalIgnoreCase))
-                .Where(n => !FormatAllProtected.Contains(n, StringComparer.OrdinalIgnoreCase))
-                .Where(n => !NvPartitions.Contains(n, StringComparer.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (targets.Count == 0)
-                throw new InvalidOperationException("No OS/data partitions found in the device GPT — nothing to format.");
-            string list = string.Join(", ", targets);
-            string keep = "preloader · bootloader (lk/uboot/tee) · GPT · seccfg (secure boot) · NV/IMEI (nvram/nvdata/nvcfg/proinfo)";
-            if (MessageBox.Show(this,
-                "FORMAT ALL — erase OS + user data?\n\n" +
-                "ERASE (" + targets.Count + "):\n" + list + "\n\n" +
-                "KEPT:\n" + keep + "\n\n" +
-                "The phone will NOT boot afterwards — flash full firmware to recover. IMEI/baseband are preserved. Continue?",
-                "Format All", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-            {
-                Log(" Format All cancelled by user.", Color.Orange);
-                return;
-            }
+            var targets = MtkNativeBench.FormatAllTargets(table.Select(p => p.Name), NvPartitions).ToList();
+            if (!ConfirmFormatAll(targets)) return;
             await MtkEraseAndResetAsync(string.Join(",", targets),
                 $"[OK] Format All — {targets.Count} OS/data partitions erased (bootchain + NV/IMEI kept).");
         });
+    }
+
+    /// <summary>
+    /// The one Format All confirmation, word for word the same on either route: the erase list, what is kept,
+    /// and the honest consequence — the phone will not boot until full firmware is flashed back.
+    /// </summary>
+    private bool ConfirmFormatAll(IReadOnlyList<string> targets)
+    {
+        if (targets.Count == 0)
+            throw new InvalidOperationException("No OS/data partitions found in the device GPT — nothing to format.");
+        string list = string.Join(", ", targets);
+        string keep = "preloader · bootloader (lk/uboot/tee) · GPT · seccfg (secure boot) · NV/IMEI (nvram/nvdata/nvcfg/proinfo)";
+        if (MessageBox.Show(this,
+            "FORMAT ALL — erase OS + user data?\n\n" +
+            "ERASE (" + targets.Count + "):\n" + list + "\n\n" +
+            "KEPT:\n" + keep + "\n\n" +
+            "The phone will NOT boot afterwards — flash full firmware to recover. IMEI/baseband are preserved. Continue?",
+            "Format All", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            Log(" Format All cancelled by user.", Color.Orange);
+            return false;
+        }
+        return true;
     }
 
     // IMEI Read — pure file scan, no device/plug cycle. Heuristic ASCII + BCD, Luhn-checked.
@@ -1682,40 +1717,151 @@ public partial class Form1
         if (!Directory.EnumerateFiles(dir).Any(f => new FileInfo(f).Length > 0)) throw new IOException("GPT backup files were not produced.");
         Log("[OK] GPT files saved: " + dir, Color.LightGreen);
     });
-    private Task BackupMediaTekAsync()
+    private async Task BackupMediaTekAsync()
     {
-        // The batched client pays one full boot per partition; a live session reads them all in one, through the
-        // framing the dump button already proved — and only a live session can carry the scatter the package needs.
-        if (nativeDa != null) return NativeGuarded("partition backup", () => NativeBackupAsync(false));
-        int count = SelectedMediaTekNames().Count;
-        Log("[!] Firmware backup needs a live native DA session: the batched client pays one full BROM boot and one " +
-            "replug per partition, so " + count + " partition(s) would mean " + count + " boots. Press Boot Device " +
-            "on the INFO tab and run this again.", Color.Orange);
-        return Task.CompletedTask;
+        // A live session already owns the phone: one boot, one READ per partition, and the scatter comes off the
+        // table it cached. Nothing here needs the batched client.
+        if (nativeDa != null)
+        {
+            await NativeGuarded("partition backup", () => NativeBackupAsync(false));
+            return;
+        }
+
+        // Without a live session the batched client still reads the whole selection in ONE boot: `multi` runs
+        // printgpt and every `r` as one script. The old one-boot-per-partition loop is gone; what stays is the
+        // same exact-size gate the native path uses, checked against the GPT this run itself reads.
+        List<string> names = SelectedMediaTekNames();
+        if (names.Count == 0)
+        {
+            Log("[!] No partitions are ticked on the FLASH tab. Press Read Info / GPT on the INFO tab to load the " +
+                "live table (or load a scatter), tick the partitions to back up, then run Backup Selected again. " +
+                "Nothing was read.", Color.Orange);
+            return;
+        }
+        List<string> unsafeNames = names.Where(n => !Regex.IsMatch(n, @"^[A-Za-z0-9_-]+$")).ToList();
+        if (unsafeNames.Count > 0)
+        {
+            Log("[FAIL] Unsafe partition name(s) in the selection: " + string.Join(", ", unsafeNames) +
+                ". Nothing was read.", Color.Red);
+            return;
+        }
+
+        string dest;
+        using (var pick = new FolderBrowserDialog { Description = "Select backup destination" })
+        {
+            if (pick.ShowDialog(this) != DialogResult.OK)
+            {
+                Log("[*] Backup declined — no folder was chosen, nothing was read.", Color.Gray);
+                return;
+            }
+            dest = Path.Combine(pick.SelectedPath, "MTK-" + Guid.NewGuid().ToString("N"));
+        }
+
+        await RunMediaTekWorkflowAsync(async () =>
+        {
+            var sw = Stopwatch.StartNew();
+            Directory.CreateDirectory(dest);
+            // ONE plug cycle: the table and every image come off the same session.
+            string script = "printgpt;" + string.Join(";", names.Select(n => $"r {n} {n}.bin"));
+            var r = await MediaTekCommandAsync(new[] { "multi", script });
+            var (live, _) = ParseGptLines(r.Lines);
+            if (live.Count > 0) SetLiveTable(live, null);
+            if (live.Count == 0)
+            {
+                foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
+                try { Directory.Delete(dest, true); } catch { }
+                throw new IOException("Partition table was not read — firmware backup aborted.");
+            }
+
+            string sess = mediaTekEngine.SessionDirectory;
+            var layout = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in names)
+            {
+                var part = live.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (part == null)
+                {
+                    foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
+                    try { Directory.Delete(dest, true); } catch { }
+                    throw new IOException("Firmware backup aborted: this device's GPT has no partition named '" +
+                        name + "'.");
+                }
+                string staged = Path.Combine(sess, part.Name + ".bin");
+                long got = File.Exists(staged) ? new FileInfo(staged).Length : -1;
+                if (got != part.Length)
+                {
+                    foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
+                    try { Directory.Delete(dest, true); } catch { }
+                    throw new IOException($"Firmware backup incomplete: {part.Name} (expected {part.Length}, got {got})");
+                }
+                layout[part.Name] = part.Length;
+            }
+            foreach (var kv in layout)
+            {
+                File.Move(Path.Combine(sess, kv.Key + ".bin"), Path.Combine(dest, kv.Key + ".bin"), true);
+                Log($"  * Backup {kv.Key} ... {MstBytes(kv.Value)}", Color.LightGreen);
+            }
+            ShopServices.WriteBackup(dest, "MTK", layout, layout.Keys, Application.ProductVersion);
+            RegisterBackup(dest);
+            Log($"  * Result ... firmware backup saved — {layout.Count} partitions", Color.LightGreen);
+            Log(" [OK] " + dest, Color.LightGreen);
+            // The folder is only a firmware package once the scatter beside it describes the whole live table.
+            TryWriteClientFirmwareScatter(dest, live, layout.Keys, r.Lines);
+            Log($" Elapsed Time... {sw.Elapsed.TotalSeconds:F0} seconds", Color.Gainsboro);
+            Log($" Finished at local time: [{DateTime.Now:dd.MM.yy HH:mm:ss}]", Color.Gainsboro);
+        });
+    }
+
+    /// <summary>
+    /// P1.5 fallback — the scatter the native backup writes, built from the GPT the batched run just read. The
+    /// storage word is what the client printed for this unit; a UFS or an unreported storage gets no file, because
+    /// the region word of a UFS scatter has never been read off a real package on this bench. Every live extent
+    /// gets a row (the dumped ones as images, the rest reserved) for the same reason the native writer does:
+    /// <c>wfscatter</c> rebuilds the GPT from the rows it parses, so a package holding only the ticked partitions
+    /// would delete the rest of the phone's table.
+    /// </summary>
+    private void TryWriteClientFirmwareScatter(string dir, IReadOnlyList<MtkPartition> live,
+        IEnumerable<string> dumped, IReadOnlyList<string> lines)
+    {
+        string chipset = MtkDaCatalog.PrimaryChipset(FindMtkInfo(lines, @"CPU:\s+(.+)"));
+        if (chipset.Length == 0) chipset = MtkDaCatalog.ChipsetFromPayloadLines(lines);
+        string storage = lines.Any(l => l.Contains("EMMC ID:", StringComparison.OrdinalIgnoreCase)) ? "EMMC"
+            : lines.Any(l => l.Contains("UFS ID:", StringComparison.OrdinalIgnoreCase) ||
+                             l.Contains("UFS Blocksize:", StringComparison.OrdinalIgnoreCase)) ? "UFS"
+            : "";
+        IReadOnlyList<ScatterRow> rows = MtkNativeBench.ScatterRowsFromGpt(live, dumped, storage, out string refusal);
+        if (rows == null)
+        {
+            Log("[*] No scatter written — " + refusal, Color.Gray);
+            return;
+        }
+        if (chipset.Length == 0)
+        {
+            Log("[*] No scatter written — this run did not report the chipset, and a package needs the platform " +
+                "its rows belong to. The images and the manifest are saved.", Color.Gray);
+            return;
+        }
+        try
+        {
+            string path = Path.Combine(dir, ScatterWriter.DefaultFileName(chipset));
+            File.WriteAllText(path, ScatterWriter.Build(chipset, "PMK-device-dump", "EMMC", rows));
+            Log("[+] Firmware package written — " + Path.GetFileName(path) + ": " +
+                rows.Count(r => r.IsDownload) + " flashable row(s) of " + rows.Count + " — the " +
+                rows.Count(r => r.IsReserved) + " rows without an image keep the rest of the live table.", Color.LightGreen);
+            Log("[*] Load that file on the FLASH tab to re-flash these images; the reserved rows stop the GPT " +
+                "rebuild from deleting partitions this dump did not read.", Color.Gray);
+        }
+        catch (Exception ex)
+        {
+            // The images and the manifest are already on disk; losing the index must not throw the run away.
+            Log("[!] Dumps saved, scatter NOT written: " + ex.Message, Color.Orange);
+        }
     }
 
     private static readonly string[] NvPartitions = { "nvram", "nvdata", "nvcfg", "proinfo", "protect1", "protect2" };
     private const string MtkNvBackupRootKey = "MtkNvBackupRoot";
 
-    // Format All = whitelist erase. Only these OS/data names are erased (intersected
-    // with the live GPT) — bootchain (preloader/lk/uboot/tee), seccfg and NV/IMEI are
-    // never in this list, so anything not named here is kept by construction.
-    private static readonly string[] FormatAllEraseable =
-    {
-        "super", "system", "systemex", "vendor", "product", "system_ext", "odm", "oem",
-        "boot", "boot_a", "boot_b", "dtbo", "dtbo_a", "dtbo_b", "recovery", "recovery_a", "recovery_b",
-        "vbmeta", "vbmeta_system", "vbmeta_vendor", "vbmeta_system_a", "vbmeta_system_b",
-        "userdata", "cache", "metadata", "md_udc",
-        "frp", "persist", "cust", "custom", "preload", "preas", "misc", "rescue", "minidump",
-        "splash", "logo", "logdump", "dump", "expdb", "para", "param", "carrier", "epo", "oemkeystore"
-    };
-    // Defense-in-depth: never erase these even if a future edit adds them to the whitelist.
-    private static readonly string[] FormatAllProtected =
-    {
-        "preloader", "gpt", "pgpt", "sgpt", "otp", "flashinfo", "seccfg",
-        "lk", "lk2", "uboot", "tee1", "tee2", "tz", "boot_para",
-        "scp1", "scp2", "sspm_1", "sspm_2", "spmfw", "mcupm", "dpm_1", "dpm_2", "gz1", "gz2"
-    };
+    // The Format All erase policy (FormatAllEraseable / FormatAllProtected / FormatAllTargets) lives in
+    // MtkNativeBench beside the never-program gate it shares, so regression checks pin what it may erase.
 
     // pmk_settings.txt merge-read (Form1.SaveSettings also preserves these panel keys)
     private static string GetMtkSetting(string key)
@@ -2131,6 +2277,23 @@ public partial class Form1
 
     private async Task FlashMediaTekAsync()
     {
+        // P1.5: a live session already owns the phone, and mtkclient cannot share that BROM face. The native route
+        // writes the selected raw images by name over that session; it never rebuilds the GPT, so the plan below
+        // requires every package row to match the live extent exactly. Sparse images keep the mtkclient wfscatter
+        // path (the DA has no sparse writer), which means Eject Device first.
+        if (nativeDa != null)
+        {
+            // The live GPT fills the grid with names and extents but no images: the package is what supplies the
+            // bytes, and BuildFlashStep is the only thing that knows how to read it. Say that here instead of letting
+            // the generic "select a scatter" refusal imply the session is the problem.
+            if (mediaTekPackage == null)
+                throw new InvalidOperationException("A native session is live, but no scatter package is loaded. Load " +
+                    "the package on the FLASH tab first — the live GPT supplies the extents, and the package supplies " +
+                    "the images this route checks against them. Nothing was written.");
+            var nativeStep = BuildFlashStep();
+            await NativeGuarded("flash", () => NativeFlashAsync(nativeStep));
+            return;
+        }
         var step = BuildFlashStep();
         if (MessageBox.Show(this, "Write these partitions?\n\n" + string.Join(", ", step.Files.Select(f => f.Name)) + "\n\nThe GPT partition table will be rebuilt from the scatter file, then the selected partitions will be written (sparse-aware, one plug cycle).", "Confirm flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         await RunMtkFlashAsync(step);
