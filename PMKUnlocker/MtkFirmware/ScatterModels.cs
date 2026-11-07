@@ -154,8 +154,8 @@ internal static class FlashRow
             return Add(risk, "the scatter names " + entry.FileName + " but it is not on disk — selecting this row " +
                 "blocks the flash until the file is there");
         string route = entry.ImageIsSparse
-            ? "sparse image: the native DA session writes raw bytes only, so this row needs the mtkclient route " +
-              "(press Eject Device first)"
+            ? "sparse image: native Flash Selected expands and validates it on this PC before writing; temporary " +
+              "disk space is required, and mtkclient can also flash it"
             : "raw image: a live native DA session can write it, and mtkclient can too";
         return Add(risk, route);
     }
@@ -193,7 +193,7 @@ internal static class FlashRow
         count == 0
             ? "0 selected · nothing will be written"
             : count + " selected · " + Bytes(bytes) + " to write · " + (nativeSessionLive
-                ? "route: native DA session — raw images only, the GPT is not rebuilt"
+                ? "route: native DA session — sparse expanded on PC, the GPT is not rebuilt"
                 : "route: mtkclient — rebuilds the GPT from the scatter, sparse-aware");
 
     internal static string Bytes(long bytes)

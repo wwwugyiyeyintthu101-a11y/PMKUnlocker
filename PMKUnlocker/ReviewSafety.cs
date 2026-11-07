@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Xml.Linq;
+using PMKUnlocker.Qualcomm;
 
 namespace PMKUnlocker;
 
@@ -207,8 +208,10 @@ internal static class ReviewSafety
         return checked((long)blkSz * totalBlks);
     }
 
-    internal static void ExpandSparseImage(string source, string destination)
+    internal static void ExpandSparseImage(string source, string destination, CancellationToken ct = default,
+        Action<int>? progress = null)
     {
+        ct.ThrowIfCancellationRequested();
         long expected = ReadSparseExpandedSize(source);
         string temp = destination + "." + Guid.NewGuid().ToString("N") + ".part";
         try
@@ -229,9 +232,19 @@ internal static class ReviewSafety
 
                 using var outp = File.Create(temp);
                 byte[] buf = new byte[1 << 20];
+                int lastProgress = -1;
+                void ReportExpanded(long bytes)
+                {
+                    int percent = (int)Math.Min(99, (double)bytes * 100 / expected);
+                    if (percent == lastProgress) return;
+                    lastProgress = percent;
+                    progress?.Invoke(percent);
+                }
+                ReportExpanded(0);
 
                 for (uint i = 0; i < totalChunks; i++)
                 {
+                    ct.ThrowIfCancellationRequested();
                     long chunkStart = inp.Position;
                     ushort type = br.ReadUInt16();
                     br.ReadUInt16();                        // reserved
@@ -255,12 +268,14 @@ internal static class ReviewSafety
                             long remaining = dataLen;
                             while (remaining > 0)
                             {
+                                ct.ThrowIfCancellationRequested();
                                 int want = (int)Math.Min(buf.Length, remaining);
                                 int got = inp.Read(buf, 0, want);
                                 if (got <= 0) throw new InvalidDataException("Sparse raw chunk truncated: " + source);
                                 outp.Write(buf, 0, got);
                                 crc = UpdateCrc(crc, buf, got);
                                 remaining -= got;
+                                ReportExpanded(outp.Position);
                             }
                             break;
                         }
@@ -277,10 +292,12 @@ internal static class ReviewSafety
                             long remaining = outLen;
                             while (remaining > 0)
                             {
+                                ct.ThrowIfCancellationRequested();
                                 int want = (int)Math.Min(fillBuf.Length, remaining);
                                 outp.Write(fillBuf, 0, want);
                                 crc = UpdateCrc(crc, fillBuf, want);
                                 remaining -= want;
+                                ReportExpanded(outp.Position);
                             }
                             break;
                         }
@@ -288,9 +305,11 @@ internal static class ReviewSafety
                             Array.Clear(buf);
                             for (long left = outLen; left > 0;)
                             {
+                                ct.ThrowIfCancellationRequested();
                                 int count = (int)Math.Min(buf.Length, left);
                                 crc = UpdateCrc(crc, buf, count);
                                 left -= count;
+                                ReportExpanded(outp.Position + outLen - left);
                             }
                             outp.Seek(outLen, SeekOrigin.Current);
                             break;
@@ -310,7 +329,9 @@ internal static class ReviewSafety
                 if (imageChecksum != 0 && imageChecksum != ~crc)
                     throw new InvalidDataException("Sparse image CRC32 mismatch.");
             }
+            ct.ThrowIfCancellationRequested();
             File.Move(temp, destination, overwrite: true);
+            progress?.Invoke(100);
         }
         catch
         {
@@ -354,6 +375,44 @@ internal static class ReviewSafety
             done++;
         }
         return done;
+    }
+
+    internal static async Task RunQcUserdataResetAsync(GptLayout layout, int sectorSize,
+        Func<GptPartition, CancellationToken, Task> erase, Func<CancellationToken, Task> reset,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var partitions = layout.Partitions;
+        var userdata = partitions.Where(p => string.Equals(p.Name, "userdata", StringComparison.OrdinalIgnoreCase)).ToList();
+        var metadata = partitions.Where(p => string.Equals(p.Name, "metadata", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (userdata.Count != 1)
+            throw new InvalidDataException("Exactly one userdata partition is required — nothing erased.");
+        if (metadata.Count > 1)
+            throw new InvalidDataException("Ambiguous metadata partition — nothing erased.");
+        if (sectorSize <= 0)
+            throw new InvalidDataException("Invalid sector size — nothing erased.");
+
+        var targets = userdata.Concat(metadata).ToList();
+        foreach (var target in targets)
+        {
+            if (target.FirstLba < layout.FirstUsableLba || target.LastLba > layout.LastUsableLba ||
+                target.LastLba < target.FirstLba)
+                throw new InvalidDataException("Invalid partition range: " + target.Name + " — nothing erased.");
+            _ = target.ByteOffset(sectorSize);
+            _ = target.ByteLength(sectorSize);
+            _ = checked((target.LastLba + 1) * sectorSize);
+            if (partitions.Any(p => !ReferenceEquals(p, target) &&
+                p.FirstLba <= target.LastLba && target.FirstLba <= p.LastLba))
+                throw new InvalidDataException("Overlapping partition range: " + target.Name + " — nothing erased.");
+        }
+
+        foreach (var target in targets)
+        {
+            ct.ThrowIfCancellationRequested();
+            await erase(target, ct);
+        }
+        ct.ThrowIfCancellationRequested();
+        await reset(ct);
     }
 
     // Qualcomm EFS/IMEI-critical partition set (fsg + fsc carry IMEI/EFS alongside persist + modemst).

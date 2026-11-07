@@ -833,18 +833,40 @@ internal static class MtkNativeBench
     /// P1.5 — one partition of a native multi-partition flash. The extent is the live GPT's own, not the scatter's:
     /// the package has already been checked against it, and the write is addressed by these bytes.
     /// </summary>
-    internal sealed record NativeFlashItem(MtkDaExtent Extent, string ImagePath, long ImageLength);
+    internal static string ServiceEraseConfirmText(bool userlock) =>
+        (userlock
+            ? "Erase userdata only? All user files, photos and apps will be lost. Back up first.\n\n" +
+              "KEPT: metadata, FRP, NV/IMEI, bootchain, GPT and seccfg."
+            : "Erase the frp partition only?\n\nKEPT: userdata, metadata, NV/IMEI, bootchain, GPT and seccfg.") +
+        "\n\nRequires the device owner's authorization. This does not remove server-side accounts. " +
+        "The phone will be reset afterwards; verify the result in Android setup. Continue?";
 
-    /// <summary>
-    /// P1.5 — the write list for one native multi-partition flash, resolved before a single frame is sent.
-    ///
-    /// The native path writes by partition name and never rebuilds the GPT, so a package from another layout is not
-    /// a smaller version of this job — it is a write list aimed at bytes this device may not own. Every row therefore
-    /// has to agree with the live table in both offset and length, the image has to fit, the name has to pass the
-    /// never-program gate, and a sparse image is refused outright: the DA writes raw bytes, and a sparse container
-    /// written raw is corruption. Null means nothing was written, and <paramref name="refusal"/> says which row broke
-    /// the match.
-    /// </summary>
+    internal static MtkDaExtent ServiceEraseTarget(MtkDaPartitionTable table, MtkStorageInfo storage, bool userlock)
+    {
+        string name = userlock ? "userdata" : "frp";
+        if (table.RawHeader == null || table.RawEntries == null || table.BlockSize != storage.BlockSize)
+            throw new InvalidDataException("The live GPT and storage geometry are required. Nothing was erased.");
+        var layout = Qualcomm.GptParser.ParseLayout(table.RawHeader, table.RawEntries, checked((int)table.BlockSize));
+        var matches = layout.Partitions.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+        var cached = table.Extents.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matches.Count != 1 || cached.Count != 1)
+            throw new InvalidDataException("Exactly one " + name + " partition is required. Nothing was erased.");
+        var target = matches[0];
+        MtkDaExtent extent = cached[0];
+        if (extent.FirstLba != target.FirstLba || extent.LastLba != target.LastLba || extent.BlockSize != table.BlockSize)
+            throw new InvalidDataException("The cached extent differs from the live GPT. Nothing was erased.");
+        if (layout.Partitions.Any(p => !ReferenceEquals(p, target) &&
+            p.FirstLba <= target.LastLba && target.FirstLba <= p.LastLba))
+            throw new InvalidDataException(name + " overlaps another partition. Nothing was erased.");
+        if (extent.ByteOffset > storage.UserAreaSize || extent.ByteLength > storage.UserAreaSize - extent.ByteOffset)
+            throw new InvalidDataException(name + " exceeds the device capacity. Nothing was erased.");
+        if (!ProgramAllowed(extent.Name, out string refusal)) throw new InvalidDataException(refusal);
+        return extent;
+    }
+
+    internal sealed record NativeFlashItem(MtkDaExtent Extent, string ImagePath, long ImageLength, bool IsSparse);
+
+    // Sparse lengths describe expanded bytes; containers must be prepared before any item reaches the DA.
     internal static IReadOnlyList<NativeFlashItem> NativeFlashPlan(MtkDaPartitionTable table,
         IEnumerable<(string Name, string Path, long Start, long Size)> files, out string refusal)
     {
@@ -884,22 +906,20 @@ internal static class MtkNativeBench
                 return null;
             }
             long imageLength;
-            try { imageLength = new FileInfo(file.Path).Length; }
-            catch (Exception ex)
+            bool sparse;
+            try
             {
-                refusal = "The image for " + extent.Name + " could not be read (" + ex.Message + "). Nothing was written.";
+                sparse = ShopServices.IsSparseImage(file.Path);
+                imageLength = ShopServices.ExpandedImageSize(file.Path);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or OverflowException or UnauthorizedAccessException)
+            {
+                refusal = "The image for " + extent.Name + " could not be validated (" + ex.Message + "). Nothing was written.";
                 return null;
             }
             if (imageLength <= 0)
             {
                 refusal = "The image for " + extent.Name + " is empty. Nothing was written.";
-                return null;
-            }
-            if (ReviewSafety.IsAndroidSparse(file.Path))
-            {
-                refusal = Path.GetFileName(file.Path) + " is a sparse image and the native session writes raw bytes " +
-                    "only. Press Eject Device and flash this selection through the mtkclient wfscatter path; nothing " +
-                    "was written.";
                 return null;
             }
             if (imageLength > (long)extent.ByteLength)
@@ -917,7 +937,12 @@ internal static class MtkNativeBench
                     "the GPT, so a package from a different layout is refused before the port is touched. Nothing was written.";
                 return null;
             }
-            plan.Add(new NativeFlashItem(extent, file.Path, imageLength));
+            if (table.BlockSize == 0 || imageLength % table.BlockSize != 0)
+            {
+                refusal = extent.Name + " image length is not aligned to the device block size. Nothing was written.";
+                return null;
+            }
+            plan.Add(new NativeFlashItem(extent, file.Path, imageLength, sparse));
         }
         if (plan.Count == 0)
         {
@@ -934,12 +959,99 @@ internal static class MtkNativeBench
     internal static string NativeFlashConfirmText(IReadOnlyList<NativeFlashItem> plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        long temporaryBytes = plan.Where(i => i.IsSparse).Sum(i => i.ImageLength);
         return "Write " + plan.Count + " partition(s) through the live DA session?\n\n" +
-            string.Join("\n", plan.Select(i => "  " + i.Extent.Describe + "  <-  " + Path.GetFileName(i.ImagePath))) +
+            string.Join("\n", plan.Select(i => "  " + i.Extent.Describe + "  <-  " + Path.GetFileName(i.ImagePath) +
+                (i.IsSparse ? " (sparse, " + MtkDaExtent.SizeText((ulong)i.ImageLength) + " expanded)" : ""))) +
+            (temporaryBytes > 0 ? "\n\nSparse images are expanded and validated on this PC before ANY partition is written. " +
+                "Temporary disk space required: " + MtkDaExtent.SizeText((ulong)temporaryBytes) +
+                ". Don't-care ranges are written as zeroes. Temporary raw files are removed when the operation ends." : "") +
             "\n\nThe images are written raw, one after another, over the session already open — the GPT is not " +
-            "rebuilt and the phone is not replugged. Every write is read back and compared byte for byte; a mismatch " +
+            "rebuilt and the phone is not replugged. Only the listed image ranges are overwritten; the remaining " +
+            "partition bytes and all unlisted partitions are kept. Every write is read back and compared byte for byte; a mismatch " +
             "stops the run at that partition and the rest of the set is not written. The phone is rebooted once, " +
             "after the last partition.";
+    }
+
+    internal sealed class NativeFlashPreparation : IDisposable
+    {
+        private readonly List<FileStream> _handles = new();
+        private readonly List<NativeFlashItem> _plan = new();
+        private readonly Action<string> _log;
+        private string _directory;
+        internal IReadOnlyList<NativeFlashItem> Plan => _plan;
+
+        private NativeFlashPreparation(Action<string> log) => _log = log;
+
+        internal static NativeFlashPreparation Create(IReadOnlyList<NativeFlashItem> plan, string temporaryRoot,
+            CancellationToken ct = default, Action<string> log = null, Action<string, int> progress = null)
+        {
+            var prepared = new NativeFlashPreparation(log);
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (NativeFlashItem item in plan)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    prepared._handles.Add(File.OpenRead(item.ImagePath));
+                    if (ShopServices.IsSparseImage(item.ImagePath) != item.IsSparse ||
+                        ShopServices.ExpandedImageSize(item.ImagePath) != item.ImageLength)
+                        throw new IOException("Image changed after preflight: " + Path.GetFileName(item.ImagePath) + ". Nothing was written.");
+                }
+
+                long temporaryBytes = plan.Where(i => i.IsSparse).Sum(i => i.ImageLength);
+                if (temporaryBytes > 0)
+                {
+                    string root = Path.GetFullPath(temporaryRoot);
+                    long available = new DriveInfo(Path.GetPathRoot(root)).AvailableFreeSpace;
+                    if (temporaryBytes > available)
+                        throw new IOException("Sparse expansion needs " + temporaryBytes + " temporary bytes; only " +
+                            available + " are available. Nothing was written.");
+                    prepared._directory = Path.Combine(root, "pmk-native-flash-" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(prepared._directory);
+                }
+
+                foreach (NativeFlashItem item in plan)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!item.IsSparse)
+                    {
+                        prepared._plan.Add(item);
+                        continue;
+                    }
+                    string raw = Path.Combine(prepared._directory,
+                        prepared._plan.Count + "-" + Path.GetFileName(item.ImagePath) + ".raw");
+                    log?.Invoke("[*] Native DA: expanding and validating " + Path.GetFileName(item.ImagePath) +
+                        " (" + MtkDaExtent.SizeText((ulong)item.ImageLength) + ") before any write...");
+                    ReviewSafety.ExpandSparseImage(item.ImagePath, raw, ct, p => progress?.Invoke(item.Extent.Name, p));
+                    var handle = File.OpenRead(raw);
+                    prepared._handles.Add(handle);
+                    if (handle.Length != item.ImageLength)
+                        throw new InvalidDataException("Expanded image length changed after preflight. Nothing was written.");
+                    prepared._plan.Add(item with { ImagePath = raw, IsSparse = false });
+                }
+                ct.ThrowIfCancellationRequested();
+                return prepared;
+            }
+            catch
+            {
+                prepared.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (FileStream handle in _handles) handle.Dispose();
+            _handles.Clear();
+            if (_directory == null) return;
+            try { Directory.Delete(_directory, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log?.Invoke("[!] Temporary flash files could not be removed: " + _directory + " (" + ex.Message + ").");
+            }
+            _directory = null;
+        }
     }
 
     /// <summary>

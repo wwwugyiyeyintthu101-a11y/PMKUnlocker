@@ -13,6 +13,8 @@ internal sealed record GptPartition(string Name, long FirstLba, long LastLba, st
     public long ByteLength(int sectorSize) => checked(SectorCount * sectorSize);
 }
 
+internal sealed record GptLayout(long FirstUsableLba, long LastUsableLba, IReadOnlyList<GptPartition> Partitions);
+
 internal static class GptParser
 {
     // GPT header (LBA 1) — UEFI 2.x fixed field offsets.
@@ -33,6 +35,27 @@ internal static class GptParser
         header[0] == (byte)'E' && header[1] == (byte)'F' && header[2] == (byte)'I' && header[3] == (byte)' ' &&
         header[4] == (byte)'P' && header[5] == (byte)'A' && header[6] == (byte)'R' && header[7] == (byte)'T';
 
+    internal static GptLayout ParseLayout(byte[] header, byte[] entries, int sectorSize)
+    {
+        var (count, size, entryLba) = HeaderInfo(header);
+        if (sectorSize < 512 || sectorSize > 65536 || (sectorSize & (sectorSize - 1)) != 0)
+            throw new InvalidDataException("Invalid GPT sector size.");
+        long entryBytes = checked((long)count * size);
+        if (entries.LongLength < entryBytes)
+            throw new InvalidDataException("GPT entry array is truncated.");
+        long entrySectors = (entryBytes + sectorSize - 1) / sectorSize;
+        long first = BitConverter.ToInt64(header, 40);
+        long last = BitConverter.ToInt64(header, 48);
+        long backup = BitConverter.ToInt64(header, 32);
+        if (BitConverter.ToInt64(header, 24) != 1 || first < checked(entryLba + entrySectors) ||
+            last < first || backup <= last || backup - entrySectors <= last)
+            throw new InvalidDataException("Invalid GPT usable-LBA boundaries.");
+        var partitions = ParseEntries(header, entries);
+        if (partitions.Any(p => p.FirstLba < first || p.LastLba > last))
+            throw new InvalidDataException("Partition extends outside the GPT usable-LBA boundaries.");
+        return new GptLayout(first, last, partitions);
+    }
+
     internal static List<GptPartition> ParseEntries(byte[] header, byte[] entries)
     {
         var (count, size, _) = HeaderInfo(header);
@@ -46,7 +69,8 @@ internal static class GptParser
             long firstLba = BitConverter.ToInt64(entries, off + 32);
             long lastLba = BitConverter.ToInt64(entries, off + 40);
             string name = ReadUtf16Name(entries, off + 56, 72);
-            if (lastLba < firstLba) continue;
+            if (lastLba < firstLba)
+                throw new InvalidDataException("Invalid GPT partition range: " + name);
             parts.Add(new GptPartition(name, firstLba, lastLba, typeGuid));
         }
         return parts;

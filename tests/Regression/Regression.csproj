@@ -36,5 +36,6 @@
     <Compile Include="../../PMKUnlocker/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
     <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
     <Compile Include="../../PMKUnlocker/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
+    <Compile Include="../../PMKUnlocker/Qualcomm/FirehoseIO.cs" Link="Qualcomm/FirehoseIO.cs" />
   </ItemGroup>
 </Project>

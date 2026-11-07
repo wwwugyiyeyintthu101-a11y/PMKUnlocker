@@ -165,12 +165,12 @@ public partial class Form1
         TabPage unlockTab = mtkModes.TabPages[1];
         // mtkclient syntax: e <partition> = erase, w <partition> <file> = write
         Button btnMtkFrpRemove = Create3DButton("🔑 FRP Remove", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
-        btnMtkFrpRemove.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("frp", "[OK] FRP partition erased — Google account lock removed.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkFrpRemove, "mtkclient e frp + reset in ONE session — erase FRP partition, Google account lock removal.");
+        btnMtkFrpRemove.Click += async (_, _) => { try { await MtkServiceEraseAsync(userlock: false); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null) Tip(btnMtkFrpRemove, "Erase frp only + reset, native when a session is live and mtkclient otherwise. Confirmation required. Userdata and NV are kept; verify Android setup afterwards.");
 
         Button btnMtkUserlockRemove = Create3DButton("📱 Userlock Remove", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
-        btnMtkUserlockRemove.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("userdata", "[OK] Userdata erased — pattern/PIN/password lock removed. All user data lost.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkUserlockRemove, "mtkclient e userdata + reset in ONE session — removes screen lock. ALL USER DATA IS LOST.");
+        btnMtkUserlockRemove.Click += async (_, _) => { try { await MtkServiceEraseAsync(userlock: true); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null) Tip(btnMtkUserlockRemove, "Erase userdata only + reset, native when a session is live and mtkclient otherwise. ALL USER DATA IS LOST. Metadata, FRP, NV and bootchain are kept; verify Android setup afterwards.");
 
         Button btnMtkMiCloud = Create3DButton("☁️ Mi Cloud Remove", UiX(2), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Orange);
         btnMtkMiCloud.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => await MtkEraseAndResetAsync("persist", "[OK] Persist erased — Mi Cloud / account data cleared.")); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
@@ -284,7 +284,7 @@ public partial class Form1
         {
             Location = new Point(UiX(0), UiY(10)),
             Size = new Size(850, 30),
-            Text = "Each op runs in ONE session and needs one plug cycle: with a live native DA the NV ops go through it, otherwise mtkclient (native + fallback + reset, auto-retry once). NV Reset erases nvdata only; NV Erase wipes all six NV — run NV Backup first. NV Restore writes only from a hash-verified backup folder and reads every partition back. Format All erases OS + user data, keeps bootchain/seccfg/NV. IMEI Read works offline from a backup.",
+            Text = "Each op runs in ONE session and needs one plug cycle: with a live native DA, FRP/Userlock and NV ops go through it, otherwise mtkclient (native + fallback + reset, auto-retry once). NV Reset erases nvdata only; NV Erase wipes all six NV — run NV Backup first. NV Restore writes only from a hash-verified backup folder and reads every partition back. Format All erases OS + user data, keeps bootchain/seccfg/NV. IMEI Read works offline from a backup.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 7.5f),
             AutoEllipsis = true
@@ -1370,6 +1370,38 @@ public partial class Form1
         }
         return "";
     }
+    private async Task MtkServiceEraseAsync(bool userlock)
+    {
+        string name = userlock ? "userdata" : "frp";
+        string title = userlock ? "Userlock Remove" : "FRP Remove";
+        if (MessageBox.Show(this, MtkNativeBench.ServiceEraseConfirmText(userlock), title,
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+
+        if (nativeDa != null)
+        {
+            await NativeGuarded(title, async () =>
+            {
+                RequireNativeSession();
+                CancellationToken ct = nativeCancel.Token;
+                ct.ThrowIfCancellationRequested();
+                var table = await nativeDa.ReadPartitionTableAsync(ct).ConfigureAwait(false);
+                var storage = await nativeDa.QueryStorageAsync(ct).ConfigureAwait(false);
+                MtkDaExtent target = MtkNativeBench.ServiceEraseTarget(table, storage, userlock);
+                ct.ThrowIfCancellationRequested();
+                NativeSay("[*] Native DA: erasing only " + target.Describe + ". All other partitions are kept.");
+                await nativeDa.ErasePartitionAsync(target.Name, ct).ConfigureAwait(false);
+                NativeSay("[OK] Native DA: " + target.Name + " erase acknowledged. Android setup/lock state is not yet verified.");
+                ct.ThrowIfCancellationRequested();
+                await NativeRebootAsync().ConfigureAwait(false);
+            });
+            return;
+        }
+
+        await RunMediaTekWorkflowAsync(() => MtkEraseAndResetAsync(name,
+            "[OK] " + name + " erase reported. Verify Android setup/lock state after boot; all other partitions were kept."));
+    }
+
     // Erase + reset in ONE mtkclient session — one plug cycle per operation.
     private async Task MtkEraseAndResetAsync(string partition, string okMsg)
     {
@@ -2277,10 +2309,7 @@ public partial class Form1
 
     private async Task FlashMediaTekAsync()
     {
-        // P1.5: a live session already owns the phone, and mtkclient cannot share that BROM face. The native route
-        // writes the selected raw images by name over that session; it never rebuilds the GPT, so the plan below
-        // requires every package row to match the live extent exactly. Sparse images keep the mtkclient wfscatter
-        // path (the DA has no sparse writer), which means Eject Device first.
+        // A live session owns the port; sparse expansion stays on the host and never starts a second client.
         if (nativeDa != null)
         {
             // The live GPT fills the grid with names and extents but no images: the package is what supplies the

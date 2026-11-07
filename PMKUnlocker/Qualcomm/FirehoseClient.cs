@@ -1,5 +1,4 @@
 using System.IO.Ports;
-using System.Text;
 
 namespace PMKUnlocker.Qualcomm;
 
@@ -12,68 +11,13 @@ namespace PMKUnlocker.Qualcomm;
 // A `<read>` ACK (rawmode="true") is followed immediately by raw binary data of
 // exactly num_partition_sectors * sector_size bytes.
 
-internal static class FirehoseIO
-{
-    internal static bool IsAck(string xml) =>
-        xml.Contains("ACK", StringComparison.Ordinal) &&
-        !xml.Contains("NAK", StringComparison.Ordinal) &&
-        !xml.Contains("ERROR", StringComparison.Ordinal);
-
-    // Read until a complete <response .../> (or <response ...></response>) element.
-    // Returns the XML text plus any raw bytes already buffered after the terminator.
-    internal static async Task<(string Xml, byte[] Trailing)> ReadResponseAsync(SerialPort sp, int timeoutMs, CancellationToken ct)
-    {
-        var buffer = new MemoryStream();
-        byte[] tmp = new byte[4096];
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (DateTime.UtcNow < deadline)
-        {
-            ct.ThrowIfCancellationRequested();
-            int avail = sp.BytesToRead;
-            if (avail <= 0) { await Task.Delay(20, ct); continue; }
-            int n = sp.Read(tmp, 0, Math.Min(tmp.Length, avail));
-            buffer.Write(tmp, 0, n);
-            byte[] data = buffer.ToArray();
-            int resp = IndexOf(data, ResponseOpen, 0);
-            if (resp < 0) continue;
-            int selfClose = IndexOf(data, SelfClose, resp + ResponseOpen.Length);
-            int fullClose = IndexOf(data, FullClose, resp + ResponseOpen.Length);
-            int end = -1;
-            if (fullClose >= 0 && (selfClose < 0 || fullClose < selfClose)) end = fullClose + FullClose.Length;
-            else if (selfClose >= 0) end = selfClose + SelfClose.Length;
-            if (end < 0) continue;
-            string xml = Encoding.ASCII.GetString(data, 0, end);
-            byte[] trailing = new byte[data.Length - end];
-            Array.Copy(data, end, trailing, 0, trailing.Length);
-            return (xml, trailing);
-        }
-        throw new TimeoutException("Firehose response timeout.");
-    }
-
-    private static readonly byte[] ResponseOpen = Encoding.ASCII.GetBytes("<response");
-    private static readonly byte[] SelfClose = Encoding.ASCII.GetBytes("/>");
-    private static readonly byte[] FullClose = Encoding.ASCII.GetBytes("</response>");
-
-    private static int IndexOf(byte[] hay, byte[] needle, int start)
-    {
-        int last = hay.Length - needle.Length;
-        for (int i = start; i <= last; i++)
-        {
-            bool ok = true;
-            for (int j = 0; j < needle.Length; j++)
-                if (hay[i + j] != needle[j]) { ok = false; break; }
-            if (ok) return i;
-        }
-        return -1;
-    }
-}
-
 internal sealed class FirehoseSession : IDisposable
 {
     internal const int DefaultSectorSize = 512;
     private const int ChunkSize = 0x10000;
 
     private readonly SerialPort _sp;
+    private readonly FirehoseIO _io;
     private readonly Action<string>? _log;
     private Dictionary<string, GptPartition>? _gpt;
     private int _sectorSize = DefaultSectorSize;
@@ -85,6 +29,11 @@ internal sealed class FirehoseSession : IDisposable
     private FirehoseSession(SerialPort sp, Action<string>? log)
     {
         _sp = sp;
+        _io = new FirehoseIO((buffer, offset, count) =>
+        {
+            int available = _sp.BytesToRead;
+            return available > 0 ? _sp.Read(buffer, offset, Math.Min(count, available)) : 0;
+        });
         _log = log;
     }
 
@@ -129,7 +78,7 @@ internal sealed class FirehoseSession : IDisposable
             Say("[*] Firehose: ping...");
             await EdlAuth.WriteAsciiAsync(sp,
                 "<?xml version=\"1.0\" ?><data><nop verbose=\"0\" value=\"ping\"/></data>", ct);
-            string pingResp = (await FirehoseIO.ReadResponseAsync(sp, 3000, ct)).Xml;
+            string pingResp = (await session._io.ReadResponseAsync(3000, ct)).Xml;
             if (pingResp.Contains("NAK") || pingResp.Contains("ERROR"))
                 Say("[!] Ping NAK — continuing with configure/sig.");
             else if (pingResp.Contains("ACK"))
@@ -143,7 +92,7 @@ internal sealed class FirehoseSession : IDisposable
             // 2) configure (pre-auth)
             Say("[*] Firehose: configure...");
             await EdlAuth.WriteAsciiAsync(sp, configureXml, ct);
-            string cfgResp = (await FirehoseIO.ReadResponseAsync(sp, 4000, ct)).Xml;
+            string cfgResp = (await session._io.ReadResponseAsync(4000, ct)).Xml;
             bool alreadyAuth = cfgResp.Contains("Authenticated", StringComparison.OrdinalIgnoreCase)
                 || (cfgResp.Contains("ACK") && cfgResp.Contains("TargetName"));
 
@@ -161,7 +110,7 @@ internal sealed class FirehoseSession : IDisposable
                     ct.ThrowIfCancellationRequested();
                     Say("[*] Trying SIG: " + sigName + " (" + sigPayload.Length + " bytes)...");
                     await EdlAuth.WriteAsciiAsync(sp, configureXml, ct);
-                    string c = (await FirehoseIO.ReadResponseAsync(sp, 4000, ct)).Xml;
+                    string c = (await session._io.ReadResponseAsync(4000, ct)).Xml;
                     if (c.Contains("Authenticated", StringComparison.OrdinalIgnoreCase) ||
                         (c.Contains("ACK") && c.Contains("TargetName")))
                     {
@@ -173,15 +122,16 @@ internal sealed class FirehoseSession : IDisposable
                     await EdlAuth.WriteAsciiAsync(sp,
                         "<?xml version=\"1.0\" ?><data><sig TargetName=\"sig\" size_in_bytes=\"" +
                         sigPayload.Length + "\" verbose=\"1\"/></data>", ct);
-                    string sigAck = (await FirehoseIO.ReadResponseAsync(sp, 5000, ct)).Xml;
+                    string sigAck = (await session._io.ReadResponseAsync(5000, ct)).Xml;
                     if (!sigAck.Contains("ACK"))
                     {
                         lastFail = sigAck.Contains("NAK") ? "Sig command NAK before payload." : "Sig ACK timeout.";
                         try { sp.DiscardInBuffer(); } catch { }
+                        session._io.DiscardBuffered();
                         continue;
                     }
                     await Task.Run(() => sp.Write(sigPayload, 0, sigPayload.Length), ct);
-                    string authResp = (await FirehoseIO.ReadResponseAsync(sp, 10000, ct)).Xml;
+                    string authResp = (await session._io.ReadResponseAsync(10000, ct)).Xml;
                     if (authResp.Contains("Authenticated", StringComparison.OrdinalIgnoreCase) ||
                         (authResp.Contains("ACK") && !authResp.Contains("NAK")))
                     {
@@ -194,12 +144,14 @@ internal sealed class FirehoseSession : IDisposable
                         : "Auth timeout after " + sigName;
                     Say("[!] " + lastFail);
                     try { sp.DiscardInBuffer(); } catch { }
+                    session._io.DiscardBuffered();
                     await Task.Delay(400, ct);
                 }
                 if (!sigOk)
                     throw new IOException(string.IsNullOrEmpty(lastFail) ? "All SIG candidates failed." : lastFail);
                 await Task.Delay(300, ct);
                 try { sp.DiscardInBuffer(); } catch { }
+                session._io.DiscardBuffered();
             }
 
             // 4) post-auth configure — full ACK + TargetName
@@ -208,9 +160,9 @@ internal sealed class FirehoseSession : IDisposable
             {
                 Say($"[*] Firehose: configure (post-auth, try {attempt})...");
                 await EdlAuth.WriteAsciiAsync(sp, configureXml, ct);
-                cfg2 = (await FirehoseIO.ReadResponseAsync(sp, 5000, ct)).Xml;
+                cfg2 = (await session._io.ReadResponseAsync(5000, ct)).Xml;
                 if (!cfg2.Contains("TargetName") && cfg2.Contains("ACK"))
-                    cfg2 += (await FirehoseIO.ReadResponseAsync(sp, 2000, ct)).Xml;
+                    cfg2 += (await session._io.ReadResponseAsync(2000, ct)).Xml;
                 if (cfg2.Contains("TargetName") || (cfg2.Contains("ACK") && !cfg2.Contains("NAK")))
                     break;
                 if (attempt < 2) await Task.Delay(500, ct);
@@ -226,7 +178,7 @@ internal sealed class FirehoseSession : IDisposable
             }
             if (cfg2.Contains("Authenticated", StringComparison.OrdinalIgnoreCase))
             {
-                string cfg3 = (await FirehoseIO.ReadResponseAsync(sp, 3000, ct)).Xml;
+                string cfg3 = (await session._io.ReadResponseAsync(3000, ct)).Xml;
                 if (!cfg3.Contains("ACK")) throw new IOException("Configure did not return ACK after auth.");
                 Say("[+] Firehose ready after auth.");
                 await session.DetectSectorSizeAsync(ct);
@@ -248,7 +200,7 @@ internal sealed class FirehoseSession : IDisposable
         {
             await EdlAuth.WriteAsciiAsync(_sp,
                 "<?xml version=\"1.0\" ?><data><getstorageinfo physical_partition_number=\"0\"/></data>", ct);
-            string xml = (await FirehoseIO.ReadResponseAsync(_sp, 4000, ct)).Xml;
+            string xml = (await _io.ReadResponseAsync(4000, ct)).Xml;
             foreach (string attr in new[] { "logical_block_size", "block_size_in_bytes", "block_size" })
             {
                 string v = EdlAuth.ExtractAttr(xml, attr);
@@ -263,7 +215,10 @@ internal sealed class FirehoseSession : IDisposable
         _sectorSize = DefaultSectorSize;
     }
 
-    internal async Task<IReadOnlyList<GptPartition>> ReadGptAsync(CancellationToken ct = default)
+    internal async Task<IReadOnlyList<GptPartition>> ReadGptAsync(CancellationToken ct = default) =>
+        (await ReadGptLayoutAsync(ct)).Partitions;
+
+    internal async Task<GptLayout> ReadGptLayoutAsync(CancellationToken ct = default)
     {
         // LBA 1 = GPT header (first 512 bytes of that block); entries start at header.EntryLba.
         byte[] headerBlock = await ReadSectorsAsync(1, 1, ct);
@@ -273,7 +228,7 @@ internal sealed class FirehoseSession : IDisposable
         long entryBytes = checked((long)count * size);
         long entrySectors = (entryBytes + _sectorSize - 1) / _sectorSize;
         byte[] entries = await ReadSectorsAsync(entryLba, entrySectors, ct);
-        return GptParser.ParseEntries(header, entries);
+        return GptParser.ParseLayout(header, entries, _sectorSize);
     }
 
     internal async Task<GptPartition?> FindPartitionAsync(string name, CancellationToken ct = default)
@@ -303,9 +258,9 @@ internal sealed class FirehoseSession : IDisposable
         await EdlAuth.WriteAsciiAsync(_sp,
             "<?xml version=\"1.0\" ?><data><program SECTOR_SIZE_IN_BYTES=\"" + _sectorSize +
             "\" num_partition_sectors=\"" + numSectors + "\" physical_partition_number=\"0\" start_sector=\"" + startSector + "\"/></data>", ct);
-        var (resp, _) = await FirehoseIO.ReadResponseAsync(_sp, 30000, ct);
-        if (!FirehoseIO.IsAck(resp))
-            throw new IOException("Program NAK: " + EdlAuth.TrimForLog(resp));
+        var resp = await _io.ReadResponseAsync(30000, ct, stopped);
+        if (!resp.IsAck)
+            throw new IOException("Program NAK: " + EdlAuth.TrimForLog(resp.Xml));
 
         byte[] chunk = new byte[ChunkSize];
         long sent = 0, remaining = fileLen;
@@ -331,13 +286,9 @@ internal sealed class FirehoseSession : IDisposable
             }
         }
 
-        try
-        {
-            var (fin, _) = await FirehoseIO.ReadResponseAsync(_sp, 10000, ct);
-            if (fin.Contains("NAK") || fin.Contains("ERROR"))
-                throw new IOException("Program failed: " + EdlAuth.TrimForLog(fin));
-        }
-        catch (TimeoutException) { _log?.Invoke("[!] Program final ACK timeout — assuming write completed."); }
+        var fin = await _io.ReadResponseAsync(10000, ct, stopped);
+        if (!fin.IsAck)
+            throw new IOException("Program failed: " + EdlAuth.TrimForLog(fin.Xml));
     }
 
     internal async Task EraseAsync(long startSector, long numSectors, CancellationToken ct = default)
@@ -345,20 +296,30 @@ internal sealed class FirehoseSession : IDisposable
         await EdlAuth.WriteAsciiAsync(_sp,
             "<?xml version=\"1.0\" ?><data><erase PAGES_PER_BLOCK=\"32\" SECTOR_SIZE_IN_BYTES=\"" + _sectorSize +
             "\" num_partition_sectors=\"" + numSectors + "\" physical_partition_number=\"0\" start_sector=\"" + startSector + "\"/></data>", ct);
-        var (resp, _) = await FirehoseIO.ReadResponseAsync(_sp, 30000, ct);
-        if (!FirehoseIO.IsAck(resp))
-            throw new IOException("Erase NAK: " + EdlAuth.TrimForLog(resp));
+        var resp = await _io.ReadResponseAsync(30000, ct);
+        if (!resp.IsAck)
+            throw new IOException("Erase NAK: " + EdlAuth.TrimForLog(resp.Xml));
     }
 
     internal async Task ResetAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        await EdlAuth.WriteAsciiAsync(_sp,
+            "<?xml version=\"1.0\" ?><data><power value=\"reset\"/></data>", ct);
+        FirehoseResponse response;
         try
         {
-            await EdlAuth.WriteAsciiAsync(_sp,
-                "<?xml version=\"1.0\" ?><data><power value=\"reset\"/></data>", ct);
-            await FirehoseIO.ReadResponseAsync(_sp, 3000, ct);
+            response = await _io.ReadResponseAsync(3000, ct);
         }
-        catch { /* reset drops the port — expected */ }
+        catch (Exception ex) when (ex is TimeoutException or IOException)
+        {
+            ct.ThrowIfCancellationRequested();
+            _log?.Invoke("[*] Reset sent; the port went quiet before acknowledgement. Device boot is not confirmed.");
+            return;
+        }
+        if (!response.IsAck)
+            throw new IOException("Reset rejected: " + EdlAuth.TrimForLog(response.Xml));
+        _log?.Invoke("[+] Reset acknowledged.");
     }
 
     private async Task<byte[]> ReadSectorsAsync(long startSector, long numSectors, CancellationToken ct)
@@ -376,26 +337,6 @@ internal sealed class FirehoseSession : IDisposable
         await EdlAuth.WriteAsciiAsync(_sp,
             "<?xml version=\"1.0\" ?><data><read SECTOR_SIZE_IN_BYTES=\"" + _sectorSize +
             "\" num_partition_sectors=\"" + numSectors + "\" physical_partition_number=\"0\" start_sector=\"" + startSector + "\"/></data>", ct);
-        var (resp, trailing) = await FirehoseIO.ReadResponseAsync(_sp, 30000, ct);
-        if (!FirehoseIO.IsAck(resp))
-            throw new IOException("Read NAK: " + EdlAuth.TrimForLog(resp));
-
-        byte[] chunk = new byte[ChunkSize];
-        long received = 0;
-        if (trailing.Length > 0) { sink.Write(trailing, 0, trailing.Length); received += trailing.Length; }
-        while (received < total)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (stopped?.Invoke() == true) throw new OperationCanceledException("STOP");
-            int avail = _sp.BytesToRead;
-            if (avail <= 0) { await Task.Delay(20, ct); continue; }
-            int want = (int)Math.Min(avail, Math.Min(chunk.Length, total - received));
-            int n = _sp.Read(chunk, 0, want);
-            if (n <= 0) continue;
-            sink.Write(chunk, 0, n);
-            received += n;
-            progress?.Invoke((int)(received * 100 / total));
-        }
-        sink.Flush();
+        await _io.ReadPayloadAsync(total, sink, progress, ct, stopped);
     }
 }

@@ -347,17 +347,6 @@ public partial class Form1
         NativeSay("[OK] Native DA: " + extent.Name + " written from " + Path.GetFileName(image) + " and read back identical.");
     }
 
-    /// <summary>
-    /// P1.5 — scatter images through the session that is already open. The package is resolved against the device's
-    /// own GPT before the dialog: every row must agree with the live extent in offset and length (the native path
-    /// never rebuilds the table, so a package from another layout has no meaning here), every name must pass the
-    /// never-program gate, and every image must be raw and fit its extent. Sparse images stay on the mtkclient
-    /// wfscatter path — the DA writes raw bytes, and a sparse container written raw is corruption.
-    /// <para>
-    /// One dialog covers the whole set, then the writes run one after another with the proven per-write readback.
-    /// The phone is rebooted once at the end, exactly like the NV restore and the mtkclient wfscatter flow.
-    /// </para>
-    /// </summary>
     private async Task NativeFlashAsync(MtkFlashStep step)
     {
         RequireNativeSession();
@@ -367,16 +356,21 @@ public partial class Form1
         if (plan == null) throw new InvalidOperationException(refusal);
 
         if (MessageBox.Show(this, MtkNativeBench.NativeFlashConfirmText(plan), "Native DA flash",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             NativeSay("[*] Native DA: flash declined by the operator — nothing was sent.");
             return;
         }
 
+        using MtkNativeBench.NativeFlashPreparation prepared = await Task.Run(() =>
+            MtkNativeBench.NativeFlashPreparation.Create(plan, Path.GetTempPath(), nativeCancel.Token,
+                NativeSay, (name, percent) => NativeProgress("prepare " + name, percent)), nativeCancel.Token).ConfigureAwait(false);
+        NativeSay("[*] Native DA: all images prepared and held read-only until verify finishes.");
         NativeSay("[*] Native DA: " + plan.Count + " partition(s) to write over the session already open — no GPT " +
                   "rebuild, no replug between partitions.");
-        foreach (MtkNativeBench.NativeFlashItem item in plan)
+        foreach (MtkNativeBench.NativeFlashItem item in prepared.Plan)
         {
+            nativeCancel.Token.ThrowIfCancellationRequested();
             NativeSay("[*] Native DA: writing " + item.Extent.Name + " from " + Path.GetFileName(item.ImagePath) +
                       " (" + MtkDaExtent.SizeText((ulong)item.ImageLength) + ")...");
             await nativeDa.WritePartitionAsync(item.Extent.Name, item.ImagePath,
@@ -384,6 +378,7 @@ public partial class Form1
                 ct: nativeCancel.Token).ConfigureAwait(false);
             NativeSay("[OK] Native DA: " + item.Extent.Name + " written and read back identical.");
         }
+        nativeCancel.Token.ThrowIfCancellationRequested();
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) flashed in one session. The phone is rebooting — " +
                   "this session closes with it.");
         await NativeRebootAsync();

@@ -8693,6 +8693,9 @@ namespace PMKUnlocker
                     case "e":
                         await NativeErasePartitionsAsync(session, args, cts.Token);
                         break;
+                    case "reset-userdata":
+                        await NativeResetUserdataAsync(session, cts.Token);
+                        break;
                     case "rl":
                         await NativeReadAllAsync(session, args, cts.Token);
                         break;
@@ -8814,6 +8817,30 @@ namespace PMKUnlocker
             }
         }
 
+        private async Task NativeResetUserdataAsync(FirehoseSession session, CancellationToken ct)
+        {
+            var layout = await session.ReadGptLayoutAsync(ct);
+            if (!layout.Partitions.Any(p => string.Equals(p.Name, "metadata", StringComparison.OrdinalIgnoreCase)))
+                Log("[*] No metadata partition in the live GPT; only userdata will be erased.", Color.Orange);
+
+            await ReviewSafety.RunQcUserdataResetAsync(layout, session.SectorSize, async (p, token) =>
+            {
+                if (stopRequested) throw new OperationCanceledException("STOP");
+                Log($"[*] Erasing {p.Name}: LBA {p.FirstLba}..{p.LastLba} ({FormatBytesLong(p.ByteLength(session.SectorSize))})...", Color.Orange);
+                SetProgress(20, "Erasing " + p.Name);
+                await session.EraseAsync(p.FirstLba, p.SectorCount, token);
+                Log("[OK] " + p.Name + " erased.", Color.LightGreen);
+            }, async token =>
+            {
+                if (stopRequested) throw new OperationCanceledException("STOP");
+                SetProgress(90, "Resetting device");
+                await session.ResetAsync(token);
+                qcAuthed = false;
+                qcAuthedPort = "";
+                Log("[*] Reset sent over the same native session; check the phone for Android startup.", Color.Cyan);
+            }, ct);
+        }
+
         private async Task NativeReadAllAsync(FirehoseSession session, List<string> args, CancellationToken ct)
         {
             string folder = args.Count > 1 ? args[1] : "";
@@ -8891,37 +8918,23 @@ namespace PMKUnlocker
             await RunFlashWorkflowAsync(() => RunEdlAsync("e frp,config", "Qualcomm FRP Remove (frp + config)"));
         }
 
-        // Userlock Reset — screen lock (PIN/pattern/password) ဖျက်ခြင်း (Qualcomm EDL)။
-        // edl.py ရဲ့ `e` command က partition ပထမတစ်ခုတည်းကို erase ပြီး return လုပ်လို့
-        // userdata နဲ့ metadata ကို သီးခြား command နှစ်ခုနဲ့ ဆက်တိုက် erase တယ်။
         private async void BtnQcUserlockReset_Click(object sender, EventArgs e)
         {
             if (MessageBox.Show(
-                    "Userlock Reset (Qualcomm) — userdata နဲ့ metadata ကို erase လုပ်ပါမယ်။\n\n" +
+                    "Userlock Reset (Qualcomm) — userdata နဲ့ metadata (ရှိလျှင်) ကို erase လုပ်ပါမယ်။\n\n" +
                     "• ဖုန်းထဲက data / ဓာတ်ပုံ / အက်ပ် အားလုံး ဖျက်ခံရမယ်\n" +
                     "• Screen lock (PIN / pattern / password) ပျက်သွားမယ်\n" +
+                    "• EFS / IMEI, bootchain နဲ့ FRP ကို မဖျက်ပါ\n" +
                     "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ (ခိုးရာပစ္စည်း မဟုတ်ကြောင်း စစ်ပါ)\n" +
                     "• data မဖျက်ဘဲ lock ဖျက်ချင်ရင် root/TWRP + ADB လမ်းကို သုံးပါ\n\n" +
                     "ဆက်လုပ်မလား?",
-                    "Confirm Userlock Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                    "Confirm Userlock Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                 return;
 
-            await RunFlashWorkflowAsync(async () =>
-            {
-                await RunEdlAsync("e userdata", "Qualcomm Userlock Reset (userdata)");
-                // metadata မရှိတဲ့ ဖုန်း (ဥပမာ CPH1803/A3s — Android 8/9 era) မှာ edl.py က
-                // "Couldn't erase partition metadata / no gpt partition" နဲ့ fail တက် → skip
-                await RunEdlAsync("e metadata", "Qualcomm Userlock Reset (metadata)",
-                    tolerateRaw: raw =>
-                    {
-                        string joined = string.Join("\n", raw ?? new List<string>());
-                        return joined.Contains("Couldn't erase partition metadata") ||
-                               joined.Contains("no gpt partition") ||
-                               joined.Contains("No such partition") ||
-                               joined.Contains("no such partition") ||
-                               joined.Contains("partition metadata") && joined.Contains("not found");
-                    });
-            }, forceReboot: true);   // erase ပြီးရင် checkbox မကြည့်ဘဲ auto reboot (EDL → Android)
+            await RunFlashWorkflowAsync(
+                () => RunEdlAsync("reset-userdata", "Qualcomm Userlock Reset (native)"),
+                autoRebootAfter: false);
         }
 
         private async void BtnQcFullBackup_Click(object sender, EventArgs e)

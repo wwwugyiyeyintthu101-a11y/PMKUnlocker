@@ -799,9 +799,9 @@ try
     Check(FlashRow.StatusTip(good.Find("boot")!, true).StartsWith("Raw image:") &&
           !FlashRow.StatusTip(good.Find("boot")!, true).Contains("risk"),
         "row tip: a normal row carries no risk sentence");
-    Check(FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("needs the mtkclient route") &&
-          FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("Eject Device first"),
-        "row tip: a sparse row says the live native session cannot write it");
+    Check(FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("native Flash Selected expands and validates") &&
+          FlashRow.StatusTip(sp.Find("vendor2")!, true).Contains("temporary disk space"),
+        "row tip: sparse native flashing names host preparation and temporary space");
     Check(FlashRow.StatusTip(dataPkg.Find("userdata")!, true).Contains("user data erasure") &&
           FlashRow.StatusTip(dataPkg.Find("userdata")!, true).Contains("not on disk"),
         "row tip: risk reason and missing file both reach the tip");
@@ -817,8 +817,9 @@ try
         "summary: mtkclient route names bytes and GPT rebuild");
     Check(FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("1.00 GB to write") &&
           FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("route: native DA session") &&
-          FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("raw images only"),
-        "summary: live native route says raw-only and no GPT rebuild");
+          FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("sparse expanded on PC") &&
+          FlashRow.SummaryText(2, 1L * 1024 * 1024 * 1024, true).Contains("GPT is not rebuilt"),
+        "summary: native route names host sparse expansion and no GPT rebuild");
     Check(FlashRow.Bytes(900) == "900 B" && FlashRow.Bytes(2048) == "2.00 KB",
         "summary: byte formatting keeps both small units");
 
@@ -1199,6 +1200,291 @@ try
     var escXml = GptParser.BuildRawProgramXml(GptParser.ParseEntries(escHdr, escEntries), 512);
     Check(escXml.Contains("label=\"a&amp;b\"") && escXml.Contains("filename=\"a&amp;b.bin\""),
         "rawprogram: partition names are XML-escaped");
+
+    string FirehoseEnvelope(string value, string? rawMode = null, string logs = "") =>
+        "<?xml version=\"1.0\"?><data>" + logs + "<response value=\"" + value + "\"" +
+        (rawMode == null ? "" : " rawmode=\"" + rawMode + "\"") + "/></data>";
+    byte[] FirehoseBytes(string xml) => Encoding.UTF8.GetBytes(xml);
+    FirehoseIO FirehoseFixture(byte[] wire, int maxChunk = 65536, Action? onEmpty = null)
+    {
+        int offset = 0;
+        return new FirehoseIO((buffer, start, count) =>
+        {
+            int take = Math.Min(wire.Length - offset, Math.Min(count, maxChunk));
+            if (take == 0) { onEmpty?.Invoke(); return 0; }
+            Array.Copy(wire, offset, buffer, start, take);
+            offset += take;
+            return take;
+        });
+    }
+    async Task<(byte[] Bytes, Exception? Error, List<int> Progress)> FirehoseReadFixture(
+        FirehoseIO io, int length, CancellationToken ct = default, Func<bool>? stopped = null, int timeoutMs = 1000)
+    {
+        using var sink = new MemoryStream();
+        var progress = new List<int>();
+        try
+        {
+            await io.ReadPayloadAsync(length, sink, pct => progress.Add(pct), ct, stopped, timeoutMs);
+            return (sink.ToArray(), null, progress);
+        }
+        catch (Exception ex) { return (sink.ToArray(), ex, progress); }
+    }
+    var firehoseStart = FirehoseBytes(FirehoseEnvelope("ACK", "true"));
+    var firehoseEnd = FirehoseBytes(FirehoseEnvelope("ACK", "false"));
+    var firehosePayload = new byte[512];
+    for (int i = 0; i < firehosePayload.Length; i++) firehosePayload[i] = (byte)i;
+    new byte[] { 0x0a, 0x0d, 0x20, 0x09, 0x00 }.CopyTo(firehosePayload, 0);
+    firehoseEnd.CopyTo(firehosePayload, 64);
+    var firehoseWire = firehoseStart.Concat(firehosePayload).Concat(firehoseEnd).ToArray();
+    foreach (int chunk in new[] { 1, 2, 7, 64, 4096 })
+    {
+        var result = await FirehoseReadFixture(FirehoseFixture(firehoseWire, chunk), firehosePayload.Length);
+        Check(result.Error == null && result.Bytes.SequenceEqual(firehosePayload) && result.Progress.Last() == 100,
+            "Firehose framing: exact raw payload across " + chunk + "-byte fragments, including leading whitespace and embedded XML");
+    }
+    var firehoseLarge = Enumerable.Range(0, 131073).Select(i => (byte)i).ToArray();
+    var firehoseLargeResult = await FirehoseReadFixture(
+        FirehoseFixture(firehoseStart.Concat(firehoseLarge).Concat(firehoseEnd).ToArray()), firehoseLarge.Length);
+    Check(firehoseLargeResult.Error == null && firehoseLargeResult.Bytes.SequenceEqual(firehoseLarge),
+        "Firehose framing: payload streams beyond the pending-buffer size without XML contamination");
+    var firehoseNext = FirehoseBytes(FirehoseEnvelope("NAK"));
+    var firehoseQueued = FirehoseFixture(firehoseWire.Concat(firehoseNext).ToArray());
+    var firehoseQueuedRead = await FirehoseReadFixture(firehoseQueued, firehosePayload.Length);
+    var firehoseQueuedResponse = await firehoseQueued.ReadResponseAsync(1000, CancellationToken.None);
+    Check(firehoseQueuedRead.Error == null && firehoseQueuedRead.Bytes.Length == 512 && !firehoseQueuedResponse.IsAck,
+        "Firehose framing: terminal ACK consumed and following response preserved, not mistaken for read success");
+    var firehoseTwoReads = FirehoseFixture(firehoseWire.Concat(firehoseWire).ToArray());
+    var firehoseFirstRead = await FirehoseReadFixture(firehoseTwoReads, 512);
+    var firehoseSecondRead = await FirehoseReadFixture(firehoseTwoReads, 512);
+    Check(firehoseFirstRead.Error == null && firehoseSecondRead.Error == null &&
+          firehoseFirstRead.Bytes.SequenceEqual(firehoseSecondRead.Bytes),
+        "Firehose framing: consecutive GPT-style reads do not consume stale acknowledgements");
+    string firehoseLog = "<?xml version=\"1.0\"?><data><log value=\"NAK ERROR text is not response status\"/></data>\n";
+    var firehoseLogged = await FirehoseReadFixture(FirehoseFixture(
+        FirehoseBytes(firehoseLog).Concat(firehoseWire).ToArray(), 7), 512);
+    Check(firehoseLogged.Error == null && firehoseLogged.Bytes.SequenceEqual(firehosePayload),
+        "Firehose framing: separate log envelope and XML whitespace do not alter raw data or ACK status");
+    var firehoseFullClose = FirehoseBytes("<data><response value='ACK' rawmode='true'></response></data>");
+    var firehoseFullCloseResult = await FirehoseReadFixture(FirehoseFixture(
+        firehoseFullClose.Concat(firehosePayload).Concat(firehoseEnd).ToArray(), 1), 512);
+    Check(firehoseFullCloseResult.Error == null && firehoseFullCloseResult.Bytes.SequenceEqual(firehosePayload),
+        "Firehose framing: non-self-closing response consumes the complete data envelope");
+    var firehoseMisleading = FirehoseFixture(FirehoseBytes(FirehoseEnvelope("NAK", logs: "<log value='ACK'/>")));
+    Check(!(await firehoseMisleading.ReadResponseAsync(1000, CancellationToken.None)).IsAck,
+        "Firehose framing: ACK in log text cannot override the response value");
+    var firehosePartialAck = FirehoseFixture(FirehoseBytes(FirehoseEnvelope("BACKUP_ACK")));
+    Check(!(await firehosePartialAck.ReadResponseAsync(1000, CancellationToken.None)).IsAck,
+        "Firehose framing: response value must be exactly ACK");
+    foreach (string start in new[] { FirehoseEnvelope("NAK", "true"), FirehoseEnvelope("ACK", "false"), FirehoseEnvelope("ACK") })
+    {
+        var result = await FirehoseReadFixture(FirehoseFixture(FirehoseBytes(start).Concat(firehosePayload).ToArray()), 512);
+        Check(result.Error is IOException && result.Bytes.Length == 0,
+            "Firehose framing: initial non-ACK or absent/wrong raw mode writes no payload");
+    }
+    foreach (string end in new[] { FirehoseEnvelope("NAK", "false"), FirehoseEnvelope("ACK", "true"), FirehoseEnvelope("ACK") })
+    {
+        var result = await FirehoseReadFixture(FirehoseFixture(firehoseStart.Concat(firehosePayload).Concat(FirehoseBytes(end)).ToArray()), 512);
+        Check(result.Error is IOException && result.Bytes.SequenceEqual(firehosePayload),
+            "Firehose framing: final non-ACK or absent/wrong raw mode cannot report completion");
+    }
+    var firehoseMissingEnd = await FirehoseReadFixture(FirehoseFixture(firehoseStart.Concat(firehosePayload).ToArray()), 512, timeoutMs: 40);
+    Check(firehoseMissingEnd.Error is TimeoutException && firehoseMissingEnd.Bytes.SequenceEqual(firehosePayload) &&
+          !firehoseMissingEnd.Progress.Contains(100),
+        "Firehose framing: missing terminal ACK times out instead of accepting a backup");
+    var firehoseShortRead = await FirehoseReadFixture(FirehoseFixture(firehoseStart.Concat(firehosePayload[..20]).ToArray()), 512, timeoutMs: 40);
+    Check(firehoseShortRead.Error is TimeoutException && firehoseShortRead.Bytes.Length == 20,
+        "Firehose framing: stalled raw payload has an idle timeout");
+    var firehoseIncompleteXml = await FirehoseReadFixture(FirehoseFixture(FirehoseBytes("<data><response value='ACK' rawmode='true'/>")), 512, timeoutMs: 40);
+    Check(firehoseIncompleteXml.Error is TimeoutException && firehoseIncompleteXml.Bytes.Length == 0,
+        "Firehose framing: response tag without closing data envelope never starts raw mode");
+    var firehoseOversizedXml = await FirehoseReadFixture(FirehoseFixture(FirehoseBytes("<data>" + new string(' ', 65536))), 512);
+    Check(firehoseOversizedXml.Error is InvalidDataException && firehoseOversizedXml.Bytes.Length == 0,
+        "Firehose framing: XML accumulation is bounded");
+    var firehoseDtd = await FirehoseReadFixture(FirehoseFixture(FirehoseBytes(
+        "<!DOCTYPE data [<!ENTITY x 'ACK'>]><data><response value='&x;' rawmode='true'/></data>")), 512);
+    Check(firehoseDtd.Error is System.Xml.XmlException && firehoseDtd.Bytes.Length == 0,
+        "Firehose framing: DTD and entity processing are prohibited");
+    var firehoseAmbiguous = await FirehoseReadFixture(FirehoseFixture(FirehoseBytes(
+        "<data><response value='ACK' rawmode='true'/><response value='NAK'/></data>")), 512);
+    Check(firehoseAmbiguous.Error is InvalidDataException && firehoseAmbiguous.Bytes.Length == 0,
+        "Firehose framing: multiple response elements are refused");
+    using (var firehoseCancel = new CancellationTokenSource())
+    {
+        firehoseCancel.Cancel();
+        var result = await FirehoseReadFixture(FirehoseFixture(firehoseWire), 512, firehoseCancel.Token);
+        Check(result.Error is OperationCanceledException && result.Bytes.Length == 0,
+            "Firehose framing: cancellation refuses already-buffered data");
+    }
+    using (var firehoseCancel = new CancellationTokenSource())
+    {
+        var io = FirehoseFixture(firehoseStart.Concat(firehosePayload[..20]).ToArray(), onEmpty: () => firehoseCancel.Cancel());
+        var result = await FirehoseReadFixture(io, 512, firehoseCancel.Token);
+        Check(result.Error is OperationCanceledException && result.Bytes.Length == 20,
+            "Firehose framing: cancellation interrupts a stalled raw read");
+    }
+    var firehoseStopped = await FirehoseReadFixture(FirehoseFixture(firehoseWire), 512, stopped: () => true);
+    Check(firehoseStopped.Error is OperationCanceledException && firehoseStopped.Bytes.Length == 0,
+        "Firehose framing: STOP is honored even when the full reply is already available");
+    bool firehoseStopAtEnd = false;
+    var firehoseStopEndReader = FirehoseFixture(firehoseStart.Concat(firehosePayload).ToArray(), onEmpty: () => firehoseStopAtEnd = true);
+    var firehoseStopEnd = await FirehoseReadFixture(firehoseStopEndReader, 512, stopped: () => firehoseStopAtEnd);
+    Check(firehoseStopEnd.Error is OperationCanceledException && firehoseStopEnd.Bytes.SequenceEqual(firehosePayload),
+        "Firehose framing: STOP interrupts the wait for final acknowledgement");
+
+    async Task<(List<string> Calls, Exception? Error)> RunQcResetFixture(
+        IReadOnlyList<GptPartition> layout, string failAt = "", string cancelAt = "", int sectorSize = 512,
+        long lastUsableLba = 4095, Func<GptLayout>? readLayout = null)
+    {
+        var calls = new List<string>();
+        using var cancel = new CancellationTokenSource();
+        if (cancelAt == "before") cancel.Cancel();
+        try
+        {
+            var resetLayout = readLayout?.Invoke() ?? new GptLayout(34, lastUsableLba, layout);
+            await ReviewSafety.RunQcUserdataResetAsync(resetLayout, sectorSize, (p, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                calls.Add("erase:" + p.Name);
+                if (failAt == p.Name) throw new IOException("Erase refused.");
+                if (cancelAt == p.Name) cancel.Cancel();
+                return Task.CompletedTask;
+            }, token =>
+            {
+                token.ThrowIfCancellationRequested();
+                calls.Add("reset");
+                if (failAt == "reset") throw new IOException("Reset refused.");
+                return Task.CompletedTask;
+            }, cancel.Token);
+            return (calls, null);
+        }
+        catch (Exception ex) { return (calls, ex); }
+    }
+
+    var qcUserdata = new GptPartition("userdata", 1000, 1999, "");
+    var qcMetadata = new GptPartition("metadata", 100, 199, "");
+    var qcResetLayout = new[]
+    {
+        qcMetadata, new GptPartition("boot", 200, 299, ""),
+        new GptPartition("modemst1", 300, 399, ""), new GptPartition("frp", 400, 499, ""), qcUserdata
+    };
+    var qcResetBoth = await RunQcResetFixture(qcResetLayout);
+    Check(qcResetBoth.Error == null && qcResetBoth.Calls.SequenceEqual(new[] { "erase:userdata", "erase:metadata", "reset" }),
+        "QC userdata reset: data then metadata then one reset; EFS, boot and FRP excluded");
+    var qcResetLegacy = await RunQcResetFixture(new[] { qcUserdata });
+    Check(qcResetLegacy.Error == null && qcResetLegacy.Calls.SequenceEqual(new[] { "erase:userdata", "reset" }),
+        "QC userdata reset: absent metadata is optional, not a failed second session");
+    var qcResetCase = await RunQcResetFixture(new[] { qcUserdata with { Name = "USERDATA" }, qcMetadata with { Name = "METADATA" } });
+    Check(qcResetCase.Error == null && qcResetCase.Calls.SequenceEqual(new[] { "erase:USERDATA", "erase:METADATA", "reset" }),
+        "QC userdata reset: GPT names match case-insensitively");
+    var qcReset4096 = await RunQcResetFixture(qcResetLayout, sectorSize: 4096);
+    Check(qcReset4096.Error == null && qcReset4096.Calls.Count == 3,
+        "QC userdata reset: planner accepts 4096-byte sector arithmetic without claiming UFS transport support");
+    var qcResetMissing = await RunQcResetFixture(new[] { qcMetadata });
+    Check(qcResetMissing.Error is InvalidDataException && qcResetMissing.Calls.Count == 0,
+        "QC userdata reset: missing userdata refuses before metadata erase or reset");
+    var qcResetEmpty = await RunQcResetFixture(Array.Empty<GptPartition>());
+    Check(qcResetEmpty.Error is InvalidDataException && qcResetEmpty.Calls.Count == 0,
+        "QC userdata reset: empty GPT cannot report success");
+    var qcResetDuplicateData = await RunQcResetFixture(new[] { qcUserdata, qcUserdata with { Name = "USERDATA" } });
+    Check(qcResetDuplicateData.Error is InvalidDataException && qcResetDuplicateData.Calls.Count == 0,
+        "QC userdata reset: duplicate userdata refuses before erase");
+    var qcResetDuplicateMeta = await RunQcResetFixture(new[] { qcUserdata, qcMetadata, qcMetadata with { Name = "METADATA" } });
+    Check(qcResetDuplicateMeta.Error is InvalidDataException && qcResetDuplicateMeta.Calls.Count == 0,
+        "QC userdata reset: ambiguous optional metadata refuses the whole plan");
+    var qcResetBadMeta = await RunQcResetFixture(new[] { qcUserdata, qcMetadata with { FirstLba = 200, LastLba = 199 } });
+    Check(qcResetBadMeta.Error is InvalidDataException && qcResetBadMeta.Calls.Count == 0,
+        "QC userdata reset: invalid metadata is detected before userdata erase");
+    var qcResetHeader = await RunQcResetFixture(new[] { qcUserdata with { FirstLba = 1 } });
+    Check(qcResetHeader.Error is InvalidDataException && qcResetHeader.Calls.Count == 0,
+        "QC userdata reset: target covering the GPT header refuses before erase");
+    var qcResetOverlap = await RunQcResetFixture(new[] { qcUserdata, new GptPartition("modemst1", 1500, 1600, "") });
+    Check(qcResetOverlap.Error is InvalidDataException && qcResetOverlap.Calls.Count == 0,
+        "QC userdata reset: target overlapping EFS refuses before erase");
+    var qcResetTargetOverlap = await RunQcResetFixture(new[] { qcUserdata, qcMetadata with { LastLba = 1100 } });
+    Check(qcResetTargetOverlap.Error is InvalidDataException && qcResetTargetOverlap.Calls.Count == 0,
+        "QC userdata reset: overlapping erase targets refuse before erase");
+    var qcResetOverflow = await RunQcResetFixture(new[] { qcUserdata with { LastLba = long.MaxValue } }, lastUsableLba: long.MaxValue);
+    Check(qcResetOverflow.Error is OverflowException && qcResetOverflow.Calls.Count == 0,
+        "QC userdata reset: overflowing byte range refuses before erase");
+    var qcResetReserved = await RunQcResetFixture(new[] { qcUserdata with { FirstLba = 2, LastLba = 33 } });
+    Check(qcResetReserved.Error is InvalidDataException && qcResetReserved.Calls.Count == 0,
+        "QC userdata reset: primary GPT entries are outside usable LBAs and never erased");
+    var qcResetPastEnd = await RunQcResetFixture(new[] { qcUserdata with { LastLba = 4096 } });
+    Check(qcResetPastEnd.Error is InvalidDataException && qcResetPastEnd.Calls.Count == 0,
+        "QC userdata reset: target beyond last usable LBA cannot erase backup GPT");
+
+    byte[] QcResetHeader()
+    {
+        var header = GptHeader(2, 4, 128);
+        BitConverter.GetBytes(1L).CopyTo(header, 24);
+        BitConverter.GetBytes(4096L).CopyTo(header, 32);
+        BitConverter.GetBytes(34L).CopyTo(header, 40);
+        BitConverter.GetBytes(4000L).CopyTo(header, 48);
+        return header;
+    }
+    var qcRawEntries = new byte[512];
+    GptEntry("userdata", 1000, 1999).CopyTo(qcRawEntries, 0);
+    GptEntry("metadata", 100, 199).CopyTo(qcRawEntries, 128);
+    var qcRawReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(QcResetHeader(), qcRawEntries, 512));
+    Check(qcRawReset.Error == null && qcRawReset.Calls.SequenceEqual(new[] { "erase:userdata", "erase:metadata", "reset" }),
+        "QC userdata reset: raw GPT parsing preserves usable bounds and feeds the reset plan");
+    var qcMalformedEntries = (byte[])qcRawEntries.Clone();
+    GptEntry("metadata", 200, 199).CopyTo(qcMalformedEntries, 128);
+    var qcMalformedReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(QcResetHeader(), qcMalformedEntries, 512));
+    Check(qcMalformedReset.Error is InvalidDataException && qcMalformedReset.Calls.Count == 0,
+        "QC userdata reset: malformed raw metadata cannot disappear as an optional absent partition");
+    var qcMalformedDuplicate = (byte[])qcRawEntries.Clone();
+    GptEntry("metadata", 300, 299).CopyTo(qcMalformedDuplicate, 256);
+    var qcMalformedDuplicateReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(QcResetHeader(), qcMalformedDuplicate, 512));
+    Check(qcMalformedDuplicateReset.Error is InvalidDataException && qcMalformedDuplicateReset.Calls.Count == 0,
+        "QC userdata reset: malformed duplicate metadata cannot bypass raw GPT validation");
+    var qcTruncatedReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(QcResetHeader(), qcRawEntries[..256], 512));
+    Check(qcTruncatedReset.Error is InvalidDataException && qcTruncatedReset.Calls.Count == 0,
+        "QC userdata reset: truncated raw GPT refuses rather than planning from partial entries");
+    var qcBadBounds = QcResetHeader();
+    BitConverter.GetBytes(2L).CopyTo(qcBadBounds, 40);
+    var qcBadBoundsReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(qcBadBounds, qcRawEntries, 512));
+    Check(qcBadBoundsReset.Error is InvalidDataException && qcBadBoundsReset.Calls.Count == 0,
+        "QC userdata reset: usable range cannot include the primary GPT array");
+    var qcBadBackupBounds = QcResetHeader();
+    BitConverter.GetBytes(4095L).CopyTo(qcBadBackupBounds, 48);
+    var qcBadBackupReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(qcBadBackupBounds, qcRawEntries, 512));
+    Check(qcBadBackupReset.Error is InvalidDataException && qcBadBackupReset.Calls.Count == 0,
+        "QC userdata reset: usable range cannot include the backup GPT array");
+    var qcRawOutsideEntries = (byte[])qcRawEntries.Clone();
+    GptEntry("userdata", 2, 33).CopyTo(qcRawOutsideEntries, 0);
+    var qcRawOutsideReset = await RunQcResetFixture(Array.Empty<GptPartition>(),
+        readLayout: () => GptParser.ParseLayout(QcResetHeader(), qcRawOutsideEntries, 512));
+    Check(qcRawOutsideReset.Error is InvalidDataException && qcRawOutsideReset.Calls.Count == 0,
+        "QC userdata reset: raw partition outside usable LBAs refuses before planning");
+
+    var qcResetBadSector = await RunQcResetFixture(qcResetLayout, sectorSize: 0);
+    Check(qcResetBadSector.Error is InvalidDataException && qcResetBadSector.Calls.Count == 0,
+        "QC userdata reset: invalid sector size refuses before erase");
+    var qcResetDataFail = await RunQcResetFixture(qcResetLayout, failAt: "userdata");
+    Check(qcResetDataFail.Error is IOException && qcResetDataFail.Calls.SequenceEqual(new[] { "erase:userdata" }),
+        "QC userdata reset: userdata failure never advances to metadata or reset");
+    var qcResetMetaFail = await RunQcResetFixture(qcResetLayout, failAt: "metadata");
+    Check(qcResetMetaFail.Error is IOException && qcResetMetaFail.Calls.SequenceEqual(new[] { "erase:userdata", "erase:metadata" }),
+        "QC userdata reset: metadata failure prevents reset");
+    var qcResetResetFail = await RunQcResetFixture(qcResetLayout, failAt: "reset");
+    Check(qcResetResetFail.Error is IOException && qcResetResetFail.Calls.Count == 3,
+        "QC userdata reset: reset failure propagates rather than reporting completion");
+    var qcResetStopped = await RunQcResetFixture(qcResetLayout, cancelAt: "before");
+    Check(qcResetStopped.Error is OperationCanceledException && qcResetStopped.Calls.Count == 0,
+        "QC userdata reset: an already-cancelled run sends nothing");
+    var qcResetStopData = await RunQcResetFixture(qcResetLayout, cancelAt: "userdata");
+    Check(qcResetStopData.Error is OperationCanceledException && qcResetStopData.Calls.SequenceEqual(new[] { "erase:userdata" }),
+        "QC userdata reset: STOP after userdata skips metadata and reset");
+    var qcResetStopMeta = await RunQcResetFixture(qcResetLayout, cancelAt: "metadata");
+    Check(qcResetStopMeta.Error is OperationCanceledException && qcResetStopMeta.Calls.SequenceEqual(new[] { "erase:userdata", "erase:metadata" }),
+        "QC userdata reset: STOP after metadata prevents reset");
 
     // ================= native MTK DA wire layer (ROADMAP Phase 1.75 "Path B", stage B2) ============
     // BROM speaks big-endian, the DA stage speaks little-endian, and every value asserted below is pinned to
@@ -4197,9 +4483,8 @@ try
     Check(MtkNativeBench.NativeFlashPlan(nfTable,
               new[] { ("boot", nfSparseFile, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength) },
               out string nfSparseRefusal) == null &&
-          nfSparseRefusal.Contains("sparse") && nfSparseRefusal.Contains("wfscatter"),
-        "MTK P1.5 FLASH: a sparse image is refused by name and sent to the mtkclient path — the DA writes raw bytes, " +
-        "and a sparse container written raw is corruption");
+          nfSparseRefusal.Contains("sparse") && nfSparseRefusal.Contains("Nothing was written"),
+        "MTK FLASH: malformed sparse headers are refused before preparation or device writes");
     Check(MtkNativeBench.NativeFlashPlan(nfTable,
               new[] { ("otp", nfBootFile, (long)nfOtp.ByteOffset, (long)nfOtp.ByteLength) },
               out string nfNeverRefusal) == null && nfNeverRefusal.Contains("bricks"),
