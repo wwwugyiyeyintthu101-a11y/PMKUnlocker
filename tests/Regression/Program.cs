@@ -2170,7 +2170,10 @@ try
     }
     catch (Exception ex) { hangRefusal = ex.Message; }
     int hangMs = (int)(DateTime.UtcNow - hangStart).TotalMilliseconds;
-    Check(hangRefusal.Contains("no answer") && hangMs >= 3000 && hangMs < 7000,
+    // A timer can fire a millisecond early, so the lower bound is "the 3 s timeout was actually spent", not an
+    // exact 3000 — the failure this check exists for is a transfer that returns at the 300 ms serial timeout or
+    // instantly, and either of those is nowhere near 2.9 s.
+    Check(hangRefusal.Contains("no answer") && hangMs >= 2900 && hangMs < 7000,
         "MTK boot: a control transfer the driver never completes is given its timeout plus room and then reported — " + hangMs +
         " ms, while the fake device is still inside the call");
 
@@ -4520,6 +4523,187 @@ try
           nfConfirm.Contains("not rebuilt") && nfConfirm.Contains("read back"),
         "MTK P1.5 FLASH: the one dialog names the extent and image and says both facts the native route changes — " +
         "no GPT rebuild, and every write is read back");
+
+    // ---- P1.5 sparse: a stock sparse image is planned at its EXPANDED length, then prepared on the host ----
+    // The container is smaller than the bytes it writes, so the plan must carry the expanded length (the size the
+    // extent fit and the block-alignment check use) and preparation must turn it into raw bytes before any frame.
+    string nfsDir = Path.Combine(dir, "nfs");
+    Directory.CreateDirectory(nfsDir);
+    string nfsSparseFile = Path.Combine(nfsDir, "userdata.img");
+    using (var nfsFs = File.Create(nfsSparseFile))
+    using (var nfsBw = new BinaryWriter(nfsFs))
+    {
+        nfsBw.Write(0xED26FF3Au); nfsBw.Write((ushort)1); nfsBw.Write((ushort)0);
+        nfsBw.Write((ushort)28); nfsBw.Write((ushort)12);
+        nfsBw.Write(4096u); nfsBw.Write(6u); nfsBw.Write(3u); nfsBw.Write(0u);
+        nfsBw.Write((ushort)0xCAC1); nfsBw.Write((ushort)0); nfsBw.Write(1u); nfsBw.Write(12u + 4096u);
+        for (int i = 0; i < 4096; i++) nfsBw.Write((byte)(i % 256));
+        nfsBw.Write((ushort)0xCAC2); nfsBw.Write((ushort)0); nfsBw.Write(2u); nfsBw.Write(16u);
+        nfsBw.Write(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+        nfsBw.Write((ushort)0xCAC3); nfsBw.Write((ushort)0); nfsBw.Write(3u); nfsBw.Write(12u);
+    }
+    var nfsExtent = new MtkDaExtent("userdata", 0x100, 0x13F, 512);   // 64 blocks x 512 = 32768 B, fits 24576 expanded
+    var nfsTable = new MtkDaPartitionTable(512, new[] { nfsExtent }, null, null);
+    var nfsPlan = MtkNativeBench.NativeFlashPlan(nfsTable,
+        new[] { ("userdata", nfsSparseFile, (long)nfsExtent.ByteOffset, (long)nfsExtent.ByteLength) },
+        out string nfsPlanRefusal);
+    Check(nfsPlanRefusal == null && nfsPlan.Count == 1 && nfsPlan[0].IsSparse && nfsPlan[0].ImageLength == 24576 &&
+          nfsPlan[0].ImagePath == nfsSparseFile,
+        "MTK P1.5 SPARSE: a valid sparse image is planned at its expanded byte length (6 x 4096), not its container " +
+        "size — the extent fit and the block-alignment check both use the bytes that will actually be written");
+    string nfsAlignFile = Path.Combine(nfsDir, "unaligned.bin");
+    File.WriteAllBytes(nfsAlignFile, new byte[513]);
+    Check(MtkNativeBench.NativeFlashPlan(nfsTable,
+              new[] { ("userdata", nfsAlignFile, (long)nfsExtent.ByteOffset, (long)nfsExtent.ByteLength) },
+              out string nfsAlignRefusal) == null &&
+          nfsAlignRefusal.Contains("not aligned") && nfsAlignRefusal.Contains("Nothing was written"),
+        "MTK P1.5 SPARSE: a raw image whose length is not a whole number of device blocks is refused before the port");
+    string nfsConfirm = MtkNativeBench.NativeFlashConfirmText(nfsPlan);
+    Check(nfsConfirm.Contains("sparse") && nfsConfirm.Contains("expanded") &&
+          nfsConfirm.Contains("Temporary disk space required") && nfsConfirm.Contains("zeroes") &&
+          nfsConfirm.Contains("kept") && nfsConfirm.Contains("read back"),
+        "MTK P1.5 SPARSE: the one dialog names the sparse image, its expanded size and the temporary disk it needs, " +
+        "and still says only the listed ranges are overwritten and every write is read back");
+
+    string nfsRoot = Path.Combine(nfsDir, "prep");
+    Directory.CreateDirectory(nfsRoot);
+    var nfsLogs = new List<string>();
+    var nfsPrep = MtkNativeBench.NativeFlashPreparation.Create(nfsPlan, nfsRoot, default, nfsLogs.Add);
+    string nfsRawPath;
+    string nfsPrepDir;
+    try
+    {
+        Check(nfsPrep.Plan.Count == 1 && !nfsPrep.Plan[0].IsSparse && nfsPrep.Plan[0].ImageLength == 24576 &&
+              nfsPrep.Plan[0].ImagePath != nfsSparseFile,
+            "MTK P1.5 SPARSE: preparation replaces the sparse container with a raw file of the expanded length before " +
+            "any partition is written");
+        nfsRawPath = nfsPrep.Plan[0].ImagePath;
+        nfsPrepDir = Path.GetDirectoryName(nfsRawPath)!;
+        byte[] nfsRaw = File.ReadAllBytes(nfsRawPath);
+        bool nfsRawOk = nfsRaw.Length == 24576;
+        for (int i = 0; i < 4096 && nfsRawOk; i++) if (nfsRaw[i] != (byte)(i % 256)) nfsRawOk = false;
+        for (int i = 4096; i < 12288 && nfsRawOk; i++)
+            if (nfsRaw[i] != new byte[] { 0xAA, 0xBB, 0xCC, 0xDD }[(i - 4096) % 4]) nfsRawOk = false;
+        for (int i = 12288; i < nfsRaw.Length && nfsRawOk; i++) if (nfsRaw[i] != 0) nfsRawOk = false;
+        Check(nfsRawOk, "MTK P1.5 SPARSE: the prepared raw file carries the raw chunk, the fill pattern and zeroes for " +
+            "the don't-care range — the bytes the DA will receive, expanded on this PC");
+        Check(nfsLogs.Any(l => l.Contains("expanding and validating") && l.Contains("userdata.img")),
+            "MTK P1.5 SPARSE: preparation logs the expand-and-validate step naming the image before any write");
+    }
+    finally { nfsPrep.Dispose(); }
+    Check(!Directory.Exists(nfsPrepDir),
+        "MTK P1.5 SPARSE: disposing the preparation removes the temporary raw directory — no expanded image is left " +
+        "on the shop PC after the operation ends");
+
+    File.WriteAllBytes(nfsSparseFile, new byte[512]);   // same name, no longer the sparse image the plan measured
+    bool nfsChanged = false;
+    try { MtkNativeBench.NativeFlashPreparation.Create(nfsPlan, nfsRoot); }
+    catch (IOException ex) { nfsChanged = ex.Message.Contains("changed after preflight"); }
+    Check(nfsChanged, "MTK P1.5 SPARSE: an image that changed after the plan was measured is refused before any write " +
+        "— the bytes that reach the DA are the bytes that passed preflight");
+    using (var nfsRestore = File.Create(nfsSparseFile))
+    using (var nfsRb = new BinaryWriter(nfsRestore))
+    {
+        nfsRb.Write(0xED26FF3Au); nfsRb.Write((ushort)1); nfsRb.Write((ushort)0);
+        nfsRb.Write((ushort)28); nfsRb.Write((ushort)12);
+        nfsRb.Write(4096u); nfsRb.Write(6u); nfsRb.Write(3u); nfsRb.Write(0u);
+        nfsRb.Write((ushort)0xCAC1); nfsRb.Write((ushort)0); nfsRb.Write(1u); nfsRb.Write(12u + 4096u);
+        for (int i = 0; i < 4096; i++) nfsRb.Write((byte)(i % 256));
+        nfsRb.Write((ushort)0xCAC2); nfsRb.Write((ushort)0); nfsRb.Write(2u); nfsRb.Write(16u);
+        nfsRb.Write(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+        nfsRb.Write((ushort)0xCAC3); nfsRb.Write((ushort)0); nfsRb.Write(3u); nfsRb.Write(12u);
+    }
+    var nfsCts = new CancellationTokenSource();
+    nfsCts.Cancel();
+    bool nfsCancelled = false;
+    try { MtkNativeBench.NativeFlashPreparation.Create(nfsPlan, nfsRoot, nfsCts.Token); }
+    catch (OperationCanceledException) { nfsCancelled = true; }
+    Check(nfsCancelled && Directory.GetDirectories(nfsRoot).Length == 0,
+        "MTK P1.5 SPARSE: a cancelled preparation throws before creating any temporary directory — nothing is expanded " +
+        "and nothing is written");
+    string nfsRawImage = Path.Combine(nfsDir, "raw.bin");
+    File.WriteAllBytes(nfsRawImage, new byte[512]);
+    var nfsRawPlan = MtkNativeBench.NativeFlashPlan(nfTable,
+        new[] { ("boot", nfsRawImage, (long)nfBoot.ByteOffset, (long)nfBoot.ByteLength) }, out string nfsRawRefusal);
+    using (var nfsRawPrep = MtkNativeBench.NativeFlashPreparation.Create(nfsRawPlan, nfsRoot))
+        Check(nfsRawPrep.Plan.Count == 1 && !nfsRawPrep.Plan[0].IsSparse &&
+              nfsRawPrep.Plan[0].ImagePath == nfsRawImage,
+            "MTK P1.5 SPARSE: a non-sparse image passes through preparation unchanged — no temporary copy is made for " +
+            "a raw file that already is the bytes to write");
+    Check(Directory.GetDirectories(nfsRoot).Length == 0,
+        "MTK P1.5 SPARSE: a raw-only preparation creates no temporary directory at all");
+
+    // ---- P1.5 service erase: the FRP / Userlock target is resolved from the live GPT, fail-closed ----
+    // The service buttons name one partition (frp or userdata). The target must be the device's own extent, present
+    // exactly once in both the parsed GPT and the cache, inside the usable LBAs, non-overlapping and inside capacity.
+    byte[] svcHeader(int count)
+    {
+        var h = GptHeader(2, count, 128);
+        BitConverter.GetBytes(1L).CopyTo(h, 24);      // MyLBA
+        BitConverter.GetBytes(4096L).CopyTo(h, 32);   // backup LBA, past last usable
+        BitConverter.GetBytes(34L).CopyTo(h, 40);     // first usable
+        BitConverter.GetBytes(4000L).CopyTo(h, 48);   // last usable
+        return h;
+    }
+    byte[] svcEntries(params (string Name, long First, long Last)[] rows)
+    {
+        var e = new byte[rows.Length * 128];
+        for (int i = 0; i < rows.Length; i++) GptEntry(rows[i].Name, rows[i].First, rows[i].Last).CopyTo(e, i * 128);
+        return e;
+    }
+    MtkDaExtent svcExtent(string name, long first, long last) => new(name, first, last, 512);
+    var svcStorage = MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(0xE8F800000ul)));
+    var svcUser = svcExtent("userdata", 1000, 1999);
+    var svcFrp = svcExtent("frp", 100, 199);
+    var svcMeta = svcExtent("metadata", 200, 299);
+    var svcRows = new[] { ("userdata", 1000L, 1999L), ("frp", 100L, 199L), ("metadata", 200L, 299L) };
+    var svcTable = new MtkDaPartitionTable(512, new[] { svcUser, svcFrp, svcMeta }, svcHeader(3), svcEntries(svcRows));
+    Check(ReferenceEquals(MtkNativeBench.ServiceEraseTarget(svcTable, svcStorage, true), svcUser) &&
+          ReferenceEquals(MtkNativeBench.ServiceEraseTarget(svcTable, svcStorage, false), svcFrp),
+        "MTK P1.5 SERVICE: Userlock resolves to the userdata extent and FRP to the frp extent — the device's own cached " +
+        "extent, matched to the live GPT by name");
+    string svcUserText = MtkNativeBench.ServiceEraseConfirmText(true);
+    string svcFrpText = MtkNativeBench.ServiceEraseConfirmText(false);
+    Check(svcUserText.Contains("userdata") && svcUserText.Contains("KEPT: metadata, FRP, NV/IMEI") &&
+          svcUserText.Contains("server-side accounts") && svcUserText.Contains("Continue?") &&
+          svcFrpText.Contains("frp") && svcFrpText.Contains("KEPT: userdata, metadata, NV/IMEI"),
+        "MTK P1.5 SERVICE: each confirmation names what is erased and what is KEPT, and says it does not remove " +
+        "server-side accounts — the destructive dialog never hides the preserved partitions");
+    bool svcRefusal(Func<MtkDaExtent> act, string fragment)
+    {
+        try { act(); return false; }
+        catch (InvalidDataException ex) { return ex.Message.Contains(fragment); }
+    }
+    var svcNoRaw = new MtkDaPartitionTable(512, new[] { svcUser, svcFrp, svcMeta }, null, null);
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcNoRaw, svcStorage, true), "live GPT and storage geometry"),
+        "MTK P1.5 SERVICE: without the raw GPT header and entries the target cannot be verified against the device, so " +
+        "the erase is refused before any frame");
+    var svcUfsStorage = MtkStorageInfo.ParseUfs(Convert.FromHexString(UfsGeometryPayload()));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcTable, svcUfsStorage, true), "live GPT and storage geometry"),
+        "MTK P1.5 SERVICE: a storage geometry whose block size differs from the table's is refused — an LBA-to-byte " +
+        "factor that disagrees would aim the erase at the wrong bytes");
+    var svcNoUser = new MtkDaPartitionTable(512, new[] { svcFrp, svcMeta }, svcHeader(2),
+        svcEntries(("frp", 100L, 199L), ("metadata", 200L, 299L)));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcNoUser, svcStorage, true), "Exactly one userdata"),
+        "MTK P1.5 SERVICE: a device with no userdata partition is refused — the service button never invents a target");
+    var svcDup = new MtkDaPartitionTable(512, new[] { svcFrp, svcMeta, svcExtent("userdata", 1000, 1499), svcExtent("userdata", 1500, 1999) },
+        svcHeader(4), svcEntries(("frp", 100L, 199L), ("metadata", 200L, 299L), ("userdata", 1000L, 1499L), ("userdata", 1500L, 1999L)));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcDup, svcStorage, true), "Exactly one userdata"),
+        "MTK P1.5 SERVICE: two userdata partitions are refused — an ambiguous target is not erased on a guess");
+    var svcCacheMiss = new MtkDaPartitionTable(512, new[] { svcExtent("userdata", 1100, 1999), svcFrp, svcMeta },
+        svcHeader(3), svcEntries(svcRows));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcCacheMiss, svcStorage, true), "cached extent differs"),
+        "MTK P1.5 SERVICE: a cached extent whose LBAs differ from the live GPT is refused — the erase addresses the " +
+        "device's current bytes, not a stale snapshot");
+    var svcOverlap = new MtkDaPartitionTable(512, new[] { svcUser, svcFrp, svcExtent("metadata", 1500, 2500) },
+        svcHeader(3), svcEntries(("userdata", 1000L, 1999L), ("frp", 100L, 199L), ("metadata", 1500L, 2500L)));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcOverlap, svcStorage, true), "overlaps another partition"),
+        "MTK P1.5 SERVICE: a target that overlaps another partition is refused — erasing it would take bytes that " +
+        "belong to a partition the operator did not name");
+    var svcSmallStorage = MtkStorageInfo.Parse(Convert.FromHexString(DescriptorPayload(600000ul)));
+    Check(svcRefusal(() => MtkNativeBench.ServiceEraseTarget(svcTable, svcSmallStorage, true), "exceeds the device capacity"),
+        "MTK P1.5 SERVICE: a target whose bytes run past the reported user area is refused — the erase never runs off " +
+        "the end of the disk");
 
     var nfLive = nfTable.Extents
         .Select(e => new MtkPartition(e.Name, (long)e.ByteOffset, (long)e.ByteLength)).ToList();
