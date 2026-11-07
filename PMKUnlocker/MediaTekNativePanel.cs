@@ -850,6 +850,8 @@ public partial class Form1
         RequireNativeSession();
         await nativeDa.RebootAsync(nativeCancel.Token).ConfigureAwait(false);
         nativeCloseRequested = true;
+        NativeSay("[*] Native DA: once Android is up, press Verify Boot (ADB) on the INFO tab — it waits for " +
+                  "sys.boot_completed=1 and reports what it can prove (the DA readback already proved the bytes).");
     }
 
     /// <summary>

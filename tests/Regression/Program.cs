@@ -4614,6 +4614,122 @@ try
         "P1.7 FORMAT ALL: no name sits in both the eraseable whitelist and the protected bootchain list — the two " +
         "arrays stay mutually exclusive");
 
+    // ---- P1.8: the ADB post-flash check (one getprop dump, no phone) -------------------------
+    string getpropBooted =
+        "* daemon started successfully *\r\n" +
+        "[ro.product.manufacturer]: [Xiaomi]\r\n" +
+        "[ro.product.model]: [Redmi 9A]\r\n" +
+        "[ro.serialno]: [9A2B7C3D]\r\n" +
+        "[ro.build.version.release]: [10]\r\n" +
+        "[ro.build.id]: [QP1A.190711.020]\r\n" +
+        "[ro.boot.verifiedbootstate]: [green]\r\n" +
+        "[ro.boot.flash.locked]: [1]\r\n" +
+        "[persist.radio.imei1]: [861234567890123]\r\n" +
+        "[sys.boot_completed]: [1]\r\n" +
+        "[dev.bootcomplete]: [1]\r\n";
+    var bootProps = MtkPostFlashCheck.ParseGetProp(getpropBooted);
+    Check(bootProps.Count == 10 && bootProps["ro.product.model"] == "Redmi 9A" &&
+        !bootProps.ContainsKey("* daemon started successfully *"),
+        "P1.8 VERIFY BOOT: getprop parsing keeps every [key]: [value] line and drops the adb daemon banner");
+    var bootEvidence = MtkPostFlashCheck.Read(bootProps);
+    Check(bootEvidence.AdbAnswered && bootEvidence.BootCompleted && bootEvidence.DevBootCompleted &&
+        bootEvidence.Missing.Count == 0,
+        "P1.8 VERIFY BOOT: sys.boot_completed=1 is the boot verdict, and a complete dump reports nothing missing");
+    Check(MtkPostFlashCheck.Verdict(bootEvidence) == "BOOTED",
+        "P1.8 VERIFY BOOT: a booted phone is BOOTED, not \"adb is up\"");
+    Check(bootEvidence.ImeiKey == "persist.radio.imei1" && bootEvidence.Imei == "861234567890123",
+        "P1.8 VERIFY BOOT: the newest IMEI property (imei1) wins over the older single imei");
+    Check(MtkPostFlashCheck.MaskImei("861234567890123") == "***********0123" &&
+        MtkPostFlashCheck.MaskImei("1234") == "****" &&
+        MtkPostFlashCheck.MaskImei("12345") == "*2345" &&
+        MtkPostFlashCheck.MaskImei("") == "",
+        "P1.8 VERIFY BOOT: the IMEI keeps only its last four digits; short and empty values are still masked");
+    var bootFacts = MtkPostFlashCheck.Facts(bootEvidence);
+    string flatBoot = string.Join(" | ", bootFacts.Select(f => f.Label + ": " + f.Value));
+    Check(flatBoot.Contains("sys.boot_completed=1") &&
+        flatBoot.Contains("green") && flatBoot.Contains("flash.locked=1") &&
+        flatBoot.Contains("***********0123") &&
+        !flatBoot.Contains("861234567890123"),
+        "P1.8 VERIFY BOOT: the report names the boot flag and verified-boot state, and never prints the full IMEI");
+    Check(flatBoot.Contains("cannot prove the FRP state"),
+        "P1.8 VERIFY BOOT: even a PASS keeps the honest limit — ADB does not report the FRP state");
+
+    var orangeEvidence = MtkPostFlashCheck.Read(MtkPostFlashCheck.ParseGetProp(
+        "[sys.boot_completed]: [1]\r\n[ro.boot.verifiedbootstate]: [orange]\r\n[ro.boot.flash.locked]: [0]\r\n"));
+    string flatOrange = string.Join(" | ", MtkPostFlashCheck.Facts(orangeEvidence).Select(f => f.Value));
+    Check(flatOrange.Contains("bootloader unlocked") && flatOrange.Contains("cannot prove the FRP state"),
+        "P1.8 VERIFY BOOT: an orange verified-boot state is decoded as an unlocked bootloader, and the report still states its limit");
+
+    var bootingEvidence = MtkPostFlashCheck.Read(MtkPostFlashCheck.ParseGetProp(
+        "[sys.boot_completed]: [0]\r\n[dev.bootcomplete]: []\r\n[ro.product.model]: [Redmi 9A]\r\n"));
+    var bootingFacts = MtkPostFlashCheck.Facts(bootingEvidence);
+    Check(!bootingEvidence.BootCompleted && MtkPostFlashCheck.Verdict(bootingEvidence) == "STILL BOOTING" &&
+        bootingEvidence.Missing.Contains("ro.boot.verifiedbootstate") &&
+        bootingEvidence.Missing.Contains(MtkPostFlashCheck.ImeiMissingLabel) &&
+        bootingFacts.Count(f => f.Label == "IMEI") == 1 &&
+        bootingFacts.Any(f => f.Label == "IMEI" && f.Value.Contains("not readable") && f.Value.Contains("*#06#")),
+        "P1.8 VERIFY BOOT: an adb answer without sys.boot_completed=1 is STILL BOOTING, and the IMEI is reported once, readably");
+    var olderImei = MtkPostFlashCheck.Read(MtkPostFlashCheck.ParseGetProp(
+        "[persist.radio.imei]: [351234567890123]\r\n[persist.radio.imei2]: [351234567890124]\r\n"));
+    Check(olderImei.ImeiKey == "persist.radio.imei" && olderImei.Imei == "351234567890123",
+        "P1.8 VERIFY BOOT: without imei1 the older persist.radio.imei is used before imei2");
+
+    var bootScript = new Queue<string>(new[]
+    {
+        "[sys.boot_completed]: [0]\r\n",
+        "[sys.boot_completed]: [0]\r\n",
+        "[sys.boot_completed]: [1]\r\n"
+    });
+    var bootCommands = new List<string>();
+    var waited = await MtkPostFlashCheck.WaitForBootAsync(
+        command => { bootCommands.Add(command); return Task.FromResult(bootScript.Dequeue()); },
+        TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(4), _ => Task.CompletedTask);
+    Check(bootCommands.Count == 3 && bootCommands.All(c => c == MtkPostFlashCheck.GetPropCommand) &&
+        waited.BootCompleted && waited.Polls == 3,
+        "P1.8 VERIFY BOOT: the wait stops on the first sys.boot_completed=1 and reports which poll answered");
+
+    int neverCalls = 0;
+    var never = await MtkPostFlashCheck.WaitForBootAsync(
+        _ => { neverCalls++; return Task.FromResult("[sys.boot_completed]: [0]"); },
+        TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(4), _ => Task.CompletedTask);
+    Check(neverCalls == 3 && !never.BootCompleted && never.AdbAnswered &&
+        MtkPostFlashCheck.Verdict(never) == "STILL BOOTING",
+        "P1.8 VERIFY BOOT: a phone that never finishes booting spends the whole budget and is not called booted");
+
+    var noAdb = await MtkPostFlashCheck.WaitForBootAsync(
+        _ => Task.FromResult(""), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(4), _ => Task.CompletedTask);
+    Check(noAdb.Polls == 2 && !noAdb.AdbAnswered && MtkPostFlashCheck.Verdict(noAdb) == "NO ADB" &&
+        MtkPostFlashCheck.Facts(noAdb).Any(f => f.Value.Contains("not a flash verdict")),
+        "P1.8 VERIFY BOOT: no adb answer is NO ADB, and the report says it is not a flash verdict");
+
+    var adbTimeout = await MtkPostFlashCheck.WaitForBootAsync(
+        _ => throw new TimeoutException("adb shell timed out"),
+        TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(4), _ => Task.CompletedTask);
+    Check(!adbTimeout.AdbAnswered && adbTimeout.Polls == 2,
+        "P1.8 VERIFY BOOT: a timeout inside adb is a poll that answered nothing, not a crashed run");
+
+    int zeroCalls = 0;
+    var zeroWindow = await MtkPostFlashCheck.WaitForBootAsync(
+        _ => { zeroCalls++; return Task.FromResult(""); },
+        TimeSpan.Zero, TimeSpan.FromSeconds(4), _ => Task.CompletedTask);
+    Check(zeroCalls == 1 && zeroWindow.Polls == 1,
+        "P1.8 VERIFY BOOT: a zero-length wait still asks once — one cheap poll, never zero");
+
+    using (var bootCancel = new CancellationTokenSource())
+    {
+        bootCancel.Cancel();
+        bool cancelled = false;
+        try
+        {
+            await MtkPostFlashCheck.WaitForBootAsync(
+                _ => Task.FromResult("[sys.boot_completed]: [0]"),
+                TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(4), _ => Task.CompletedTask, bootCancel.Token);
+        }
+        catch (OperationCanceledException) { cancelled = true; }
+        Check(cancelled,
+            "P1.8 VERIFY BOOT: the operator's cancel aborts the wait instead of being swallowed as an adb timeout");
+    }
+
     Console.WriteLine($"{passed} regression checks passed.");
 
 

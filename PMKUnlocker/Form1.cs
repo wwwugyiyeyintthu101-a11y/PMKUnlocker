@@ -5508,6 +5508,42 @@ namespace PMKUnlocker
             catch (InvalidOperationException) { }
         }
 
+        /// <summary>
+        /// One timestamped block for a structured result: the header carries the time, and every fact under it
+        /// lines up in two columns with its own colour. A run that ends in twelve timestamped sentences reads as
+        /// twelve events; this reads as one answer.
+        /// </summary>
+        private void LogFactBlock(string header, Color headerColor,
+            IEnumerable<(string Label, string Value, Color ValueColor)> facts)
+        {
+            if (rtbLog == null || rtbLog.IsDisposed || !rtbLog.IsHandleCreated) return;
+            try
+            {
+                if (rtbLog.InvokeRequired)
+                {
+                    var copy = facts.ToList();
+                    rtbLog.Invoke(new Action(() => LogFactBlock(header, headerColor, copy)));
+                    return;
+                }
+
+                AppendLogTimestamp(header);
+                rtbLog.SelectionColor = headerColor;
+                rtbLog.AppendText(header + "\r\n");
+                const string indent = "           ";   // "[HH:mm:ss] " is 11 characters
+                foreach (var (label, value, valueColor) in facts)
+                {
+                    rtbLog.SelectionColor = Color.FromArgb(110, 120, 136);
+                    rtbLog.AppendText(indent + label.PadRight(10));
+                    rtbLog.SelectionColor = valueColor;
+                    rtbLog.AppendText(value + "\r\n");
+                }
+                rtbLog.SelectionColor = rtbLog.ForeColor;
+                rtbLog.ScrollToCaret();
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        }
+
         // စာကြောင်းတူကို ခဏအတွင်း ထပ်မရေး — mtkclient က DA/bypass marker ၂ကြိမ်
         // ပို့လို့ "[OK] Bypassing authentication" / "Sending Download-Agent... OK" လိုမျိုး
         // ၂ခါ မထွက်အောင် (false = ဒီစာကြောင်းကို ကျော်လိုက်တယ်)။ ကြားက စာကြောင်း

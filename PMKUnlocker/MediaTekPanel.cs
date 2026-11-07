@@ -138,22 +138,31 @@ public partial class Form1
         Button btnMtkSaveGpt = Create3DButton("📋 Save GPT", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkSaveGpt.Click += async (_, _) => { try { await SaveMediaTekGptAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
 
+        // Post-flash check, not a flash action: the phone is on Android by now, so this button waits for ADB and
+        // asks Android itself whether it finished booting. The wait is bounded, and the report names what it cannot
+        // prove instead of turning "adb is up" into "the flash is fine".
+        Button btnMtkVerifyBoot = Create3DButton("✅ Verify Boot (ADB)", UiX(2), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Green);
+        btnMtkVerifyBoot.Click += async (_, _) => { try { await VerifyBootAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null)
+            Tip(btnMtkVerifyBoot, "ADB post-flash check — waits up to 3 minutes for sys.boot_completed=1, then reports the model, build, verified-boot state and the IMEI it can read (masked). Run it after FLASH / Format All / NV restore. The phone must be plugged in with USB debugging on, or the screen unlocked if the build asks.");
+
         // Post-B5.2 (PMK's call): the standalone "Reset Device" button leaves this group. The INFO tab's native
         // Reboot Device does the same job over a live DA session from RUN 48's measured recipe (hardware-proven in
         // RUN 49), and every mtkclient flow that needs a reset already carries ";reset" inside its own session
         // (MtkEraseAndResetAsync, the NV restore, AutoRebootAsync's own reset) — so no capability was lost here,
         // only a button that duplicated a live-session control and sat beside it on the same tab.
-        Panel grpInfo = CreateGroupPanel("SERVICE", UiX(0), UiY(0), 2, btnMtkReadInfo, btnMtkSaveGpt);
+        Panel grpInfo = CreateGroupPanel("SERVICE", UiX(0), UiY(0), 3, btnMtkReadInfo, btnMtkSaveGpt, btnMtkVerifyBoot);
         infoTab.Controls.Add(grpInfo);
 
         // This hint used to start at UiX(0), one row under the SERVICE frame — but CreateGroupPanel is added to the
         // tab first, so the frame paints IN FRONT and the sentence appeared cut in half (only its tail, past the
         // frame's right edge, was readable). It now sits in the clear space beside the frame, and wraps instead of
-        // ellipsising, because the whole line is operator instruction, not decoration.
+        // ellipsising, because the whole line is operator instruction, not decoration. The SERVICE frame grew to
+        // three columns (Read Info, Save GPT, Verify Boot), so the hint starts past its new right edge (x=495).
         Label lblInfoHint = new()
         {
-            Location = new Point(UiX(0) + 335, UiY(0) + 12),
-            Size = new Size(500, 56),
+            Location = new Point(UiX(0) + 500, UiY(0) + 10),
+            Size = new Size(340, 66),
             Text = "Power off the phone, connect in MediaTek mode (BROM / Preloader), then select its COM port. DA / Auth / Preloader depend on the device. Read Info loads the live partition table into FLASH tab.",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
@@ -1449,6 +1458,44 @@ public partial class Form1
                 $"[OK] Format All — {targets.Count} OS/data partitions erased (bootchain + NV/IMEI kept).");
         });
     }
+
+    /// <summary>
+    /// The post-flash check: wait for ADB, then ask Android whether it finished booting. This is the step that used
+    /// to be done by hand after Format All — watching for the launcher and typing *#06# — and it is deliberately
+    /// read-only: one getprop dump, no device writes, and the IMEI is masked before it reaches the log.
+    /// </summary>
+    private async Task VerifyBootAsync()
+    {
+        if (nativeDa != null)
+        {
+            // A live DA session means the phone is still in BROM, so ADB cannot answer yet. Say that instead of
+            // spending three minutes on polls that can only fail.
+            Log("[!] Verify Boot: a native DA session is still live on this phone — press Eject Device, let the phone boot Android, then run the check.", Color.Orange);
+            return;
+        }
+
+        const int timeoutSeconds = 180;
+        Log("[*] Verify Boot: waiting up to " + (timeoutSeconds / 60) + " minutes for adb to answer — plug the phone in and unlock the screen if it asks.", Color.Cyan);
+        var evidence = await MtkPostFlashCheck.WaitForBootAsync(
+            command => ExecuteCommandQuickAsync("adb.exe", command, 8000),
+            TimeSpan.FromSeconds(timeoutSeconds),
+            TimeSpan.FromSeconds(4),
+            span => Task.Delay(span),
+            CancellationToken.None,
+            line => Log(line, Color.Gray));
+        string verdict = MtkPostFlashCheck.Verdict(evidence);
+        bool booted = verdict == "BOOTED";
+        LogFactBlock((booted ? "[OK] " : "[!] ") + "Verify Boot — " + verdict,
+            booted ? Color.LightGreen : Color.Orange,
+            MtkPostFlashCheck.Facts(evidence).Select(f => (f.Label, f.Value, PostFlashLevelColor(f.Level))));
+    }
+
+    private static Color PostFlashLevelColor(MtkPostFlashCheck.PostFlashLevel level) => level switch
+    {
+        MtkPostFlashCheck.PostFlashLevel.Ok => Color.LightGreen,
+        MtkPostFlashCheck.PostFlashLevel.Warn => Color.Orange,
+        _ => Color.Gainsboro
+    };
 
     /// <summary>
     /// The one Format All confirmation, word for word the same on either route: the erase list, what is kept,
