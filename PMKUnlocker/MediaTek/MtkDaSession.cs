@@ -1060,12 +1060,19 @@ internal sealed partial class MtkDaSession : IDisposable
                     // recipe is on disk. Everything else stays a refusal — a wrong spray is how phones get bricked.
                     MtkBootProfile auto = MtkNativeBench.PickByHwCode(_autoProfiles, p => p.HwCode, DeviceHwCode);
                     if (auto == null)
+                    {
+                        // The refusal is the same either way, but the reason differs: under Auto the whole recipe tree
+                        // was searched and none claims this code; a hand-picked recipe never searched at all. Both name
+                        // the CPUs this build does carry, because that list is the answer to "what would make it boot?".
+                        string coverage = _autoProfiles != null
+                            ? MtkRecipeAudit.UnknownChipText(DeviceHwCode, _autoProfiles.Select(p => (p.Chipset, p.HwCode)))
+                            : "This run used the recipe picked by hand, so auto-detect never searched the tree: pick a " +
+                              "recipe recorded on this code, or install one under mtk\\boot-profiles.";
                         throw new MtkDaProtocolException("Device reports HW code 0x" + DeviceHwCode.ToString("X4") +
                             " but recipe " + _profile.Chipset + " was recorded on 0x" + _profile.HwCode.ToString("X4") +
-                            (_autoProfiles != null
-                                ? ". No installed recipe is recorded on 0x" + DeviceHwCode.ToString("X4") + " either, so auto has nothing to switch to"
-                                : "") +
-                            ". Replaying a bypass spray on the wrong chipset is how phones get bricked, so the boot was stopped.");
+                            ". " + coverage +
+                            " Replaying a bypass spray on the wrong chipset is how phones get bricked, so the boot was stopped.");
+                    }
                     if (!MtkBootProfile.SamePrefix(_profile.BromSteps, auto.BromSteps, index + 1))
                         throw new MtkDaProtocolException("Auto found recipe " + auto.Chipset + " for HW 0x" +
                             DeviceHwCode.ToString("X4") + ", but the two recipes differ in the steps already sent, so " +

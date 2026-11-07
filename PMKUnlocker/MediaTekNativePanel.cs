@@ -50,6 +50,8 @@ public partial class Form1
     private CheckBox chkNativeSimple;
     // FindProfiles walks the recipe tree, so the combo shows a friendly name and the boot uses the full path.
     private readonly List<string> nativeProfilePaths = new();
+    // The first visit to the NATIVE tab runs the offline recipe audit once per app run (hash every blob).
+    private bool nativeRecipesAudited;
 
     private void BuildNativeDaTab()
     {
@@ -84,18 +86,30 @@ public partial class Form1
 
         // Auto is the default: the chipset is read from the BROM itself and the matching recipe is chosen at that
         // byte, so an operator moving between phones does not have to remember which recipe belongs to which one.
+        // Each row names the CPU and the HW code that actually selects it — "does this build cover MT6768" is
+        // answered by looking at the list, not by booting and reading a refusal.
+        IReadOnlyList<MtkRecipeHeader> recipeHeaders = MtkRecipeAudit.Headers(profiles);
         cmbNativeProfile.Items.Add("Auto (detect chipset)");
-        foreach (string profile in profiles)
+        for (int i = 0; i < profiles.Count; i++)
         {
-            nativeProfilePaths.Add(profile);
-            // "mt6877_boot_profile" reads as noise in a 250 px combo; the recipe name is the chipset.
-            string label = Path.GetFileNameWithoutExtension(profile);
+            nativeProfilePaths.Add(profiles[i]);
+            string label = i < recipeHeaders.Count && recipeHeaders[i].Readable
+                ? recipeHeaders[i].Label
+                : Path.GetFileNameWithoutExtension(profiles[i]);
             const string suffix = "_boot_profile";
             if (label.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                 label = label.Substring(0, label.Length - suffix.Length);
             cmbNativeProfile.Items.Add(label);
         }
         cmbNativeProfile.SelectedIndex = 0;
+        NativeSay("[*] Native DA: " + MtkRecipeAudit.CoverageLine(recipeHeaders) + ".");
+        // The follow-up question is always "then what do I add next?". The loader packs already on disk answer
+        // half of it, so the tab says which CPU is one recorded boot away instead of leaving it to a failed plug-in.
+        NativeSay("[*] Native DA next: " +
+            MtkRecipeWorkshop.NextCpuLine(MtkRecipeWorkshop.ScanPacks(MtkRecipeWorkshop.DefaultLoadersDirectory),
+                recipeHeaders) + ".");
+        foreach (string problem in MtkRecipeAudit.Problems(recipeHeaders))
+            NativeSay("[!] Native DA recipe: " + problem + ".");
         if (toolTipMain != null)
             Tip(cmbNativeProfile, "Auto reads the chipset from the BROM's own HW code (the first reply that is chipset-specific) and runs the recipe recorded on it — nothing chipset-specific is sent before that. Pick a name only to force one recipe.");
 
@@ -197,8 +211,10 @@ public partial class Form1
         var lblNativeHint = new Label
         {
             Location = new Point(UiX(0), UiY(7)),
-            Size = new Size(856, 72),
-            Text = "NATIVE BENCH — proven on MT6765 (HW 0766) on real hardware: RUN 42 booted the DA, RUN 43 proved READ/WRITE/ERASE, RUN 47/49 the UI. A recipe for any other chipset is a first run, not a supported device. " +
+            Size = new Size(856, 88),
+            Text = "CPUs this build can boot natively: " + MtkRecipeAudit.CoverageNames(recipeHeaders) + ". " +
+                  "The session itself is chipset-generic; a recipe for a CPU that is not listed is a first run, not a supported device. " +
+                  "Proven on hardware: MT6765 (boot, READ/WRITE/ERASE) and MT6877 (boot, UFS GPT). " +
                   "Recipes are read from mtk\\boot-profiles next to the exe and are not shipped (the DA/EMI blob licence is PMK's call). " +
                   "Do not use this on a phone you cannot afford to reflash, and never unplug between Boot and Close. " +
                   "If the BROM refuses the greet, try the raw USB pipe first and read the pipe line in the log.",
@@ -214,6 +230,49 @@ public partial class Form1
         BuildNativeInfoGroup();
         BuildNativeFlashActions();
         SetNativeButtonsLive();
+
+        // A recipe for a new CPU is checked before the first boot, not during it: the first visit to this tab hashes
+        // every installed recipe once. That is the same gate the boot runs, so a swapped DA image or a missing blob is
+        // named here — with no phone on the bench — instead of surfacing as a failed boot.
+        nativeTab.Enter += (_, _) =>
+        {
+            if (nativeRecipesAudited) return;
+            nativeRecipesAudited = true;
+            string[] paths = nativeProfilePaths.ToArray();
+            _ = Task.Run(() =>
+            {
+                var checks = MtkRecipeAudit.Verify(paths);
+                Log("[*] Native DA: " + MtkRecipeAudit.VerifySummary(checks) + ".", Color.Gray);
+                foreach (var check in checks)
+                    Log((check.Loaded ? "[OK] " : "[!] ") + "Recipe: " + MtkRecipeAudit.VerifyLine(check) + ".",
+                        check.Loaded ? Color.LightGreen : Color.Orange);
+
+                // The tool has two MTK engines and they cover different CPUs: the standard engine picks a catalog DA
+                // by chipset, the native session replays a recorded recipe. An operator with a phone on the bench
+                // needs both answers at once, so the first visit writes the full per-CPU table beside the logs.
+                var packs = MtkRecipeWorkshop.ScanPacks(MtkRecipeWorkshop.DefaultLoadersDirectory);
+                var payloads = MtkRecipeWorkshop.ScanPayloads(MtkRecipeWorkshop.DefaultPayloadsDirectory);
+                var coverage = MtkRecipeWorkshop.Coverage(packs, recipeHeaders, chip =>
+                {
+                    var match = MtkDaCatalog.FindByChipset(mtkDeviceDb, Path.Combine(Application.StartupPath, "mtk"), chip);
+                    return match == null ? "" : match.Brand + "\\" + match.Model + " (" + match.Basis + ")";
+                }, payloads);
+                Log("[*] CPU coverage: " + MtkRecipeWorkshop.CoverageSummary(coverage) + ".", Color.Gray);
+                try
+                {
+                    string folder = Path.Combine(ShopServices.DataDirectory, "mtk");
+                    Directory.CreateDirectory(folder);
+                    string file = Path.Combine(folder, "cpu-coverage.md");
+                    File.WriteAllText(file, MtkRecipeWorkshop.CoverageMarkdown(coverage,
+                        DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm")));
+                    Log("[*] CPU coverage table: " + file, Color.Gray);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Log("[!] CPU coverage table not written: " + ex.Message, Color.Orange);
+                }
+            });
+        };
     }
 
     // ================= B4 — UI WIRING: the session on the INFO and FLASH tabs =================

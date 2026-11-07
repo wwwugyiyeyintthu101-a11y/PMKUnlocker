@@ -566,7 +566,10 @@ public partial class Form1
         mtkAutoMatch = match;
         if (match == null)
         {
-            Log("  * Chipset " + chip + " has no bundled DA/Auth — mtkclient's own loader is the only option here.", Color.Orange);
+            Log("  * Chipset " + chip + " has no bundled DA/Auth — " +
+                (MtkRecipeWorkshop.HasDedicatedPayload(chip)
+                    ? "mtkclient has a dedicated BROM payload for it, so its built-in DA can still boot it."
+                    : "mtkclient's generic heapbait fallback is the only option here (unproven on this chip)."), Color.Orange);
             lblMtkDeviceStatus.Text = chip + " · no catalog loader";
             lblMtkDeviceStatus.ForeColor = Color.Orange;
             return;
@@ -608,7 +611,10 @@ public partial class Form1
         mtkLastChipNotice = chip;
         if (match == null)
         {
-            Log("  * " + chip + " (from ADB) has no bundled DA/Auth — mtkclient's own loader will be used.", Color.Orange);
+            Log("  * " + chip + " (from ADB) has no bundled DA/Auth — " +
+                (MtkRecipeWorkshop.HasDedicatedPayload(chip)
+                    ? "mtkclient's dedicated BROM payload + built-in DA will be used."
+                    : "mtkclient's generic heapbait fallback will be used (unproven on this chip)."), Color.Orange);
             lblMtkDeviceStatus.Text = chip + " · no catalog loader";
             lblMtkDeviceStatus.ForeColor = Color.Orange;
             return;

@@ -1898,8 +1898,10 @@ try
     try { (await MtkDaSession.BootAsync(noMatchDevice, recipe6765, null, default, 300, 300, 300,
         autoProfiles: new[] { recipe6765, recipe6877 })).Dispose(); }
     catch (Exception ex) { noMatchError = ex.Message; }
-    Check(noMatchError != null && noMatchError.Contains("No installed recipe is recorded on 0x0BAD"),
-        "MTK auto: an HW code no installed recipe claims stops the boot instead of replaying a neighbouring chipset's spray");
+    Check(noMatchError != null && noMatchError.Contains("No installed recipe is recorded on HW 0x0BAD") &&
+          noMatchError.Contains("MT6765-TEST on 0x0766") && noMatchError.Contains("MT6877-TEST on 0x0959") &&
+          noMatchError.Contains("Nothing chipset-specific was sent"),
+        "MTK auto: an HW code no installed recipe claims stops the boot, names the CPUs that are installed, and says the phone was not sprayed");
     Check(noMatchDevice.Writes.Count == 1,
         "MTK auto: that refusal is paid for by the one query byte that was already due — nothing else reaches the phone");
 
@@ -4730,6 +4732,202 @@ try
         Check(cancelled,
             "P1.8 VERIFY BOOT: the operator's cancel aborts the wait instead of being swallowed as an adb timeout");
     }
+
+    // ---- P2.0: chipset coverage — which CPUs this build can boot, checked without a phone -----------
+    // Adding a CPU to the native session is adding a recipe for its HW code: the command layer above the boot is
+    // chipset-generic, the BROM prelude and DA/EMI images are not. These checks pin the listing, the two ways a
+    // recipe tree goes wrong, the offline hash audit, and the refusal an unclaimed HW code now produces.
+    var peekGood = MtkBootProfile.Peek(goodProfilePath);
+    Check(peekGood.Readable && peekGood.Chipset == "MT6765-TEST" && peekGood.HwCode == 0x0766 &&
+          peekGood.BlobCount == 3 && peekGood.BlobBytes == 20 && peekGood.BlobsOnDisk && peekGood.Problem.Length == 0 &&
+          peekGood.Label == "MT6765-TEST (HW 0x0766)",
+        "P2.0 COVERAGE: Peek reads the chipset, HW code and blob sizes without hashing, and labels a recipe by the code that selects it");
+
+    var peekMissing = MtkBootProfile.Peek(FixturePath("peek-missing", Recipe(GoodBrom, GoodDa),
+        ("kamakiri.bin", kamakiri), ("da1.bin", da1)));
+    Check(peekMissing.Readable && !peekMissing.BlobsOnDisk && peekMissing.Problem.Contains("da2.bin"),
+        "P2.0 COVERAGE: a recipe whose images are not all beside it is still listed, and the missing file is named");
+
+    string brokenFolder = Path.Combine(bootFix, "broken");
+    Directory.CreateDirectory(brokenFolder);
+    string brokenRecipePath = Path.Combine(brokenFolder, "broken.json");
+    File.WriteAllText(brokenRecipePath, "{ this is not a recipe");
+    var peekBroken = MtkBootProfile.Peek(brokenRecipePath);
+    Check(!peekBroken.Readable && peekBroken.Problem.Length > 0 && peekBroken.Label == "broken.json",
+        "P2.0 COVERAGE: a file that is not JSON is reported as unreadable instead of being listed as a CPU");
+
+    var headerList = MtkRecipeAudit.Headers(new[] { goodProfilePath, brokenRecipePath });
+    Check(headerList.Count == 2 && headerList[0].Readable && !headerList[1].Readable,
+        "P2.0 COVERAGE: the listing keeps recipe order and marks only the unreadable one");
+    string coverageLine = MtkRecipeAudit.CoverageLine(headerList);
+    Check(coverageLine.Contains("2 recipe(s) installed") &&
+          coverageLine.Contains("MT6765-TEST (HW 0x0766)") &&
+          coverageLine.Contains("1 refused") && !coverageLine.Contains(" \u2014 "),
+        "P2.0 COVERAGE: one line names the installed CPU, its HW code and how many recipes were refused (no em dash, so the screen keeps it whole)");
+    Check(MtkRecipeAudit.CoverageLine(Array.Empty<MtkRecipeHeader>()).Contains("mtk\\boot-profiles"),
+        "P2.0 COVERAGE: an empty tree says there is no CPU this build can boot, and where a recipe goes");
+    Check(MtkRecipeAudit.CoverageNames(headerList) == "MT6765-TEST (HW 0x0766)",
+        "P2.0 COVERAGE: the short form names only the readable CPUs, for the NATIVE tab's own hint");
+
+    var dupHeaders = MtkRecipeAudit.Headers(new[]
+    {
+        FixturePath("dup-a", RecipeOn("MT6765-TEST", "0x0766", GoodBrom, GoodDa), AutoBlobs),
+        FixturePath("dup-b", RecipeOn("MT6765-CLONE", "0x0766", GoodBrom, GoodDa), AutoBlobs)
+    });
+    Check(MtkRecipeAudit.Problems(dupHeaders).Any(p => p.Contains("HW 0x0766") &&
+            p.Contains("MT6765-TEST") && p.Contains("MT6765-CLONE") && p.Contains("only one can stay")),
+        "P2.0 COVERAGE: two recipes claiming one HW code are flagged by name — Auto would run the first and the second would silently never boot");
+
+    var problemList = MtkRecipeAudit.Problems(MtkRecipeAudit.Headers(new[] { peekMissing.Path, brokenRecipePath }));
+    Check(problemList.Any(p => p.Contains("da2.bin")) && problemList.Any(p => p.Contains("broken.json")),
+        "P2.0 COVERAGE: a missing image and an unreadable recipe are both reported before a phone is plugged in");
+
+    var verifyGood = MtkRecipeAudit.Verify(new[] { goodProfilePath });
+    Check(verifyGood.Count == 1 && verifyGood[0].Loaded && verifyGood[0].BromSteps == bootProfile.BromSteps.Count &&
+          verifyGood[0].DaSteps == bootProfile.DaSteps.Count && verifyGood[0].BlobBytes == 20,
+        "P2.0 COVERAGE: the offline audit runs the real gate — hash-verified blobs and both step counts, no phone needed");
+    Check(MtkRecipeAudit.VerifyLine(verifyGood[0]).Contains("hash-verified") &&
+          MtkRecipeAudit.VerifySummary(verifyGood) == "1 recipe(s) audited: 1 hash-verified, 0 refused",
+        "P2.0 COVERAGE: the audit prints what it proved in one row and one headline");
+
+    var verifySwapped = MtkRecipeAudit.Verify(new[]
+    {
+        FixturePath("swapped-da", Recipe(GoodBrom, GoodDa),
+            ("kamakiri.bin", kamakiri), ("da1.bin", da1), ("da2.bin", new byte[] { 0xAA, 0xA1, 0xA2, 0xA3 }))
+    });
+    Check(verifySwapped.Count == 1 && !verifySwapped[0].Loaded && verifySwapped[0].Problem.Contains("sha256") &&
+          MtkRecipeAudit.VerifyLine(verifySwapped[0]).Contains("refused"),
+        "P2.0 COVERAGE: a recipe whose image does not match its hash is refused by the offline audit with the message a boot would give");
+    var verifyBroken = MtkRecipeAudit.Verify(new[] { brokenRecipePath });
+    Check(verifyBroken.Count == 1 && !verifyBroken[0].Loaded && verifyBroken[0].Label == "broken.json" &&
+          MtkRecipeAudit.VerifySummary(verifyBroken).Contains("0 hash-verified, 1 refused"),
+        "P2.0 COVERAGE: an unreadable recipe is one refused row in the audit, not an exception that stops the run");
+
+    string unknownChip = MtkRecipeAudit.UnknownChipText(0x6768,
+        new[] { ("MT6765", (ushort)0x0766), ("MT6877", (ushort)0x0959) });
+    Check(unknownChip.Contains("HW 0x6768") && unknownChip.Contains("MT6765 on 0x0766") &&
+          unknownChip.Contains("MT6877 on 0x0959") && unknownChip.Contains("mtk\\boot-profiles") &&
+          unknownChip.Contains("Nothing chipset-specific was sent"),
+        "P2.0 COVERAGE: an unclaimed HW code names the code, the CPUs that are installed, where a recipe goes, and that the phone was not sprayed");
+    Check(MtkRecipeAudit.UnknownChipText(0x6768, Array.Empty<(string, ushort)>()).Contains("none installed"),
+        "P2.0 COVERAGE: with an empty tree the same refusal says none are installed instead of naming a CPU it does not have");
+
+    // ---- P2.1: what the next CPU still needs — loader packs joined against installed recipes ------------
+    // "Add other CPUs the same way" is two inputs: DA/EMI images (already on disk for two dozen chipsets) and one
+    // recorded boot per chipset (not on disk). This pins the join, so the tab names the next CPU and what it needs
+    // instead of the operator discovering it as a failed plug-in.
+    string packRoot = Path.Combine(dir, "mtk-loaders");
+    void Pack(string relative, string content = "x")
+    {
+        string path = Path.Combine(packRoot, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
+    Pack(Path.Combine("Huawei", "DA_PL_M6768_HONOR", "preloader.bin"));
+    Pack(Path.Combine("Huawei", "DA_PL_M6768_HONOR", "da.auth"));
+    Pack(Path.Combine("Vivo", "MT6833_DA1", "da1.bin"));
+    Pack(Path.Combine("Notes", "readme.txt"));
+    Pack(Path.Combine("Misc", "no-chipset-here.bin"));
+
+    var packs = MtkRecipeWorkshop.ScanPacks(packRoot);
+    Check(packs.Count == 2 && packs[0].Chipset == "MT6768" && packs[0].Images == 1 && packs[0].AuthFiles == 1 &&
+          packs[0].Files == 2 && packs[0].Folder.Contains("DA_PL_M6768_HONOR") &&
+          packs[1].Chipset == "MT6833" && packs[1].Images == 1 && packs[1].AuthFiles == 0,
+        "P2.1 NEXT CPU: the loader scan groups images by the chipset their path names, counts .bin and .auth separately, and skips files that name no chipset");
+    Check(MtkRecipeWorkshop.ScanPacks(Path.Combine(dir, "no-such-loaders")).Count == 0,
+        "P2.1 NEXT CPU: a missing loader root is an empty list, not an exception on tab build");
+
+    Check(MtkRecipeWorkshop.ChipsetToken(Path.Combine("Xiaomi", "MTK_AllInOne_DA_6761", "da.bin")) == "MT6761" &&
+          MtkRecipeWorkshop.ChipsetToken("Misc/no-chipset-here.bin") == "" &&
+          MtkRecipeWorkshop.ChipsetToken(Path.Combine("Oppo-Realme-OnePlus", "DA_BR_MT6765_20271", "x.bin")) == "MT6765",
+        "P2.1 NEXT CPU: the MT form is read from either spelling, and a bare model number is never mistaken for a chipset");
+    Check(MtkRecipeWorkshop.ChipsetToken(Path.Combine("Samsung", "MTK_AllInOne_DA-S96616AA1", "da.bin")) == "",
+        "P2.1 NEXT CPU: a model code inside an MTK_AllInOne folder name is not read as a chipset, so the queue cannot invent a CPU");
+
+    var packCovered = new[] { new MtkRecipeHeader("a", "MT6768", 0x0768, 1, 1, true, "") };
+    var missingPacks = MtkRecipeWorkshop.WithoutRecipe(packs, packCovered);
+    Check(missingPacks.Count == 1 && missingPacks[0].Chipset == "MT6833",
+        "P2.1 NEXT CPU: a chipset whose recipe is installed is not listed as missing, so the list only grows the queue");
+
+    string nextLine = MtkRecipeWorkshop.NextCpuLine(packs, packCovered);
+    Check(nextLine.StartsWith("1 CPU(s) have loader packs but no recipe yet: MT6833") &&
+          nextLine.Contains("next is MT6833 (1 file(s) under Vivo\\MT6833_DA1)") &&
+          nextLine.Contains("one recorded BROM-to-DA boot") && !nextLine.Contains(" \u2014 "),
+        "P2.1 NEXT CPU: one line names the CPUs that only lack a capture, which one is next, and the exact missing input (no em dash, so the screen keeps it whole)");
+
+    var covered = new[]
+    {
+        new MtkRecipeHeader("a", "MT6768", 0x0768, 1, 1, true, ""),
+        new MtkRecipeHeader("b", "MT6833", 0x6833, 1, 1, true, "")
+    };
+    Check(MtkRecipeWorkshop.NextCpuLine(packs, covered) == "every CPU with a loader pack (2) already has a recipe",
+        "P2.1 NEXT CPU: when every packed CPU is covered the line says so instead of printing an empty queue");
+    Check(MtkRecipeWorkshop.NextCpuLine(Array.Empty<MtkLoaderPack>(), covered).Contains("no loader pack is installed either"),
+        "P2.1 NEXT CPU: an empty pack tree names the other missing half instead of blaming the recipe");
+
+    for (int i = 0; i < 12; i++)
+        Pack(Path.Combine("Bulk", "MT68" + (10 + i).ToString("00"), "da.bin"));
+    var bulkPacks = MtkRecipeWorkshop.ScanPacks(packRoot);
+    string bulkLine = MtkRecipeWorkshop.NextCpuLine(bulkPacks, Array.Empty<MtkRecipeHeader>());
+    Check(bulkLine.StartsWith("14 CPU(s) have loader packs but no recipe yet: ") && bulkLine.Contains("+6 more"),
+        "P2.1 NEXT CPU: a long queue is capped and counts the rest, so the tab line stays one line");
+
+    // ---- P2.1: the two engines, one per-CPU table ----------------------------------------------------
+    // The standard engine picks a catalog DA by chipset; the native session replays a recipe. A phone on the bench
+    // needs both answers at once, and the table is what says which engine can serve this CPU today.
+    var coverage = MtkRecipeWorkshop.Coverage(packs, packCovered,
+        chip => chip == "MT6833" ? "Vivo\\MT6833_DA1 (name+code)" : "",
+        new[] { "MT6833" });
+    Check(coverage.Count == 2 && coverage[0].Chipset == "MT6768" && coverage[0].NativeRecipe && !coverage[0].EngineServed &&
+          !coverage[0].DedicatedPayload &&
+          coverage[1].Chipset == "MT6833" && !coverage[1].NativeRecipe && coverage[1].EngineServed &&
+          coverage[1].DedicatedPayload,
+        "P2.1 COVERAGE TABLE: each CPU carries both verdicts — a catalog loader for the MTK engine, whether a dedicated BROM payload exists, and whether a native recipe exists");
+    Check(MtkRecipeWorkshop.CoverageSummary(coverage) ==
+          "2 CPU(s): 1 served by the MTK engine (1 with a catalog DA, 1 with a dedicated BROM payload), 0 also have a native recipe, 0 with neither",
+        "P2.1 COVERAGE TABLE: the summary counts served, catalog DA, payload, both-engine and unserved CPUs separately");
+    Check(MtkRecipeWorkshop.CoverageSummary(MtkRecipeWorkshop.Coverage(packs, Array.Empty<MtkRecipeHeader>(), _ => "")) ==
+          "2 CPU(s): 0 served by the MTK engine (0 with a catalog DA, 0 with a dedicated BROM payload), 0 also have a native recipe, 2 with neither",
+        "P2.1 COVERAGE TABLE: a CPU with no loader, no payload and no recipe is counted as unserved instead of silently dropped");
+
+    string coverageMd = MtkRecipeWorkshop.CoverageMarkdown(coverage, "2026-11-07 12:00");
+    Check(coverageMd.Contains("| CPU | MTK engine") && coverageMd.Contains("| BROM payload |") &&
+          coverageMd.Contains("| MT6768 | no loader | generic fallback | yes |") &&
+          coverageMd.Contains("| MT6833 | Vivo\\MT6833_DA1 (name+code) | dedicated | no - needs one recorded boot |"),
+        "P2.1 COVERAGE TABLE: the markdown names the loader, the BROM payload and the native recipe per CPU, and a missing native recipe says what it needs");
+
+    // A chip mtkclient ships a dedicated payload for is served by the standard engine through its built-in DA
+    // even with no catalog loader and no recipe — the whole payload set must appear, not only the catalog subset.
+    var payloadOnly = MtkRecipeWorkshop.Coverage(packs, packCovered,
+        chip => chip == "MT6833" ? "Vivo\\MT6833_DA1 (name+code)" : "",
+        new[] { "MT6833", "MT6765" });
+    var pOnly = payloadOnly.SingleOrDefault(r => r.Chipset == "MT6765");
+    Check(payloadOnly.Count == 3 && pOnly != null && !pOnly.EngineServed && pOnly.DedicatedPayload && !pOnly.NativeRecipe,
+        "P2.1 COVERAGE TABLE: a dedicated-payload CPU with no catalog loader or recipe still gets a row, so the full mtkclient payload set is enumerated");
+    Check(pOnly != null && MtkRecipeWorkshop.CoverageMarkdown(new[] { pOnly }, "x").Contains("| MT6765 | mtkclient built-in DA | dedicated |"),
+        "P2.1 COVERAGE TABLE: a payload-only CPU is shown as served by mtkclient's built-in DA, not 'no loader'");
+    Check(MtkRecipeWorkshop.CoverageSummary(payloadOnly) ==
+          "3 CPU(s): 2 served by the MTK engine (1 with a catalog DA, 2 with a dedicated BROM payload), 0 also have a native recipe, 0 with neither",
+        "P2.1 COVERAGE TABLE: the summary counts a payload-only CPU as served by the MTK engine");
+    Check(!MtkRecipeWorkshop.HasDedicatedPayload("") && !MtkRecipeWorkshop.HasDedicatedPayload("not-a-chip") &&
+          !MtkRecipeWorkshop.HasDedicatedPayload("MT676"),
+        "P2.1 COVERAGE TABLE: the payload notice only answers for a well-formed MT#### token");
+
+    string payloadRoot = Path.Combine(dir, "mtk-payloads");
+    Directory.CreateDirectory(payloadRoot);
+    File.WriteAllText(Path.Combine(payloadRoot, "mt6739_payload.bin"), "x");
+    File.WriteAllText(Path.Combine(payloadRoot, "mt6833_payload.bin"), "x");
+    File.WriteAllText(Path.Combine(payloadRoot, "da_x.bin"), "x");
+    File.WriteAllText(Path.Combine(payloadRoot, "mt6765_payload.bin.bak"), "x");
+    var payloadsFound = MtkRecipeWorkshop.ScanPayloads(payloadRoot);
+    Check(payloadsFound.SequenceEqual(new[] { "MT6739", "MT6833" }) &&
+          MtkRecipeWorkshop.ScanPayloads(Path.Combine(dir, "no-payloads")).Count == 0,
+        "P2.1 COVERAGE TABLE: the BROM payload scan reads only chip-named payloads, so a chip with no dedicated exploit is not called supported");
+
+    var throwing = MtkRecipeWorkshop.Coverage(packs, Array.Empty<MtkRecipeHeader>(),
+        _ => throw new IOException("loader tree is unreadable"));
+    Check(throwing.Count == 2 && throwing.All(r => !r.EngineServed),
+        "P2.1 COVERAGE TABLE: an unreadable loader tree is an unserved cell, not an exception that stops the report");
 
     // ---- SPD FDL pairing: one folder must carry both halves (a mixed pair bricks the phone) ----
     string spdRoot = Path.Combine(dir, "spd-loaders");

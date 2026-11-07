@@ -195,6 +195,63 @@ internal sealed class MtkBootProfile
         return new MtkBootProfile(blobDirectory, chipset, hwCode, source, note, blobs, bromSteps, daSteps);
     }
 
+    /// <summary>
+    /// Read only the recipe's identity: chipset, HW code, the blob registry and whether every image it names is on
+    /// disk at the recorded size. No hash is taken here, because the recipe combo and the coverage line are built
+    /// while the operator is watching and a DA image is tens of megabytes. This is a listing aid, never a gate:
+    /// <see cref="Load"/> stays the one that hashes and refuses a boot.
+    /// </summary>
+    internal static MtkRecipeHeader Peek(string profilePath, string blobDirectory = null)
+    {
+        if (string.IsNullOrWhiteSpace(profilePath))
+            return new MtkRecipeHeader("", "", 0, 0, 0, false, "no recipe path was given");
+        string path = profilePath;
+        try { path = Path.GetFullPath(profilePath); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // A path that cannot be normalised is still a path the caller named; report it against what it gave us.
+        }
+        blobDirectory ??= Path.GetDirectoryName(path);
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            JsonElement root = doc.RootElement;
+            string chipset = ReadString(root, "chipset");
+            if (chipset.Length == 0)
+                return new MtkRecipeHeader(path, "", 0, 0, 0, false, "the chipset field is empty");
+            ushort hwCode = ParseU16(ReadString(root, "hwCode"), ChipsetLabel(chipset, "hwCode"));
+
+            int count = 0;
+            long bytes = 0;
+            string absent = "";
+            foreach (JsonElement b in Enumerate(root, "blobs"))
+            {
+                string file = ReadString(b, "file");
+                int size = ReadInt(b, "bytes");
+                count++;
+                bytes += size;
+                if (absent.Length > 0) continue;
+                string blobPath = Path.Combine(blobDirectory ?? "", file);
+                if (!File.Exists(blobPath))
+                    absent = file + " is not in " + (blobDirectory ?? "(no directory)");
+                else
+                {
+                    long onDisk = new FileInfo(blobPath).Length;
+                    if (onDisk != size)
+                        absent = file + " is " + onDisk + " B on disk but the recipe records " + size + " B";
+                }
+            }
+            if (count == 0)
+                return new MtkRecipeHeader(path, chipset, hwCode, 0, 0, false, "carries no blob registry");
+            return new MtkRecipeHeader(path, chipset, hwCode, count, bytes, absent.Length == 0, absent);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
+            InvalidDataException or FormatException or ArgumentException)
+        {
+            return new MtkRecipeHeader(path, "", 0, 0, 0, false, ex.Message);
+        }
+    }
+
     /// <summary>The image bytes for a registry entry, re-verified against the recorded hash on first use.</summary>
     internal byte[] GetBlob(string name)
     {

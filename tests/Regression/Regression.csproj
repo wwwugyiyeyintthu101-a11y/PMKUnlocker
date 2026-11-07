@@ -26,6 +26,10 @@
     <!-- P1.8: the ADB post-flash check — getprop parsing, the boot verdict, the masked IMEI and the poll loop.
          The ADB call is a delegate, so the whole wait is assertable without a phone. -->
     <Compile Include="../../PMKUnlocker/MediaTek/MtkPostFlashCheck.cs" Link="MediaTek/MtkPostFlashCheck.cs" />
+    <!-- P2.0: chipset coverage — recipe listing, the offline audit and the unknown-HW-code sentence. No phone. -->
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkRecipeAudit.cs" Link="MediaTek/MtkRecipeAudit.cs" />
+    <!-- P2.1: what the next CPU still needs — loader packs joined against installed recipes. No phone, no blobs. -->
+    <Compile Include="../../PMKUnlocker/MediaTek/MtkRecipeWorkshop.cs" Link="MediaTek/MtkRecipeWorkshop.cs" />
     <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
     <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
