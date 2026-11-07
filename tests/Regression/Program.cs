@@ -2,6 +2,7 @@ using PMKUnlocker;
 using PMKUnlocker.MediaTek;
 using PMKUnlocker.MtkFirmware;
 using PMKUnlocker.Qualcomm;
+using PMKUnlocker.Spreadtrum;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Formats.Tar;
@@ -4729,6 +4730,55 @@ try
         Check(cancelled,
             "P1.8 VERIFY BOOT: the operator's cancel aborts the wait instead of being swallowed as an adb timeout");
     }
+
+    // ---- SPD FDL pairing: one folder must carry both halves (a mixed pair bricks the phone) ----
+    string spdRoot = Path.Combine(dir, "spd-loaders");
+    string spdFull = Path.Combine(spdRoot, "sc9863a_Realme_C11");
+    string spdHalf1 = Path.Combine(spdRoot, "7731e_fdl1_only");
+    string spdHalf2 = Path.Combine(spdRoot, "9832e_fdl2_only");
+    string spdPlain = Path.Combine(spdRoot, "9820a_generic");
+    string spdNested = Path.Combine(spdRoot, "nested_only");
+    Directory.CreateDirectory(spdFull);
+    Directory.CreateDirectory(spdHalf1);
+    Directory.CreateDirectory(spdHalf2);
+    Directory.CreateDirectory(spdPlain);
+    Directory.CreateDirectory(Path.Combine(spdNested, "inner"));
+    foreach (string name in new[] { "fdl1-dl.bin", "fdl1-sign.bin", "fdl2-dl.bin", "fdl2-sign.bin" })
+        File.WriteAllText(Path.Combine(spdFull, name), "x");
+    File.WriteAllText(Path.Combine(spdHalf1, "fdl1.bin"), "x");
+    File.WriteAllText(Path.Combine(spdHalf1, "notes.txt"), "x");
+    File.WriteAllText(Path.Combine(spdHalf2, "fdl2.bin"), "x");
+    File.WriteAllText(Path.Combine(spdPlain, "fdl1.bin"), "x");
+    File.WriteAllText(Path.Combine(spdPlain, "fdl2.bin"), "x");
+    File.WriteAllText(Path.Combine(spdNested, "inner", "fdl1.bin"), "x");
+    File.WriteAllText(Path.Combine(spdNested, "inner", "fdl2.bin"), "x");
+
+    var paired = SpdLoaderPair.FromFolder(spdFull);
+    Check(paired != null && Path.GetFileName(paired.Fdl1) == "fdl1-sign.bin" &&
+          Path.GetFileName(paired.Fdl2) == "fdl2-sign.bin",
+        "SPD LOADER PAIR: a folder holding -sign and -dl copies yields the signed pair");
+    var plainPair = SpdLoaderPair.FromFolder(spdPlain);
+    Check(plainPair != null && Path.GetFileName(plainPair.Fdl1) == "fdl1.bin" &&
+          Path.GetFileName(plainPair.Fdl2) == "fdl2.bin",
+        "SPD LOADER PAIR: an unsigned-only folder still yields its own pair");
+    Check(SpdLoaderPair.FromFolder(spdHalf1) == null && SpdLoaderPair.FromFolder(spdHalf2) == null,
+        "SPD LOADER PAIR: a folder with only one half is refused instead of handing back half a pair");
+    Check(SpdLoaderPair.FromFolder(spdNested) == null,
+        "SPD LOADER PAIR: a pair buried in a subfolder does not count — only the folder's own files do");
+    Check(SpdLoaderPair.FromFolder(Path.Combine(dir, "no-such-loaders")) == null &&
+          SpdLoaderPair.FromFolder(null) == null && SpdLoaderPair.FromFolder("") == null,
+        "SPD LOADER PAIR: a missing or empty folder is null, not an exception");
+    var firstPair = SpdLoaderPair.FirstFromFolders(new[] { spdHalf1, spdHalf2, spdFull });
+    Check(firstPair != null && firstPair.Folder == spdFull,
+        "SPD LOADER PAIR: the scan skips FDL1-only and FDL2-only folders and takes the first complete pair");
+    Check(SpdLoaderPair.FirstFromFolders(new[] { spdHalf1, spdHalf2 }) == null &&
+          SpdLoaderPair.FirstFromFolders(Array.Empty<string>()) == null &&
+          SpdLoaderPair.FirstFromFolders(null) == null,
+        "SPD LOADER PAIR: two half-folders never add up to a pair (the old recursive scan stitched them)");
+    Check(SpdLoaderPair.SameFolder(Path.Combine(spdFull, "fdl1-sign.bin"), Path.Combine(spdFull, "FDL2-SIGN.BIN")) &&
+          !SpdLoaderPair.SameFolder(Path.Combine(spdFull, "fdl1-sign.bin"), Path.Combine(spdPlain, "fdl2.bin")) &&
+          !SpdLoaderPair.SameFolder("fdl1.bin", ""),
+        "SPD LOADER PAIR: the mixed-source warning fires only when the two halves really live in different folders");
 
     Console.WriteLine($"{passed} regression checks passed.");
 

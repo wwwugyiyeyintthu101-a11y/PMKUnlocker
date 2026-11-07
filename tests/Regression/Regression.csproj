@@ -40,5 +40,7 @@
     <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
     <Compile Include="../../PMKUnlocker/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
     <Compile Include="../../PMKUnlocker/Qualcomm/FirehoseIO.cs" Link="Qualcomm/FirehoseIO.cs" />
+    <!-- SPD FDL pairing — one folder must supply both halves, so an incomplete loader folder is assertable. -->
+    <Compile Include="../../PMKUnlocker/Spreadtrum/SpdLoaderPair.cs" Link="Spreadtrum/SpdLoaderPair.cs" />
   </ItemGroup>
 </Project>

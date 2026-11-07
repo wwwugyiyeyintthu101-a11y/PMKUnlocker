@@ -18,6 +18,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
 using PMKUnlocker.Qualcomm;
+using PMKUnlocker.Spreadtrum;
 
 namespace PMKUnlocker
 {
@@ -4873,46 +4874,47 @@ namespace PMKUnlocker
                         }
                     }
 
-                    // matched folder ထဲက fdl1/fdl2 ကို ရှာ — "-sign" ကို ဦးစွာယူ (secure boot device များအတွက်)
-                    if (!string.IsNullOrEmpty(matchedDir))
+                    // folder တစ်ခုတည်းက fdl1+fdl2 နှစ်ခုလုံး ရှိမှ ယူပါ — တစ်ဝက်ကို တခြား chipset
+                    // folder ကနေ ဖြည့်တာ မလုပ်တော့ပါ (မတူတဲ့ pair = SPD ဖုန်း brick)
+                    FdlPair pair = !string.IsNullOrEmpty(matchedDir) ? SpdLoaderPair.FromFolder(matchedDir) : null;
+                    if (pair == null)
                     {
-                        foreach (string file in Directory.GetFiles(matchedDir, "*.bin")
-                            .OrderByDescending(f => f.ToLowerInvariant().Contains("-sign")))
-                        {
-                            string n = Path.GetFileName(file).ToLowerInvariant();
-                            if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
-                            else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
-                        }
+                        List<string> others = Directory.GetDirectories(loadersRoot)
+                            .Where(d => !string.Equals(d, matchedDir, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        pair = SpdLoaderPair.FirstFromFolders(others);
+                        if (pair != null && !string.IsNullOrEmpty(matchedDir))
+                            Log("[!] No complete FDL pair in " + Path.GetFileName(matchedDir) +
+                                " — using " + Path.GetFileName(pair.Folder), Color.Orange);
                     }
-
-                    // ၄။ မတွေ့ရင် အကုန်ရှာ (fallback)
-                    if (string.IsNullOrEmpty(fdl1) || string.IsNullOrEmpty(fdl2))
+                    if (pair != null)
                     {
-                        foreach (string file in Directory.GetFiles(loadersRoot, "*.bin", SearchOption.AllDirectories))
-                        {
-                            string n = Path.GetFileName(file).ToLowerInvariant();
-                            if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
-                            else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
-                            if (!string.IsNullOrEmpty(fdl1) && !string.IsNullOrEmpty(fdl2)) break;
-                        }
+                        if (string.IsNullOrEmpty(fdl1)) fdl1 = pair.Fdl1;
+                        if (string.IsNullOrEmpty(fdl2)) fdl2 = pair.Fdl2;
                     }
                 }
             }
 
-            // ၃။ တိုက်ရိုက် spd folder ထဲတွင် ရှိနေပါက ထပ်မံရှာဖွေပါ
+            // ၃။ တိုက်ရိုက် spd folder ထဲတွင် ရှိနေပါက ထပ်မံရှာဖွေပါ (folder တစ်ခုတည်းက pair ကိုသာ)
             if (string.IsNullOrEmpty(fdl1) || string.IsNullOrEmpty(fdl2))
             {
                 string spdDir = Path.Combine(Application.StartupPath, "spd");
                 if (Directory.Exists(spdDir))
                 {
-                    foreach (string file in Directory.GetFiles(spdDir, "*.bin", SearchOption.AllDirectories))
+                    FdlPair pair = SpdLoaderPair.FromFolder(spdDir) ??
+                        SpdLoaderPair.FirstFromFolders(Directory.GetDirectories(spdDir)
+                            .Where(d => !string.Equals(Path.GetFileName(d), "loaders", StringComparison.OrdinalIgnoreCase)));
+                    if (pair != null)
                     {
-                        string n = Path.GetFileName(file).ToLowerInvariant();
-                        if (n.Contains("fdl1") && string.IsNullOrEmpty(fdl1)) fdl1 = file;
-                        else if (n.Contains("fdl2") && string.IsNullOrEmpty(fdl2)) fdl2 = file;
+                        if (string.IsNullOrEmpty(fdl1)) fdl1 = pair.Fdl1;
+                        if (string.IsNullOrEmpty(fdl2)) fdl2 = pair.Fdl2;
                     }
                 }
             }
+
+            if (!string.IsNullOrEmpty(fdl1) && !string.IsNullOrEmpty(fdl2) && !SpdLoaderPair.SameFolder(fdl1, fdl2))
+                Log("[!] FDL1 and FDL2 come from different folders (" + Path.GetFileName(fdl1) + " + " +
+                    Path.GetFileName(fdl2) + ") — a mismatched pair bricks an SPD phone", Color.Orange);
 
             ToolIntegrity.Verify(fdl1);
             ToolIntegrity.Verify(fdl2);
