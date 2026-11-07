@@ -1,40 +1,40 @@
 {
-    "schema":  1,
-    "bundledInventory":  {
-                             "path":  "PMKUnlocker/bundled-tools/integrity.json",
-                             "sha256":  "a47b7f26e3bdcb7096f24a7a232d87550febac077935e0889f3b270978cce477",
-                             "entries":  1565
-                         },
-    "libraries":  [
-                      {
-                          "path":  "PMKUnlocker/libs/potato/libusb-1.0.dll",
-                          "target":  "libusb-1.0.dll",
-                          "sha256":  "1269e6338da5ee738b4b4a24c091773a56559f0b515d002624e675e854c3ea3a",
-                          "versionStatus":  "Existing checked-in binary; upstream release and redistribution approval still require review"
-                      },
-                      {
-                          "path":  "PMKUnlocker/libs/potato/LibUsbDotNet.LibUsbDotNet.dll",
-                          "target":  "LibUsbDotNet.LibUsbDotNet.dll",
-                          "sha256":  "b6de87ff6fdde6d0a245ef37fe81fac49523c35115c61bc002e4935d99875508",
-                          "versionStatus":  "Existing checked-in binary; upstream release and redistribution approval still require review"
-                      },
-                      {
-                          "path":  "PMKUnlocker/libs/potato/Potato.Fastboot.dll",
-                          "target":  "Potato.Fastboot.dll",
-                          "sha256":  "00cf20e4d4bc5d822568637a10a87c7b06a62554b653394d57446ad461d8600f",
-                          "versionStatus":  "Existing checked-in binary; upstream release and redistribution approval still require review"
-                      },
-                      {
-                          "path":  "PMKUnlocker/libs/potato/Potato.ImageFlasher.dll",
-                          "target":  "Potato.ImageFlasher.dll",
-                          "sha256":  "b0e4ff754a5d1a1e281c5d94305b4dac0a7e5931e8e2532184ec8913c81ffa36",
-                          "versionStatus":  "Existing checked-in binary; upstream release and redistribution approval still require review"
-                      }
-                  ],
-    "optionalBackends":  {
-                             "mtkclient":  "Bundled local CLI 2.2.9 (bkerler/mtkclient @ ebe450da, 2026-08-16); files pinned in mtkclient-lock.json; reset path hardware-validated on MT6765 (2026-10-27, see the lock file's hardwareValidationNote)",
-                             "python":  "External, not bundled; supply a complete environment rather than python.exe alone",
-                             "edl.py":  "External, not bundled; dependencies and approved loader must be configured"
-                         },
-    "note":  "Locks the current file bytes, not device compatibility or redistribution permission. Update only after reviewing replacement source and licenses."
+  "schema": 1,
+  "bundledInventory": {
+    "path": "PMKUnlocker/bundled-tools/integrity.json",
+    "sha256": "9f6141d3f542d0e6bb9c1e50cb07e8efb42984582698faefbc1b040c54a738d2",
+    "entries": 1719
+  },
+  "libraries": [
+    {
+      "path": "PMKUnlocker/libs/potato/libusb-1.0.dll",
+      "target": "libusb-1.0.dll",
+      "sha256": "1269e6338da5ee738b4b4a24c091773a56559f0b515d002624e675e854c3ea3a",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/LibUsbDotNet.LibUsbDotNet.dll",
+      "target": "LibUsbDotNet.LibUsbDotNet.dll",
+      "sha256": "b6de87ff6fdde6d0a245ef37fe81fac49523c35115c61bc002e4935d99875508",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/Potato.Fastboot.dll",
+      "target": "Potato.Fastboot.dll",
+      "sha256": "00cf20e4d4bc5d822568637a10a87c7b06a62554b653394d57446ad461d8600f",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    },
+    {
+      "path": "PMKUnlocker/libs/potato/Potato.ImageFlasher.dll",
+      "target": "Potato.ImageFlasher.dll",
+      "sha256": "b0e4ff754a5d1a1e281c5d94305b4dac0a7e5931e8e2532184ec8913c81ffa36",
+      "versionStatus": "Existing checked-in binary; upstream release and redistribution approval still require review"
+    }
+  ],
+  "optionalBackends": {
+    "mtkclient": "Bundled local CLI 2.2.9 (bkerler/mtkclient @ ebe450da, 2026-08-16); files pinned in mtkclient-lock.json; reset path hardware-validated on MT6765 (2026-10-27, see the lock file's hardwareValidationNote)",
+    "python": "External, not bundled; supply a complete environment rather than python.exe alone",
+    "edl.py": "External, not bundled; dependencies and approved loader must be configured"
+  },
+  "note": "Locks the current file bytes, not device compatibility or redistribution permission. Update only after reviewing replacement source and licenses."
 }
