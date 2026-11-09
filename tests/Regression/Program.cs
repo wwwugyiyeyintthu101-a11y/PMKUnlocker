@@ -29,6 +29,14 @@ void Check(bool condition, string description)
     Console.WriteLine("PASS: " + description);
     passed++;
 }
+// A checkout without the (untracked) bundled tools can still run the byte-level suite in CI. The wired-catalog
+// checks stay mandatory by default; only PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS=1 turns their absence into a SKIP.
+int skipped = 0;
+void Skip(string description)
+{
+    Console.WriteLine("SKIP: " + description);
+    skipped++;
+}
 string dir = Path.Combine(Path.GetTempPath(), "pmk-regression-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(dir);
 try
@@ -100,98 +108,106 @@ try
         probe = Path.GetDirectoryName(probe);
     if (probe != null) projRoot = probe;
     Check(!string.IsNullOrEmpty(projRoot), "Project root resolved for wired catalog check");
-    var wired = MtkDaCatalog.Load(Path.Combine(projRoot, "PMKUnlocker", "pmk_mtk_devices.json"),
-        Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk", "loaders"));
-    Check(wired.ContainsKey("Lenovo") && wired.ContainsKey("Motorola") && wired.ContainsKey("Nothing") &&
-          wired.ContainsKey("Honor") && wired.ContainsKey("Doogee") && wired.ContainsKey("Itel"),
-        "Wired catalog adds Lenovo/Motorola/Nothing/Honor/Doogee/Itel brands");
-    Check(File.Exists(wired["Xiaomi"]["Redmi 9"].Da) && File.Exists(wired["Xiaomi"]["Redmi 9"].Auth) &&
-          File.Exists(wired["Xiaomi"]["Redmi 9"].Preloader), "Wired Redmi 9 has DA/auth/preloader files");
-    Check(wired["Motorola"]["G13+G23"].Da.EndsWith("da.bin", StringComparison.OrdinalIgnoreCase) &&
-          File.Exists(wired["Motorola"]["G13+G23"].Da), "Wired Motorola G13+G23 DA resolves to a file");
-    Check(wired["Lenovo"]["IdeaTab A7600-H"].Da.Length > 0 && wired["Lenovo"]["IdeaTab A7600-H"].Preloader.Length > 0 &&
-          wired["Lenovo"]["IdeaTab A7600-H"].Auth.Length == 0, "Wired Lenovo has DA+preloader but no auth");
-    Check(File.Exists(wired["Honor"]["Honor 200 Lite"].Da), "Wired Honor 200 Lite DA resolves to a file");
-    Check(File.Exists(wired["Vivo"]["iQOO Neo 7"].Da) && File.Exists(wired["Vivo"]["iQOO Neo 7"].Auth),
-        "Wired iQOO Neo 7 has DA+auth files");
-    int wiredModels = 0;
-    foreach (var b in wired.Values) foreach (var m in b.Values) if (m.Da.Length > 0) wiredModels++;
-    Check(wiredModels >= 51, "Wired catalog fills DA for all 51 umbrage+mtk-escape models");
-    Check(new[] { "Hot 11", "Hot 12", "Note 10", "Note 11" }.All(m => File.Exists(wired["Infinix"][m].Da)) &&
-          new[] { "Camon 17", "Camon 18" }.All(m => File.Exists(wired["Tecno"][m].Da)),
-        "Wired MT6769 models resolve a DA (Infinix Hot 11/12, Note 10/11, Tecno Camon 17/18)");
-    Check(File.ReadAllBytes(wired["Infinix"]["Hot 11"].Da)
-              .SequenceEqual(File.ReadAllBytes(wired["Motorola"]["G13+G23"].Da)),
-        "MT6769 model DAs reuse the chipset-level MT6769 download agent");
-    Check(File.Exists(wired["Samsung"]["A155F_BIT_5"].Auth) && File.Exists(wired["Samsung"]["SM-X115"].Auth) &&
-          File.Exists(wired["Lenovo"]["TB351FU"].Auth),
-        "Samsung/Lenovo MTK auth files resolve through the catalog");
-    Check(!wired["Xiaomi"].ContainsKey("Redmi Note 8") && !wired["Xiaomi"].ContainsKey("Redmi Note 10") &&
-          !wired["Xiaomi"].ContainsKey("Redmi Note 11") && !wired["Xiaomi"].ContainsKey("Poco X3") &&
-          !wired["Xiaomi"].ContainsKey("Poco M3") && !wired["Oppo"].ContainsKey("A74") &&
-          !wired["Oppo"].ContainsKey("F17") && !wired["Oppo"].ContainsKey("F19") &&
-          !wired["Samsung"].ContainsKey("Galaxy A02s") && !wired["Samsung"].ContainsKey("Galaxy A03"),
-        "QC/SPD stubs are no longer offered by the MTK catalog");
-    Check(new[] { "Spark 8", "Spark 9" }.All(m => File.Exists(wired["Tecno"][m].Da)) &&
-          new[] { "Y21", "Y30" }.All(m => File.Exists(wired["Vivo"][m].Da)) &&
-          File.Exists(wired["Samsung"]["Galaxy A12"].Da) && File.Exists(wired["Tecno"]["Spark 7"].Da),
-        "Wired MT6765/MT6761 models resolve a DA (Tecno Spark 7/8/9, Vivo Y21/Y30, Galaxy A12)");
-    Check(File.ReadAllBytes(wired["Vivo"]["Y21"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6765_2"].Da)),
-        "MT6765 model DAs reuse the chipset-level MediaTek AllInOne DA");
-    Check(!wired["Vivo"].ContainsKey("Y20"), "Vivo Y20 (Snapdragon 460) is no longer offered by the MTK catalog");
-    Check(File.Exists(wired["Vivo"]["Y12"].Da) && File.Exists(wired["Vivo"]["Y12"].Auth) &&
-          File.Exists(wired["Vivo"]["Y15"].Da) && File.Exists(wired["Vivo"]["Y15"].Auth),
-        "Wired MT6762 models (Vivo Y12/Y15) resolve DA+auth");
-    Check(File.ReadAllBytes(wired["Vivo"]["Y12"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6761_2"].Da)),
-        "MT6762 model DAs reuse the 0x6761 AllInOne download agent (upstream mtkclient maps MT6762 to dacode 0x6761)");
+    bool wiredTools = Directory.Exists(Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk", "loaders"));
+    if (!wiredTools && Environment.GetEnvironmentVariable("PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS") == "1")
+    {
+        Skip("wired MTK catalog checks (bundled-tools/mtk/loaders is not in the checkout)");
+    }
+    else
+    {
+        var wired = MtkDaCatalog.Load(Path.Combine(projRoot, "PMKUnlocker", "pmk_mtk_devices.json"),
+            Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk", "loaders"));
+        Check(wired.ContainsKey("Lenovo") && wired.ContainsKey("Motorola") && wired.ContainsKey("Nothing") &&
+              wired.ContainsKey("Honor") && wired.ContainsKey("Doogee") && wired.ContainsKey("Itel"),
+            "Wired catalog adds Lenovo/Motorola/Nothing/Honor/Doogee/Itel brands");
+        Check(File.Exists(wired["Xiaomi"]["Redmi 9"].Da) && File.Exists(wired["Xiaomi"]["Redmi 9"].Auth) &&
+              File.Exists(wired["Xiaomi"]["Redmi 9"].Preloader), "Wired Redmi 9 has DA/auth/preloader files");
+        Check(wired["Motorola"]["G13+G23"].Da.EndsWith("da.bin", StringComparison.OrdinalIgnoreCase) &&
+              File.Exists(wired["Motorola"]["G13+G23"].Da), "Wired Motorola G13+G23 DA resolves to a file");
+        Check(wired["Lenovo"]["IdeaTab A7600-H"].Da.Length > 0 && wired["Lenovo"]["IdeaTab A7600-H"].Preloader.Length > 0 &&
+              wired["Lenovo"]["IdeaTab A7600-H"].Auth.Length == 0, "Wired Lenovo has DA+preloader but no auth");
+        Check(File.Exists(wired["Honor"]["Honor 200 Lite"].Da), "Wired Honor 200 Lite DA resolves to a file");
+        Check(File.Exists(wired["Vivo"]["iQOO Neo 7"].Da) && File.Exists(wired["Vivo"]["iQOO Neo 7"].Auth),
+            "Wired iQOO Neo 7 has DA+auth files");
+        int wiredModels = 0;
+        foreach (var b in wired.Values) foreach (var m in b.Values) if (m.Da.Length > 0) wiredModels++;
+        Check(wiredModels >= 51, "Wired catalog fills DA for all 51 umbrage+mtk-escape models");
+        Check(new[] { "Hot 11", "Hot 12", "Note 10", "Note 11" }.All(m => File.Exists(wired["Infinix"][m].Da)) &&
+              new[] { "Camon 17", "Camon 18" }.All(m => File.Exists(wired["Tecno"][m].Da)),
+            "Wired MT6769 models resolve a DA (Infinix Hot 11/12, Note 10/11, Tecno Camon 17/18)");
+        Check(File.ReadAllBytes(wired["Infinix"]["Hot 11"].Da)
+                  .SequenceEqual(File.ReadAllBytes(wired["Motorola"]["G13+G23"].Da)),
+            "MT6769 model DAs reuse the chipset-level MT6769 download agent");
+        Check(File.Exists(wired["Samsung"]["A155F_BIT_5"].Auth) && File.Exists(wired["Samsung"]["SM-X115"].Auth) &&
+              File.Exists(wired["Lenovo"]["TB351FU"].Auth),
+            "Samsung/Lenovo MTK auth files resolve through the catalog");
+        Check(!wired["Xiaomi"].ContainsKey("Redmi Note 8") && !wired["Xiaomi"].ContainsKey("Redmi Note 10") &&
+              !wired["Xiaomi"].ContainsKey("Redmi Note 11") && !wired["Xiaomi"].ContainsKey("Poco X3") &&
+              !wired["Xiaomi"].ContainsKey("Poco M3") && !wired["Oppo"].ContainsKey("A74") &&
+              !wired["Oppo"].ContainsKey("F17") && !wired["Oppo"].ContainsKey("F19") &&
+              !wired["Samsung"].ContainsKey("Galaxy A02s") && !wired["Samsung"].ContainsKey("Galaxy A03"),
+            "QC/SPD stubs are no longer offered by the MTK catalog");
+        Check(new[] { "Spark 8", "Spark 9" }.All(m => File.Exists(wired["Tecno"][m].Da)) &&
+              new[] { "Y21", "Y30" }.All(m => File.Exists(wired["Vivo"][m].Da)) &&
+              File.Exists(wired["Samsung"]["Galaxy A12"].Da) && File.Exists(wired["Tecno"]["Spark 7"].Da),
+            "Wired MT6765/MT6761 models resolve a DA (Tecno Spark 7/8/9, Vivo Y21/Y30, Galaxy A12)");
+        Check(File.ReadAllBytes(wired["Vivo"]["Y21"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6765_2"].Da)),
+            "MT6765 model DAs reuse the chipset-level MediaTek AllInOne DA");
+        Check(!wired["Vivo"].ContainsKey("Y20"), "Vivo Y20 (Snapdragon 460) is no longer offered by the MTK catalog");
+        Check(File.Exists(wired["Vivo"]["Y12"].Da) && File.Exists(wired["Vivo"]["Y12"].Auth) &&
+              File.Exists(wired["Vivo"]["Y15"].Da) && File.Exists(wired["Vivo"]["Y15"].Auth),
+            "Wired MT6762 models (Vivo Y12/Y15) resolve DA+auth");
+        Check(File.ReadAllBytes(wired["Vivo"]["Y12"].Da).SequenceEqual(File.ReadAllBytes(wired["Infinix"]["MT6761_2"].Da)),
+            "MT6762 model DAs reuse the 0x6761 AllInOne download agent (upstream mtkclient maps MT6762 to dacode 0x6761)");
 
-    // ---- MTK loader auto-detect (chipset reported by BROM/Preloader → catalog DA/auth) ----
-    string mtkBase = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk");
-    Check(MtkDaCatalog.PrimaryChipset("MT6765/MT8768t(Helio P35/G35)") == "MT6765",
-        "Chipset token is the first MT#### of the mtkclient CPU line");
-    Check(MtkDaCatalog.PrimaryChipset("Helio G35 · eMMC CJTD4R") == "",
-        "Marketing-only text yields no chipset token");
-    Check(MtkDaCatalog.ChipsetFromPayloadLines(new[] { "Preloader - boot rom code", "PLTools - Successfully sent payload: C:\\mtkclient\\payloads\\mt6765_payload.bin" }) == "MT6765",
-        "Accepted payload filename is the fallback chipset signal");
-    Check(MtkDaCatalog.PrimaryChipset("MT6765") == "MT6765" && MtkDaCatalog.PrimaryChipset("mt6765") == "MT6765" &&
-          MtkDaCatalog.PrimaryChipset("MediaTek MT6873") == "MT6873",
-        "ADB ro.soc.model / ro.board.platform tokens resolve the same way as the BROM CPU line");
-    Check(MtkDaCatalog.PrimaryChipset("Qualcomm SM6125") == "" && MtkDaCatalog.PrimaryChipset("Helio G85") == "",
-        "Non-MediaTek and marketing-only prop text yields no chipset token for the DA catalog");
-    var fam62 = MtkDaCatalog.ChipsetCandidates("mt6762");
-    Check(fam62.Count == 2 && fam62[0] == "MT6762" && fam62[1] == "MT6761",
-        "Chipset candidates list the device chip first, then its proven shared-DA family");
-    Check(MtkDaCatalog.ReadDaChipCode(wired["Vivo"]["Y12"].Da) == 0x6761,
-        "DA blob chip code is read from the MTK_DOWNLOAD_AGENT header (LE u16 at 0x6E)");
-    Check(MtkDaCatalog.ReadDaChipCode(Path.Combine(dir, "no-such-da.bin")) == -1,
-        "Missing or non-DA file yields no chip code");
-    var auto6765 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765");
-    Check(auto6765 != null && File.Exists(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)),
-        "MT6765 auto-resolves to a catalog loader that exists on disk");
-    Check(auto6765 != null && (MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765" ||
-          MtkDaCatalog.ReadDaChipCode(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)) == 0x6765),
-        "The MT6765 loader match is justified by the folder token or the DA's own chip code");
-    Check(auto6765 != null && MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Brand == auto6765.Brand &&
-          MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Model == auto6765.Model,
-        "Chipset resolution is deterministic across runs");
-    Check(auto6765 != null && MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765",
-        "Chipset-keyed loader folders outrank model-named folders carrying the same DA code");
-    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6762") != null,
-        "MT6762 resolves through the 0x6761 family alias");
-    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6769") != null,
-        "MT6769 resolves through the 0x6768 family alias");
-    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6893") != null &&
-          MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991") != null,
-        "Chipsets whose loaders are only folder-named (DAv5/AllInOne v6) still resolve");
-    Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT9999") == null &&
-          MtkDaCatalog.FindByChipset(wired, mtkBase, "") == null &&
-          MtkDaCatalog.FindByChipset(null, mtkBase, "MT6765") == null,
-        "Unknown, empty or missing catalog input yields no loader match instead of a guess");
-    var auto6991 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991");
-    Check(auto6991 != null && !MtkDaCatalog.DaMatchesChipset(auto6991.Model, MtkDaCatalog.Resolve(auto6991.Info.Da, mtkBase), "MT6765"),
-        "A wrong-chipset manual loader is detected as a mismatch");
-    Check(auto6765 != null && MtkDaCatalog.DaMatchesChipset(auto6765.Model, MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase), "MT6765"),
-        "The resolved loader passes the manual-override sanity check for its own chipset");
+        // ---- MTK loader auto-detect (chipset reported by BROM/Preloader → catalog DA/auth) ----
+        string mtkBase = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "mtk");
+        Check(MtkDaCatalog.PrimaryChipset("MT6765/MT8768t(Helio P35/G35)") == "MT6765",
+            "Chipset token is the first MT#### of the mtkclient CPU line");
+        Check(MtkDaCatalog.PrimaryChipset("Helio G35 · eMMC CJTD4R") == "",
+            "Marketing-only text yields no chipset token");
+        Check(MtkDaCatalog.ChipsetFromPayloadLines(new[] { "Preloader - boot rom code", "PLTools - Successfully sent payload: C:\\mtkclient\\payloads\\mt6765_payload.bin" }) == "MT6765",
+            "Accepted payload filename is the fallback chipset signal");
+        Check(MtkDaCatalog.PrimaryChipset("MT6765") == "MT6765" && MtkDaCatalog.PrimaryChipset("mt6765") == "MT6765" &&
+              MtkDaCatalog.PrimaryChipset("MediaTek MT6873") == "MT6873",
+            "ADB ro.soc.model / ro.board.platform tokens resolve the same way as the BROM CPU line");
+        Check(MtkDaCatalog.PrimaryChipset("Qualcomm SM6125") == "" && MtkDaCatalog.PrimaryChipset("Helio G85") == "",
+            "Non-MediaTek and marketing-only prop text yields no chipset token for the DA catalog");
+        var fam62 = MtkDaCatalog.ChipsetCandidates("mt6762");
+        Check(fam62.Count == 2 && fam62[0] == "MT6762" && fam62[1] == "MT6761",
+            "Chipset candidates list the device chip first, then its proven shared-DA family");
+        Check(MtkDaCatalog.ReadDaChipCode(wired["Vivo"]["Y12"].Da) == 0x6761,
+            "DA blob chip code is read from the MTK_DOWNLOAD_AGENT header (LE u16 at 0x6E)");
+        Check(MtkDaCatalog.ReadDaChipCode(Path.Combine(dir, "no-such-da.bin")) == -1,
+            "Missing or non-DA file yields no chip code");
+        var auto6765 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765");
+        Check(auto6765 != null && File.Exists(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)),
+            "MT6765 auto-resolves to a catalog loader that exists on disk");
+        Check(auto6765 != null && (MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765" ||
+              MtkDaCatalog.ReadDaChipCode(MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase)) == 0x6765),
+            "The MT6765 loader match is justified by the folder token or the DA's own chip code");
+        Check(auto6765 != null && MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Brand == auto6765.Brand &&
+              MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6765")!.Model == auto6765.Model,
+            "Chipset resolution is deterministic across runs");
+        Check(auto6765 != null && MtkDaCatalog.PrimaryChipset(auto6765.Model) == "MT6765",
+            "Chipset-keyed loader folders outrank model-named folders carrying the same DA code");
+        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6762") != null,
+            "MT6762 resolves through the 0x6761 family alias");
+        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6769") != null,
+            "MT6769 resolves through the 0x6768 family alias");
+        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6893") != null &&
+              MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991") != null,
+            "Chipsets whose loaders are only folder-named (DAv5/AllInOne v6) still resolve");
+        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT9999") == null &&
+              MtkDaCatalog.FindByChipset(wired, mtkBase, "") == null &&
+              MtkDaCatalog.FindByChipset(null, mtkBase, "MT6765") == null,
+            "Unknown, empty or missing catalog input yields no loader match instead of a guess");
+        var auto6991 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991");
+        Check(auto6991 != null && !MtkDaCatalog.DaMatchesChipset(auto6991.Model, MtkDaCatalog.Resolve(auto6991.Info.Da, mtkBase), "MT6765"),
+            "A wrong-chipset manual loader is detected as a mismatch");
+        Check(auto6765 != null && MtkDaCatalog.DaMatchesChipset(auto6765.Model, MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase), "MT6765"),
+            "The resolved loader passes the manual-override sanity check for its own chipset");
+    }
 
     string backupDir = Path.Combine(dir, "verified-backup"); Directory.CreateDirectory(backupDir);
     var layout = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { ["nvram"] = 16, ["boot"] = 4096 };
@@ -538,10 +554,18 @@ try
           KernelExploit.PatchedFirmwareNote(Path.Combine(dir, "pk-none"), "5.15.1") == null,
         "Patched-firmware note is null for another release, an empty kernel and a missing list");
     string shippedExploits = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "exploits");
-    Check(File.Exists(Path.Combine(shippedExploits, "patched-kernels.txt")) &&
-          (KernelExploit.PatchedFirmwareNote(shippedExploits,
-              "5.15.194-android13-8-00038-g853eb7b6b965-ab15936612") ?? "").Contains("remove_waiter"),
-        "Shipped patched-kernels.txt flags the bench firmware 5.15.194 with a remove_waiter() reason");
+    if (!File.Exists(Path.Combine(shippedExploits, "patched-kernels.txt")) &&
+        Environment.GetEnvironmentVariable("PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS") == "1")
+    {
+        Skip("shipped patched-kernels.txt check (bundled-tools is not in the checkout)");
+    }
+    else
+    {
+        Check(File.Exists(Path.Combine(shippedExploits, "patched-kernels.txt")) &&
+              (KernelExploit.PatchedFirmwareNote(shippedExploits,
+                  "5.15.194-android13-8-00038-g853eb7b6b965-ab15936612") ?? "").Contains("remove_waiter"),
+            "Shipped patched-kernels.txt flags the bench firmware 5.15.194 with a remove_waiter() reason");
+    }
 
     // Route success claim — separates a refused route from a write the route acknowledged but never landed
     Check(KernelExploit.RouteClaimedWrite("[route] route_done status=0 clean=1/1 step=0 errno=0 calls=1 success=1") &&
@@ -5233,6 +5257,7 @@ try
         "SPD LOADER PAIR: the mixed-source warning fires only when the two halves really live in different folders");
 
     Console.WriteLine($"{passed} regression checks passed.");
+    if (skipped > 0) Console.WriteLine($"{skipped} checks skipped (bundled tools not in this checkout).");
 
 
 }

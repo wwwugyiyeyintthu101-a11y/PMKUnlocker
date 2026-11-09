@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # bundled-tools/ and tools/ are intentionally untracked (1.3 GB). CI still runs the byte-level
+  # suite; only the checks that read those on-disk assets are SKIPped, and they stay mandatory
+  # everywhere the assets are present.
+  PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS: "1"
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: |
+          dotnet restore tests/Regression/Regression.csproj
+          dotnet restore PMKLicenseServer/PMKLicenseServer.csproj
+          dotnet restore PMKLicenseAdmin/PMKLicenseAdmin.csproj
+          dotnet restore PMKUnlocker/PMKUnlocker.csproj
+
+      - name: Build license server
+        run: dotnet build PMKLicenseServer/PMKLicenseServer.csproj -c Debug --no-restore
+
+      - name: Build license admin
+        run: dotnet build PMKLicenseAdmin/PMKLicenseAdmin.csproj -c Debug --no-restore
+
+      # Compile-only: the normal Build target also writes the runtime integrity manifest, which
+      # requires the untracked bundled tools. Those are verified by release builds on the dev machine.
+      - name: Compile desktop app
+        run: dotnet build PMKUnlocker/PMKUnlocker.csproj -c Debug -t:Compile --no-restore
+
+      - name: Regression checks
+        run: dotnet run --project tests/Regression/Regression.csproj -c Debug --no-restore

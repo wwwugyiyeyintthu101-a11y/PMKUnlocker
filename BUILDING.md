@@ -22,6 +22,15 @@ approved tool inventory when cloning; do not replace missing tools with an empty
 manifest. The per-process PowerShell execution setting in the build does not
 change machine-wide execution policy.
 
+## CI
+
+`.github/workflows/ci.yml` restores everything, builds the license server and admin,
+compiles the desktop app with `-t:Compile` (the full Build target writes the runtime
+integrity manifest and therefore needs the untracked bundled tools), and runs the
+regression suite. Since `bundled-tools/` and `tools/` are not tracked, CI sets
+`PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS=1`: only the checks that read those on-disk
+assets report SKIP there, and they stay mandatory on a machine that has them.
+
 MTK native recipes (`mtk/boot-profiles` next to the exe) are PMK's own DA/EMI
 artefacts: they are not tracked and not shipped, and without them the NATIVE tab
 is deliberately absent. Keep the master copy at
