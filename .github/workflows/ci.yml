@@ -63,12 +63,21 @@ jobs:
       - name: Integrity guard fails closed without the tool inventory
         shell: pwsh
         run: |
-          $manifest = 'PMKUnlocker/bin/Debug/net8.0-windows/integrity.json'
-          $out = & dotnet build PMKUnlocker/PMKUnlocker.csproj -c Debug --no-restore 2>&1 | Out-String
-          if ($LASTEXITCODE -eq 0) { throw 'Default build succeeded without bundled tools: the integrity guard is not fail-closed' }
-          if ($out -notmatch 'Missing bundled integrity inventory') { throw "Default build failed for an unexpected reason:`n$out" }
-          if (Test-Path -LiteralPath $manifest) { throw 'A failed build still wrote integrity.json' }
+          $tmp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+          $outFile = Join-Path $tmp 'pmk-default-build.out'
+          $errFile = Join-Path $tmp 'pmk-default-build.err'
+          # Start-Process keeps the expected non-zero exit out of the step's own $LASTEXITCODE, which the
+          # pwsh wrapper would otherwise adopt as the step result.
+          $p = Start-Process -FilePath 'dotnet' `
+            -ArgumentList 'build','PMKUnlocker/PMKUnlocker.csproj','-c','Debug','--no-restore' `
+            -RedirectStandardOutput $outFile -RedirectStandardError $errFile -NoNewWindow -Wait -PassThru
+          $log = (Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue) +
+                 (Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)
+          if ($p.ExitCode -eq 0) { throw 'Default build succeeded without bundled tools: the integrity guard is not fail-closed' }
+          if ($log -notmatch 'Missing bundled integrity inventory') { throw "Default build failed for an unexpected reason:`n$log" }
+          if (Test-Path -LiteralPath 'PMKUnlocker/bin/Debug/net8.0-windows/integrity.json') { throw 'A failed build still wrote integrity.json' }
           Write-Host 'Default build failed closed on the missing tool inventory, with no manifest written.'
+          exit 0
 
       - name: Regression checks
         run: dotnet run --project tests/Regression/Regression.csproj -c Debug --no-restore
