@@ -4,6 +4,7 @@ namespace PMKUnlocker;
 // PMK-style login — polished purple card design
 public class LoginForm : Form
 {
+    private const string PasswordPlaceholder = "Password";
     private TextBox txtEmail;
     private TextBox txtPassword;
     private CheckBox chkRemember;
@@ -378,8 +379,10 @@ public class LoginForm : Form
             ForeColor = Color.FromArgb(158, 164, 196),
             Font = FLbl
         };
-        txtPassword = MakeField(left, 210, fieldW - 78, 42, "••••••••", out var passWrap);
-        txtPassword.UseSystemPasswordChar = true;
+        txtPassword = MakeField(left, 210, fieldW - 78, 42, PasswordPlaceholder, out var passWrap);
+        // Placeholder ကို ဖတ်နိုင်အောင် ထားမယ် — စာရိုက်တာနဲ့ mask ပြန်တပ် (dots ကို သိမ်းထားတဲ့
+        // password လို့ မထင်ရအောင်)
+        txtPassword.UseSystemPasswordChar = false;
 
         var chkShow = new CheckBox
         {
@@ -391,7 +394,12 @@ public class LoginForm : Form
             Cursor = Cursors.Hand
         };
         chkShow.CheckedChanged += (_, _) =>
+            txtPassword.UseSystemPasswordChar = !chkShow.Checked && txtPassword.Text != PasswordPlaceholder;
+        // MakeField က placeholder ကို focus မှာ ရှင်းပြီး blur မှာ ပြန်ထည့်တယ် — အဲဒီနောက်မှ mask ချိန်
+        txtPassword.GotFocus += (_, _) =>
             txtPassword.UseSystemPasswordChar = !chkShow.Checked;
+        txtPassword.LostFocus += (_, _) =>
+            txtPassword.UseSystemPasswordChar = !chkShow.Checked && txtPassword.Text != PasswordPlaceholder;
 
         chkRemember = new CheckBox
         {
@@ -526,6 +534,7 @@ public class LoginForm : Form
             {
                 // password blob — prefill (auto-login မရှိ — Login နှိပ်မှ ဝင်ရ)
                 txtPassword.Text = savedSecret;
+                txtPassword.UseSystemPasswordChar = true;
                 chkRemember.Checked = true;
             }
         }
@@ -733,7 +742,7 @@ public class LoginForm : Form
             var work = Task.Run(async () =>
             {
                 string email = txtEmail.Text.Trim();
-                string pw = txtPassword.Text;
+                string pw = txtPassword.Text == PasswordPlaceholder ? "" : txtPassword.Text;
 
                 if (registerMode)
                 {
