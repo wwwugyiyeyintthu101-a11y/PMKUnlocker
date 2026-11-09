@@ -41,17 +41,56 @@ namespace PMKUnlocker
             EnsureLicenseServer();
             StartupMark("license server gate passed");
 
-            // PMK-style login gate — every launch shows login; Cancel/✕ ဆို app မဖွင့်ဘဲ ထွက်
+            // PMK-style login gate — remember-me token ရှိရင် အရင်ကြိုးစား၊ မရမှ login screen ပြ
+            // (password ကို ဘယ်တော့မှ မသိမ်းဘူး — DPAPI-encrypted server token ပဲ ရှိတယ်)
             string licEmail = "", licPlan = "", licExp = "";
             int licDays = 0;
-            using (var login = new LoginForm())
+            bool signedIn = false;
+            if (LocalLogin.TryRemembered(out string rememberedEmail, out _, out bool rememberedIsToken) && rememberedIsToken)
             {
-                StartupMark("login UI tree built");
-                if (login.ShowDialog() != DialogResult.OK) return;
-                licEmail = login.LoginEmail;
-                licPlan = login.LoginPlan;
-                licExp = login.LoginExpiresAt;
-                licDays = login.LoginDaysLeft;
+                try
+                {
+                    // server နှေးရင် 5s ပဲ စောင့် — မရမှ login screen (login form က email ကို prefill လုပ်မယ်)
+                    var auto = Task.Run(() => LicenseClient.TryAutoLoginAsync());
+                    if (auto.Wait(TimeSpan.FromSeconds(5)) && auto.Result.Ok)
+                    {
+                        signedIn = true;
+                        licEmail = rememberedEmail;
+                        licPlan = auto.Result.Plan;
+                        licExp = auto.Result.ExpiresAt;
+                        licDays = auto.Result.DaysLeft;
+                        StartupMark("token auto-login ok");
+                    }
+                    else StartupMark("token auto-login not accepted");
+                }
+                catch (Exception ex) { StartupMark("token auto-login error " + ex.GetType().Name); }
+            }
+
+            if (!signedIn)
+            {
+                using (var login = new LoginForm())
+                {
+                    StartupMark("login UI tree built");
+                    if (login.ShowDialog() != DialogResult.OK) return;
+                    licEmail = login.LoginEmail;
+                    licPlan = login.LoginPlan;
+                    licExp = login.LoginExpiresAt;
+                    licDays = login.LoginDaysLeft;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(UpdateChecker.Repo))
+            {
+                // token auto-login က login screen ကို ကျော်တာမို့ update gate ကို ဒီမှာ ဖြတ်
+                // (login form လမ်းကြောင်းဆို gate ကို login form ထဲမှာ ဖြတ်ပြီးသား)
+                using var gateUi = new UpdateProgressForm();
+                gateUi.Shown += async (_, _) =>
+                {
+                    await UpdateChecker.EnforceGateAsync(gateUi, gateUi.SetStatus, gateUi.SetProgress);
+                    gateUi.DialogResult = DialogResult.OK;
+                    gateUi.Close();
+                };
+                if (gateUi.ShowDialog() != DialogResult.OK) return;
+                StartupMark("update gate passed");
             }
 
             Form1 main = new Form1(licEmail, licPlan, licExp, licDays);

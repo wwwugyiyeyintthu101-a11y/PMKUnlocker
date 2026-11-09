@@ -527,7 +527,7 @@ public class LoginForm : Form
             if (!string.IsNullOrEmpty(saved)) txtEmail.Text = saved;
             if (savedIsToken)
             {
-                // token mode — password မသိမ်းတော့ (auto-login ပိတ်ထား — Login နှိပ်မှ ဝင်ရ)
+                // token mode — startup မှာ auto-login ကြိုးစားပြီး မရမှ ဒီ screen ရောက်တာ (password မသိမ်းထား)
                 chkRemember.Checked = true;
             }
             else if (!string.IsNullOrEmpty(savedSecret))
@@ -826,72 +826,30 @@ public class LoginForm : Form
     }
 
     // ===== LOGIN UPDATE GATE =====
-    // update ရှိ → update လုပ်ရမယ် (No နှိပ်ရင် app ပိတ်); check fail/offline → continue (warning);
-    // နောက်ဆုံး version ဆို Form1 ဝင်ခွင့်ပေး → true
+    // gate logic က UpdateChecker.EnforceGateAsync (token auto-login လမ်းကြောင်းနဲ့ shared) —
+    // ဒီမှာ status label / progress bar UI ကိုပဲ ချိတ်တယ်
     private async Task<bool> EnforceUpdateGateAsync()
     {
-        UpdateInfo info;
-        try
-        {
-            lblStatus.ForeColor = TextMuted;
-            lblStatus.Text = "Checking for updates...";
-            info = await UpdateChecker.AwaitCheckForGateAsync(25000);
-        }
-        catch (Exception ex)
-        {
-            // offline / GitHub timeout — update check မအောင်လို့ tool ကို မပိတ်တော့
-            // (customer network မကောင်းရင် အသုံးမပြုနိုင်တာ ကို ရှောင်) — update available
-            // ကိုတော့ check ပြီးမှပဲ gate ဝင်တယ်, check fail = continue offline
-            lblStatus.ForeColor = Danger;
-            lblStatus.Text = "Update check failed (offline?) — continuing";
-            MessageBox.Show(this,
-                "Update check failed:\n" + ex.Message + "\n\nContinuing without update verification.",
-                "Update check", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return true;
-        }
-        if (info == null) return true;   // နောက်ဆုံး version (သို့) update source off
-
-        DialogResult r = MessageBox.Show(this,
-            "A new version (v" + info.Version + ") is required.  (current: v" + UpdateChecker.CurrentVersion + ")\n\n" +
-            (string.IsNullOrWhiteSpace(info.Notes) ? "" : info.Notes + "\n\n") +
-            "Download and install now?\nClick No to exit the tool.",
-            "Update required", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-        if (r != DialogResult.Yes)
-        {
-            Environment.Exit(0);
-            return false;
-        }
-
         string oldTitle = Text;
-        try
-        {
-            // download progress — status bar + progress bar + title မှာ ရာခိုင်နှုန်းပြ
-            updBar.Value = 0;
-            updBar.Width = 150;
-            updBar.Visible = true;
-            lblStatus.ForeColor = Accent;
-            lblStatus.Text = "Downloading update... 0%";
-            string setup = await UpdateChecker.DownloadAsync(info, pct =>
+        return await UpdateChecker.EnforceGateAsync(this,
+            (phase, text) =>
             {
-                Text = "Downloading update... " + pct + "%";
-                lblStatus.Text = "Downloading update... " + pct + "%";
+                lblStatus.ForeColor = phase switch
+                {
+                    GatePhase.CheckFailed => Danger,
+                    GatePhase.Downloading => Accent,
+                    GatePhase.Verified => Success,
+                    _ => TextMuted
+                };
+                lblStatus.Text = text;
+                Text = phase is GatePhase.Downloading or GatePhase.Verified ? text : oldTitle;
+            },
+            pct =>
+            {
+                updBar.Width = 150;
+                updBar.Visible = true;
                 if (pct > updBar.Value && pct <= 100) updBar.Value = pct;
             });
-            lblStatus.ForeColor = Success;
-            lblStatus.Text = "SHA-256 verified — installing update...";
-            updBar.Value = 100;
-            UpdateChecker.StartInstallAndExit(setup, info.Sha256.Trim());
-            Environment.Exit(0);
-        }
-        catch (Exception ex)
-        {
-            Text = oldTitle;
-            MessageBox.Show(this, "Update download failed:\n" + ex.Message + "\n\n" +
-                "The tool will close — relaunch to try again.",
-                "Update required", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Environment.Exit(0);
-        }
-        return false;
     }
 
     // login OK → Form1 ကိုပြဖို့ fields ဖြည့်
