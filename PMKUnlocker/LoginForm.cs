@@ -792,9 +792,9 @@ public class LoginForm : Form
             }
 
             string email2 = txtEmail.Text.Trim();
-            // Remember me → password ကို DPAPI နဲ့ သိမ်း (next launch မှာ prefill — Login နှိပ်ရုံ)
-            if (chkRemember.Checked)
-                LocalLogin.SaveRemembered(email2, txtPassword.Text);
+            // Remember me → server auto-login token ကိုပဲ DPAPI နဲ့ သိမ်း (password မသိမ်းရ)
+            if (chkRemember.Checked && !string.IsNullOrEmpty(loginRes.AutoToken))
+                LocalLogin.SaveRememberedToken(email2, loginRes.AutoToken);
             else LocalLogin.ClearRemembered();
 
             CompleteLogin(email2, loginRes);
