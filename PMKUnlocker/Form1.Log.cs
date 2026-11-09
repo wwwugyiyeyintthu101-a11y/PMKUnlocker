@@ -111,6 +111,16 @@ namespace PMKUnlocker
             try { toolTipMain.SetToolTip(control, text); } catch { }
         }
 
+        // Consolas မှာ char အရေအတွက် → pixel (hanging indent က pixel ယူတယ်)
+        private int LogIndentPx(int chars) =>
+            TextRenderer.MeasureText(new string('0', Math.Max(chars, 1)), rtbLog.Font).Width;
+
+        // နောက်ဆုံးမှာ လိုင်းအလွတ် ရှိပြီးသားလား (block တွေ ကပ်မနေရ)
+        private static bool EndsWithBlankLine(string text) =>
+            text.EndsWith("\n\n", StringComparison.Ordinal) ||
+            text.EndsWith("\r\n\r\n", StringComparison.Ordinal) ||
+            text.EndsWith("\n\r\n", StringComparison.Ordinal);
+
         private void Log(string message, Color? color = null)
         {
             // form/log box ပိတ်ပြီးသား သို့ handle မတည်ရသေးရင် thread-pool
@@ -126,25 +136,42 @@ namespace PMKUnlocker
 
                 rtbLog.SelectionStart = rtbLog.TextLength;
                 rtbLog.SelectionLength = 0;
-                AppendLogTimestamp(message);
-                rtbLog.SelectionColor = color ?? Color.FromArgb(0, 255, 128);
-
-                rtbLog.AppendText(message + "\r\n");
+                Color body = color ?? Color.FromArgb(0, 255, 128);
+                // ရှည်တဲ့စာကြောင်း ကွေးကျတဲ့အခါ ဒုတိယစာကြောင်းတွေကို စာသားစတဲ့နေရာအောက် တည့်တည့်ချ
+                // (Paragraph indent က တစ်ကြောင်းချင်းပဲ သက်ရောက်လို့ line တစ်ကြောင်းချင်း ထည့်တယ်)
+                string[] lines = (message ?? "").Replace("\r\n", "\n").Split('\n');
+                bool block = lines.Length > 1;
+                if (block && rtbLog.TextLength > 0 && !EndsWithBlankLine(rtbLog.Text))
+                    rtbLog.AppendText("\r\n");   // block စမယ့် အပေါ်မှာ လိုင်းအလွတ် ခြား
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i];
+                    int lead = line.Length - line.TrimStart(' ').Length;
+                    // ခေါင်းစဉ် ပြီးနောက် အသေးစိတ်လိုင်းတွေကို ခပ်မှိန်မှိန် — block တစ်ခုကို အလျင်အမြန် ဖတ်ရအောင်
+                    Color lineColor = block && i > 0
+                        ? Color.FromArgb(body.R * 85 / 100, body.G * 85 / 100, body.B * 85 / 100)
+                        : body;
+                    rtbLog.SelectionHangingIndent = LogIndentPx(line.StartsWith("  * ") ? lead + 2 : Math.Max(lead, 2));
+                    if (line.StartsWith("  * "))
+                    {
+                        rtbLog.SelectionColor = Color.FromArgb(110, 128, 146);   // bullet ကို မှိန်ထား
+                        rtbLog.AppendText("  * ");
+                        rtbLog.SelectionColor = lineColor;
+                        rtbLog.AppendText(line.Substring(4) + "\r\n");
+                    }
+                    else
+                    {
+                        rtbLog.SelectionColor = lineColor;
+                        rtbLog.AppendText(line + "\r\n");
+                    }
+                    rtbLog.SelectionHangingIndent = 0;
+                }
+                if (block) rtbLog.AppendText("\r\n");   // block ပြီးရင် အောက်ကစာနဲ့ ခြား
                 rtbLog.SelectionColor = rtbLog.ForeColor;
                 rtbLog.ScrollToCaret();
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
-        }
-
-        // စာကြောင်း တိုင်းရဲ့ ရှေ့မှာ dim ရောင် [HH:mm:ss] ထည့် — separator ဗလာကြောင်း ကတော့ မထည့်
-        private void AppendLogTimestamp(string message)
-        {
-            if (string.IsNullOrEmpty(message)) return;
-            rtbLog.SelectionStart = rtbLog.TextLength;
-            rtbLog.SelectionLength = 0;
-            rtbLog.SelectionColor = Color.FromArgb(110, 120, 136);
-            rtbLog.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] ");
         }
 
         private void LogPair(string label, string value, Color labelColor, Color valueColor, bool boldValue = true)
@@ -160,9 +187,10 @@ namespace PMKUnlocker
 
                 rtbLog.SelectionStart = rtbLog.TextLength;
                 rtbLog.SelectionLength = 0;
-                AppendLogTimestamp(label);
                 rtbLog.SelectionColor = labelColor;
                 rtbLog.AppendText(label);
+                // value က ရှည်လို့ ကွေးကျရင် ဒုတိယစာကြောင်းတွေ value column အောက် တည့်တည့် ကျမယ်
+                rtbLog.SelectionHangingIndent = LogIndentPx(label.Length);
                 rtbLog.SelectionColor = valueColor;
                 if (boldValue)
                 {
@@ -177,6 +205,7 @@ namespace PMKUnlocker
                 {
                     rtbLog.AppendText(value + "\r\n");
                 }
+                rtbLog.SelectionHangingIndent = 0;
                 rtbLog.SelectionColor = rtbLog.ForeColor;
                 rtbLog.ScrollToCaret();
             }
@@ -185,9 +214,9 @@ namespace PMKUnlocker
         }
 
         /// <summary>
-        /// One timestamped block for a structured result: the header carries the time, and every fact under it
-        /// lines up in two columns with its own colour. A run that ends in twelve timestamped sentences reads as
-        /// twelve events; this reads as one answer.
+        /// One block for a structured result: the header names the run, and every fact under it lines up in two
+        /// columns with its own colour. A run that ends in twelve separate sentences reads as twelve events;
+        /// this reads as one answer.
         /// </summary>
         private void LogFactBlock(string header, Color headerColor,
             IEnumerable<(string Label, string Value, Color ValueColor)> facts)
@@ -202,16 +231,18 @@ namespace PMKUnlocker
                     return;
                 }
 
-                AppendLogTimestamp(header);
+                if (rtbLog.TextLength > 0 && !EndsWithBlankLine(rtbLog.Text))
+                    rtbLog.AppendText("\r\n");   // block တွေ ကပ်မနေရ
                 rtbLog.SelectionColor = headerColor;
                 rtbLog.AppendText(header + "\r\n");
-                const string indent = "           ";   // "[HH:mm:ss] " is 11 characters
                 foreach (var (label, value, valueColor) in facts)
                 {
                     rtbLog.SelectionColor = Color.FromArgb(110, 120, 136);
-                    rtbLog.AppendText(indent + label.PadRight(10));
+                    rtbLog.AppendText(label.PadRight(10));
+                    rtbLog.SelectionHangingIndent = LogIndentPx(10);
                     rtbLog.SelectionColor = valueColor;
                     rtbLog.AppendText(value + "\r\n");
+                    rtbLog.SelectionHangingIndent = 0;
                 }
                 rtbLog.SelectionColor = rtbLog.ForeColor;
                 rtbLog.ScrollToCaret();

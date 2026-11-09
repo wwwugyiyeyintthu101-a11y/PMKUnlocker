@@ -1331,7 +1331,7 @@ namespace PMKUnlocker
                     cpu += " / " + hw;
                 lbChip.Text = (mdl + " → " + cpu).Trim();
                 lbChip.ForeColor = Color.LightGreen;
-                Log("[OK] " + tag + " auto-detect: " + lbChip.Text, Color.LightGreen);
+                Log("[OK] " + tag + " auto-detect\r\n     " + lbChip.Text, Color.LightGreen);
                 WarnUnknownModel(mdl);
                 // MTK SoC token ကို DA catalog နဲ့ ချိတ် — Read Info/Detect ကနေ BROM မတိုင်ခင် loader သိထားအောင်
                 NoteMediaTekChipFromAdb(soc, "");

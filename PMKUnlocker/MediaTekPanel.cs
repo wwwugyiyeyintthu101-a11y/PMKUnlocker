@@ -566,10 +566,10 @@ public partial class Form1
         mtkAutoMatch = match;
         if (match == null)
         {
-            Log("  * Chipset " + chip + " has no bundled DA/Auth — " +
+            Log("  * Chipset " + chip + " · no bundled DA or auth\r\n      " +
                 (MtkRecipeWorkshop.HasDedicatedPayload(chip)
-                    ? "mtkclient has a dedicated BROM payload for it, so its built-in DA can still boot it."
-                    : "mtkclient's generic heapbait fallback is the only option here (unproven on this chip)."), Color.Orange);
+                    ? "mtkclient's BROM payload still boots it."
+                    : "generic heapbait fallback only (unproven)."), Color.Orange);
             lblMtkDeviceStatus.Text = chip + " · no catalog loader";
             lblMtkDeviceStatus.ForeColor = Color.Orange;
             return;
@@ -577,21 +577,27 @@ public partial class Form1
         if (brand == MtkAutoCatalogMode)
         {
             ApplyCatalogLoader();
-            Log("  * Catalog loader applied for " + chip + ": " + DescribeMatch(match) + " — passed as --loader on the next operation.", Color.LightGreen);
+            Log("  * DA catalog · " + chip + "\r\n      " + DescribeMatch(match) +
+                "\r\n      applied as --loader for the next operation.", Color.LightGreen);
         }
         else
         {
             lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
             lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
-            Log("  * Catalog loader for " + chip + ": " + DescribeMatch(match) +
-                " — not used, mtkclient's built-in DA stays default. Choose Brand \"" + MtkAutoCatalogMode +
-                "\" (or the model by hand) if an operation needs it.", Color.Cyan);
+            Log("  * DA catalog · " + chip + "\r\n      " + DescribeMatch(match) +
+                "\r\n      not applied — built-in DA stays default" +
+                "\r\n      choose \"" + MtkAutoCatalogMode + "\" to use it" +
+                "\r\n      \"Auto Detect\" switches here if it fails.", Color.Cyan);
         }
     }
 
-    static string DescribeMatch(MtkChipsetMatch m) =>
-        m.Brand + " " + m.Model + " (" + m.Basis + (string.IsNullOrEmpty(m.Info.Auth) ? ", no auth file" : " + auth file") +
-        (string.IsNullOrEmpty(m.Info.Preloader) ? "" : " + preloader") + ")";
+    static string DescribeMatch(MtkChipsetMatch m)
+    {
+        string basis = (m.Basis ?? "").Replace("loader folder ", "loader ").Replace(" + DA code ", " · DA ");
+        return m.Brand + " " + m.Model + (basis.Length > 0 ? " · " + basis : "") +
+            (string.IsNullOrEmpty(m.Info.Auth) ? "" : " · auth") +
+            (string.IsNullOrEmpty(m.Info.Preloader) ? "" : " · preloader");
+    }
 
     // ============== PRE-COMMAND CHIPSET (ADB prop → catalog loader, before the phone enters BROM) ==============
     // Read Full Info / Detect read ro.soc.model ("MT6765" / "MediaTek Helio G35") and ro.board.platform
@@ -611,10 +617,10 @@ public partial class Form1
         mtkLastChipNotice = chip;
         if (match == null)
         {
-            Log("  * " + chip + " (from ADB) has no bundled DA/Auth — " +
+            Log("  * Chipset " + chip + " · no bundled DA or auth (ADB)\r\n      " +
                 (MtkRecipeWorkshop.HasDedicatedPayload(chip)
-                    ? "mtkclient's dedicated BROM payload + built-in DA will be used."
-                    : "mtkclient's generic heapbait fallback will be used (unproven on this chip)."), Color.Orange);
+                    ? "mtkclient's BROM payload still boots it."
+                    : "generic heapbait fallback only (unproven)."), Color.Orange);
             lblMtkDeviceStatus.Text = chip + " · no catalog loader";
             lblMtkDeviceStatus.ForeColor = Color.Orange;
             return;
@@ -622,15 +628,17 @@ public partial class Form1
         if (brand == MtkAutoCatalogMode)
         {
             ApplyCatalogLoader();
-            Log("  * Catalog loader for " + chip + " (ADB): " + DescribeMatch(match) + " — ready as --loader.", Color.LightGreen);
+            Log("  * DA catalog · " + chip + " (ADB)\r\n      " + DescribeMatch(match) +
+                "\r\n      ready as --loader.", Color.LightGreen);
         }
         else
         {
             lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
             lblMtkDeviceStatus.ForeColor = Color.FromArgb(86, 145, 250);
-            Log("  * Catalog loader for " + chip + " (ADB): " + DescribeMatch(match) +
-                " — ready. Brand \"" + MtkAutoCatalogMode + "\" uses it, \"Auto Detect\" keeps mtkclient's built-in DA" +
-                " and switches here itself if that DA fails.", Color.Cyan);
+            Log("  * DA catalog · " + chip + " (ADB)\r\n      " + DescribeMatch(match) +
+                "\r\n      not applied — built-in DA stays default" +
+                "\r\n      choose \"" + MtkAutoCatalogMode + "\" to use it" +
+                "\r\n      \"Auto Detect\" switches here if it fails.", Color.Cyan);
         }
     }
 

@@ -260,7 +260,7 @@ namespace PMKUnlocker
                 string rootText = string.IsNullOrWhiteSpace(suOut) ? "not detected (no su)" : "su found: " + suOut;
                 bool bootBad = bootState.Contains("UNLOCKED") || bootState.Contains("verifiedboot=orange") || bootState.Contains("verifiedboot=red");
 
-                Log("======================================", Color.FromArgb(0, 110, 170));
+                Log("", Color.FromArgb(0, 110, 170));   // header နဲ့ အောက်စာကြောင်းတွေ ခြားရန်
                 LogPair("Brand            : ", brand, lbl, idCol);
                 LogPair("Model            : ", modelDisplay, lbl, idCol);
                 if (!string.IsNullOrWhiteSpace(deviceName)) LogPair("Device Name      : ", deviceName, lbl, idCol);
@@ -282,7 +282,7 @@ namespace PMKUnlocker
                 if (bootState.Length > 0) LogPair("Bootloader State : ", bootState, lbl, bootBad ? badCol : okCol);
                 LogPair("SELinux          : ", selinuxFull, lbl, selinuxText == "?" ? Color.Gray : (selinuxText.Contains("Permissive") ? badCol : okCol));
                 LogPair("Root             : ", rootText, lbl, string.IsNullOrWhiteSpace(suOut) ? warnCol : okCol);
-                Log("======================================", Color.FromArgb(0, 110, 170));
+                Log("");   // နောက်လာမယ့် output နဲ့ ခြားရန်
             }
             else
             {

@@ -1186,7 +1186,8 @@ namespace PMKUnlocker
                 ForeColor = Color.FromArgb(0, 255, 128),
                 Font = new Font("Consolas", 10f, FontStyle.Regular),
                 BorderStyle = BorderStyle.None,
-                HideSelection = false   // search match ကို focus မရှိလည်း highlight မြင်ရအောင်
+                HideSelection = false,   // search match ကို focus မရှိလည်း highlight မြင်ရအောင်
+                Margin = new Padding(8, 6, 8, 4)   // table cell အနားသတ် — စာသားက ဘောင်နဲ့ ကပ်မနေရ
             };
             rtbLog.Name = "pmkRtbLog";
 
