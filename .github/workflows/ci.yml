@@ -31,6 +31,7 @@ jobs:
       - name: Restore
         run: |
           dotnet restore tests/Regression/Regression.csproj
+          dotnet restore tests/LicenseLogin/LicenseLogin.csproj
           dotnet restore PMKLicenseServer/PMKLicenseServer.csproj
           dotnet restore PMKLicenseAdmin/PMKLicenseAdmin.csproj
           dotnet restore PMKUnlocker/PMKUnlocker.csproj
@@ -81,3 +82,8 @@ jobs:
 
       - name: Regression checks
         run: dotnet run --project tests/Regression/Regression.csproj -c Debug --no-restore
+
+      # Real server process on a throwaway DataFile + the real LicenseClient/LocalLogin code,
+      # including DPAPI remember-me. Needs the license server build from the step above.
+      - name: Login flow checks
+        run: dotnet run --project tests/LicenseLogin/LicenseLogin.csproj -c Debug --no-restore

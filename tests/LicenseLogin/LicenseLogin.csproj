@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The client halves of the login flow: DPAPI remember-me storage and the /api/login caller. -->
+    <Compile Include="../../PMKUnlocker/LocalLogin.cs" Link="LocalLogin.cs" />
+    <Compile Include="../../PMKUnlocker/LicenseClient.cs" Link="LicenseClient.cs" />
+  </ItemGroup>
+</Project>
