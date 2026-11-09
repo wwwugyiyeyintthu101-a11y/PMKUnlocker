@@ -32,6 +32,8 @@ still writes and verifies it by default — `SkipToolIntegrity` is an explicit C
 opt-out. Since `bundled-tools/` and `tools/` are not tracked, CI also sets
 `PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS=1`: only the checks that read those on-disk
 assets report SKIP there, and they stay mandatory on a machine that has them.
+CI also runs the default Build once and requires it to fail with the missing-inventory
+error and to leave no manifest, so the opt-out cannot silently become the default.
 
 MTK native recipes (`mtk/boot-profiles` next to the exe) are PMK's own DA/EMI
 artefacts: they are not tracked and not shipped, and without them the NATIVE tab

@@ -58,5 +58,17 @@ jobs:
             throw 'Desktop build did not copy the potato managed libraries'
           }
 
+      # The opt-out must stay opt-in: without it (and without the inventory) the Build target has to fail
+      # closed, and it must never leave a manifest behind.
+      - name: Integrity guard fails closed without the tool inventory
+        shell: pwsh
+        run: |
+          $manifest = 'PMKUnlocker/bin/Debug/net8.0-windows/integrity.json'
+          $out = & dotnet build PMKUnlocker/PMKUnlocker.csproj -c Debug --no-restore 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw 'Default build succeeded without bundled tools: the integrity guard is not fail-closed' }
+          if ($out -notmatch 'Missing bundled integrity inventory') { throw "Default build failed for an unexpected reason:`n$out" }
+          if (Test-Path -LiteralPath $manifest) { throw 'A failed build still wrote integrity.json' }
+          Write-Host 'Default build failed closed on the missing tool inventory, with no manifest written.'
+
       - name: Regression checks
         run: dotnet run --project tests/Regression/Regression.csproj -c Debug --no-restore
