@@ -102,10 +102,10 @@ namespace PMKUnlocker
                 if (unknownSize)
                 {
                     Log("[!] Some partition sizes could not be read — restore is unverified.", Color.Orange);
-                    if (MessageBox.Show(this, "Partition size မသိနိုင်တဲ့ partition ရှိတယ်။\nSize မတိုက်စစ်ဘဲ ဆက်ရေးမလား?",
+                    if (ConfirmDialog.Show(this, "Partition size မသိနိုင်တဲ့ partition ရှိတယ်။\nSize မတိုက်စစ်ဘဲ ဆက်ရေးမလား?",
                             "Samsung EFS restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
                 }
-                if (MessageBox.Show(this,
+                if (ConfirmDialog.Show(this,
                         "Restore " + plan.Count + " partition(s)?\n\n" + string.Join(", ", plan.Select(p => p.Name)) +
                         "\n\nEFS မှားရင် IMEI/baseband ပျက်နိုင်တယ်။ Backup က ဒီဖုန်းအတွက် ဟုတ်ကြောင်း သေချာအောင်။\n\nဆက်လုပ်မလား?",
                         "Confirm Samsung EFS restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
@@ -130,7 +130,7 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (id.Contains("uid=0")) return true;
             Log("[!] " + title + ": root (su) မရပါ — Magisk / KernelSU root ဖုန်းမှာသာ လုပ်လို့ရတယ်.", Color.OrangeRed);
-            MessageBox.Show("Root (su) မရပါ။\n\nEFS backup/restore ကို ADB + root နဲ့သာ လုပ်လို့ရတယ် (heimdall က partition ဖတ်လို့မရ)။",
+            ConfirmDialog.Show("Root (su) မရပါ။\n\nEFS backup/restore ကို ADB + root နဲ့သာ လုပ်လို့ရတယ် (heimdall က partition ဖတ်လို့မရ)။",
                 title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }
@@ -326,7 +326,7 @@ namespace PMKUnlocker
             string heimdall = FindHeimdall();
             if (string.IsNullOrWhiteSpace(await ExecuteCommandQuickAsync(heimdall, "version")))
             {
-                MessageBox.Show("heimdall.exe မတွေ့ပါ။\n\nPIT download / flash အတွက် heimdall.exe လိုပါတယ် —\n" +
+                ConfirmDialog.Show("heimdall.exe မတွေ့ပါ။\n\nPIT download / flash အတွက် heimdall.exe လိုပါတယ် —\n" +
                                 "• ဒီ tool folder ထဲ (သို့) PATH မှာ ထည့်ပါ",
                     "heimdall required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -404,7 +404,7 @@ namespace PMKUnlocker
         {
             if (string.IsNullOrEmpty(samFirmwareFile) || !File.Exists(samFirmwareFile))
             {
-                MessageBox.Show("Firmware ဖိုင် မရွေးရသေးပါ — 📂 Browse နဲ့ အရင် ရွေးပါ။", "Firmware",
+                ConfirmDialog.Show("Firmware ဖိုင် မရွေးရသေးပါ — 📂 Browse နဲ့ အရင် ရွေးပါ။", "Firmware",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -412,7 +412,7 @@ namespace PMKUnlocker
             string heimdall = FindHeimdall();
             if (string.IsNullOrWhiteSpace(await ExecuteCommandQuickAsync(heimdall, "version")))
             {
-                MessageBox.Show("heimdall.exe မတွေ့ပါ။\n\n• ဒီ tool folder ထဲ (သို့) PATH မှာ ထည့်ပါ",
+                ConfirmDialog.Show("heimdall.exe မတွေ့ပါ။\n\n• ဒီ tool folder ထဲ (သို့) PATH မှာ ထည့်ပါ",
                     "heimdall required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -438,7 +438,7 @@ namespace PMKUnlocker
                 List<string> extracted = ExtractTarImages(samFirmwareFile, tempDir);
                 if (extracted.Count == 0)
                 {
-                    MessageBox.Show("Archive ထဲမှာ .img/.bin ဖိုင် မတွေ့ပါ။", "Samsung",
+                    ConfirmDialog.Show("Archive ထဲမှာ .img/.bin ဖိုင် မတွေ့ပါ။", "Samsung",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -465,7 +465,7 @@ namespace PMKUnlocker
                     p = p.Trim().ToUpperInvariant();
                     if (!IsValidPartitionName(p))
                     {
-                        MessageBox.Show("Partition နာမည် မမှန်ပါ (a-z, 0-9, _ , - သာ သုံးပါ)။", "Samsung",
+                        ConfirmDialog.Show("Partition နာမည် မမှန်ပါ (a-z, 0-9, _ , - သာ သုံးပါ)။", "Samsung",
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -476,7 +476,7 @@ namespace PMKUnlocker
 
             if (parts.Count == 0)
             {
-                MessageBox.Show("Flash လုပ်စရာ partition မရှိပါ (PIT download လုပ်ပြီး ပြန်စမ်းပါ)။", "Samsung",
+                ConfirmDialog.Show("Flash လုပ်စရာ partition မရှိပါ (PIT download လုပ်ပြီး ပြန်စမ်းပါ)။", "Samsung",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -485,7 +485,7 @@ namespace PMKUnlocker
             for (int i = 0; i < parts.Count; i++)
                 plan += "• " + parts[i].PadRight(16) + " <- " + Path.GetFileName(images[i]) + "\n";
 
-            if (MessageBox.Show("heimdall CLI နဲ့ flash လုပ်မလား?\n\n" + plan + "\n" +
+            if (ConfirmDialog.Show("heimdall CLI နဲ့ flash လုပ်မလား?\n\n" + plan + "\n" +
                                 "• ဖုန်းက Download Mode မှာ ရှိရမယ်\n" +
                                 "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ\n\nဆက်လုပ်မလား?",
                     "Confirm Flash (heimdall)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
@@ -1200,7 +1200,7 @@ namespace PMKUnlocker
 
         private async Task RunSamsungMtpFrpAsync()
         {
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Samsung - MTP FRP (UNLOCKTOOL-style: read info → enable ADB → remove)" + Environment.NewLine + Environment.NewLine +
                     "USB debugging မဖွင့်ရသေးတဲ့ ဖုန်းအတွက် အဆင့်:" + Environment.NewLine +
                     "  1) File Transfer (MTP) mode နဲ့ USB ချိတ်" + Environment.NewLine +
@@ -1257,7 +1257,7 @@ namespace PMKUnlocker
             }
 
             // *#0*# Test mode prompt (UNLOCKTOOL: user dials, then OK)
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "ဖုန်းပေါ် Emergency call → *#0*# ရိုက်ပြီး Test mode ဖွင့်ပါ။" + Environment.NewLine + Environment.NewLine +
                     "Test mode screen ပေါ်ပြီဆို OK နှိပ်ပါ — tool က ADB enable စမယ်။" + Environment.NewLine + Environment.NewLine +
                     "• ဖုန်းပေါ် USB debugging dialog ပေါ်ရင် Always allow / Allow နှိပ်ပါ" +
@@ -1565,7 +1565,7 @@ namespace PMKUnlocker
             Log("[i] ================================================", Color.FromArgb(0, 200, 255));
 
             bool sideSync = FindSideSyncPath(out string ssPath);
-            var r = MessageBox.Show(
+            var r = ConfirmDialog.Show(
                 "Samsung legacy FRP guide" + Environment.NewLine + Environment.NewLine +
                 "*#0*# method: ADB interface မပေါ်ပါ (A3 2016 စသည်)។" + Environment.NewLine + Environment.NewLine +
                 "SideSync: " + (sideSync ? "တွေ့ပါတယ် — ဖွင့်မလား?" : "PC မှာ မတွေ့ပါ (install လို)") + Environment.NewLine +
@@ -1624,7 +1624,7 @@ namespace PMKUnlocker
         // 2) မရှိရင် Samsung modem COM (AT) ကြိုးစား → မရရင် Recovery button guide (ADB မလို)
         private async Task RunSamsungMtpFactoryResetAsync()
         {
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Samsung - MTP Factory Reset (no ADB wait)" + Environment.NewLine + Environment.NewLine +
                     "ADB စောင့်စရာ မလိုပါ — အောက်ပါနည်းဖြင့်:" + Environment.NewLine +
                     "  • ADB ဖွင့်ထားပြီးသားဆို → ချက်ချင်း wipe" + Environment.NewLine +
@@ -2045,7 +2045,7 @@ namespace PMKUnlocker
             Log("[i] 4) Vol+ / Vol- = navigate, Power = confirm", Color.White);
             Log("[i] ======================================================", Color.FromArgb(0, 200, 255));
 
-            MessageBox.Show(
+            ConfirmDialog.Show(
                 "Recovery Mode Factory Reset (ADB မလို)" + Environment.NewLine + Environment.NewLine +
                 "1) ဖုန်း Power off ပါ" + Environment.NewLine + Environment.NewLine +
                 "2) Vol+ ကို ဆက်နှိပ်ထားပြီး Power နှိပ်" + Environment.NewLine +

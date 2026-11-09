@@ -334,14 +334,14 @@ namespace PMKUnlocker
             string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
             {
-                MessageBox.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
                                 + "- USB debugging ဖွင့်ပြီး cable ချိတ်ပါ" + Environment.NewLine
                                 + "- RSA prompt ကို Allow ပါ",
                     "Remove Pattern/PIN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Remove screen lock (pattern / PIN / password)?" + Environment.NewLine + Environment.NewLine +
                     "• ROOT ရှိရင် — locksettings + gatekeeper files ဖျက် (data မပျက်)" + Environment.NewLine +
                     "• ROOT မရှိရင် — best-effort ADB commands စမ်းမယ်" + Environment.NewLine +
@@ -399,7 +399,7 @@ namespace PMKUnlocker
             string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
             {
-                MessageBox.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
                                 + "- USB debugging ဖွင့်ပြီး cable ချိတ်ပါ" + Environment.NewLine
                                 + "- RSA prompt ကို Allow ပါ",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -409,7 +409,7 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
-                MessageBox.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
                                 + "• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ" + Environment.NewLine
                                 + "• ဖုန်း screen က su prompt Allow မလုပ်ရသေးရင် လုပ်ပါ",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -552,7 +552,7 @@ namespace PMKUnlocker
                 Log("[i] script blob bytes=" + blob.Length +
                     (blob.Length > 0 ? "  head=" + blob.Substring(0, Math.Min(140, blob.Length)).Replace("\n", " ") : "  (empty — timeout/exit≠0/adb error)"), Color.Gray);
                 Log("[!] /dev/block/by-name not found — device may not expose by-name symlinks.", Color.Orange);
-                MessageBox.Show("/dev/block/by-name မရှိပါ (by-name symlink မပေးတဲ့ device)။",
+                ConfirmDialog.Show("/dev/block/by-name မရှိပါ (by-name symlink မပေးတဲ့ device)။",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -632,14 +632,14 @@ namespace PMKUnlocker
             string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
             {
-                MessageBox.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
                                 + "- USB debugging ဖွင့်ပြီး cable ချိတ်ပါ" + Environment.NewLine
                                 + "- RSA prompt ကို Allow ပါ",
                     "Factory Reset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Factory Reset via ADB?" + Environment.NewLine + Environment.NewLine +
                     "• ဖုန်းထဲက data / ဓာတ်ပုံ / အက်ပ် အားလုံး ဖျက်ခံရမယ်" + Environment.NewLine +
                     "• Pattern/PIN နဲ့ Google account (FRP) ပါ ပျက်သွားနိုင်တယ်" + Environment.NewLine +
@@ -686,7 +686,7 @@ namespace PMKUnlocker
             // 3) fallback — reboot recovery + ညွှန်ကြားချက်
             Log("[i] Direct wipe not confirmed — rebooting to recovery for manual wipe...", Color.Orange);
             await ExecuteCommandCleanAsync("adb.exe", "reboot recovery", "Reboot Recovery (manual wipe)");
-            MessageBox.Show(
+            ConfirmDialog.Show(
                 "Phone ကို recovery mode ပို့ပြီးပါပြီ။" + Environment.NewLine + Environment.NewLine +
                 "Recovery ထဲမှာ:" + Environment.NewLine +
                 "  1. Wipe data / Factory reset ရွေးပါ" + Environment.NewLine +

@@ -258,7 +258,7 @@ namespace PMKUnlocker
             Log($"[!] set_active OKAY but current-slot = {after.ToUpperInvariant()} still unchanged", Color.Orange);
             Log("[i] Some bootloaders apply the switch only after reboot — you can re-check in bootloader", Color.Gray);
 
-            var ask = MessageBox.Show(
+            var ask = ConfirmDialog.Show(
                 "set_active က device က OKAY ပြန်ပေမဲ့ current-slot က " + after.ToUpperInvariant() + " အတိုင်းပါ။\n\n" +
                 "တစ်ချို့ bootloader များ reboot ပြီးမှ switch ဖြစ်တယ်။\n" +
                 "Reboot to bootloader ပြီး ပြန်စစ်မလား?",
@@ -385,7 +385,7 @@ namespace PMKUnlocker
             if (!SetMiFlashOps(ops))
             {
                 Log("[!] " + Path.GetFileName(bat) + " — 0 fastboot commands — not a flash_all.bat", Color.Orange);
-                MessageBox.Show(this,
+                ConfirmDialog.Show(this,
                     "ဒီ .bat ထဲမှာ fastboot command မပါဘူး။\n\nMIUI Fastboot ROM ရဲ့ flash_all.bat\n(သို့) flash_all_lock.bat ကို ရွေးပါ။",
                     "Mi Flash", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;

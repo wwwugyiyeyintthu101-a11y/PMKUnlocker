@@ -99,7 +99,7 @@ namespace PMKUnlocker
         {
             if (!skipConfirm)
             {
-                if (MessageBox.Show(
+                if (ConfirmDialog.Show(
                         brand + " - FRP Reset (adb နည်းလမ်း)" + Environment.NewLine + Environment.NewLine +
                         "Setup wizard ကို ကျော်ပြီး Google account verification ကို ဖျက်ပါမယ်။" + Environment.NewLine +
                         "• Root မလိုပါ၊ ဒါပေမဲ့ adb (USB debugging) ရနိုင်ရမယ်" + Environment.NewLine +

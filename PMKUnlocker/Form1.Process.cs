@@ -512,7 +512,7 @@ namespace PMKUnlocker
                 {
                     string imgHuman = FormatBytesLong(imgSize);
                     string partHuman = FormatBytes(p.LengthHex);
-                    DialogResult r = MessageBox.Show(
+                    DialogResult r = ConfirmDialog.Show(
                         "Image က partition ထက် ကြီ်နေတယ်!\n\n" +
                         "• Partition : " + partition + " (" + partHuman + ")\n" +
                         "• Image    : " + imgHuman + "\n\n" +

@@ -441,6 +441,8 @@ namespace PMKUnlocker
             SetupProfessionalUI();
             BuildShopPanel();
             LoadSettings();       // checkbox state တွေ ပြန်ဖတ် (SetupProfessionalUI ပြီးမှ — control တွေ ဖန်တီးပြီးမှ)
+            // saved theme မရှိရင် ApplyTheme() မခေါ်လို့ dialog ကို default (dark) ကို တိုက်ရိုက် sync
+            ConfirmDialog.DarkMode = !lightTheme;
             LoadKirinList();       // Kirin bootloader manifest တွေ ဖတ် (HiSilicon tab)
             RefreshHisiPorts();    // testpoint mode COM port list (HUAWEI first)
             _ = CheckAllDevicesAsync(false);

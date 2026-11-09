@@ -219,7 +219,7 @@ namespace PMKUnlocker
                 Log("[x] Unlock code contains invalid characters - allowed: a-z, 0-9, _ , -", Color.Red);
                 return;
             }
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "fastboot oem unlock " + code + "\n\n" +
                     "ဒါက bootloader ကို unlock လုပ်တယ် — userdata ဖျက်ခံရနိုင်တယ်။\n" +
                     "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။\n\nဆက်လုပ်မလား?",
@@ -497,7 +497,7 @@ namespace PMKUnlocker
             var selected = cmbKirin.SelectedItem as KirinBootloader;
             if (selected == null)
             {
-                MessageBox.Show("Kirin model ကို အရင် ရွေးပါ။\n(📁 Bootloaders ခလုတ်နဲ့ bootloaders folder ရွေးဖို့ လိုနိုင်တယ်)",
+                ConfirmDialog.Show("Kirin model ကို အရင် ရွေးပါ။\n(📁 Bootloaders ခလုတ်နဲ့ bootloaders folder ရွေးဖို့ လိုနိုင်တယ်)",
                     "Kirin model", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -505,7 +505,7 @@ namespace PMKUnlocker
             string port = ExtractComPort(cmbHisiPort.SelectedItem != null ? cmbHisiPort.SelectedItem.ToString() : "");
             if (string.IsNullOrEmpty(port) || !port.StartsWith("COM", StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show("ဖုန်းရဲ့ COM port ကို ရွေးပါ (Device Manager မှာ 'HUAWEI USB COM 1.0')။\n\n" +
+                ConfirmDialog.Show("ဖုန်းရဲ့ COM port ကို ရွေးပါ (Device Manager မှာ 'HUAWEI USB COM 1.0')။\n\n" +
                                 "• ဖုန်းကို testpoint short လုပ်ပြီး ချိတ်ပါ\n• ပြီးရင် 🔄 နှိပ်ပြီး port ပြန်စစ်ပါ\n" +
                                 "• HUAWEI port ဆိုရင် list ထဲမှာ '(HUAWEI)' နဲ့ အပေါ်ဆုံးမှာ ပေါ်တယ်",
                     "COM port", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -516,7 +516,7 @@ namespace PMKUnlocker
                 Log("[!] " + port + " is not a HUAWEI USB COM port — with the driver installed correctly, select the '(HUAWEI)' port.", Color.Orange);
             }
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Kirin Bootloader Unlock\n\n" +
                     "• Model : " + selected.Name + "\n" +
                     "• Port  : " + port + "\n\n" +
@@ -541,7 +541,7 @@ namespace PMKUnlocker
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("   ✔ UNLOCK CODE : " + code, Color.LightGreen);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
-                MessageBox.Show("Unlock ပြီးပါပြီ!\n\nUnlock code: " + code + "\n\n" +
+                ConfirmDialog.Show("Unlock ပြီးပါပြီ!\n\nUnlock code: " + code + "\n\n" +
                                 "ဖုန်းကို fastboot mode ပြောင်းပြီး '⚡ OEM Unlock (code)' နဲ့ ဒီ code ကို ထည့်ပါ။",
                     "Kirin Unlock", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

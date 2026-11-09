@@ -927,12 +927,12 @@ namespace PMKUnlocker
 
         private async void BtnQcFrpRemove_Click(object sender, EventArgs e)
         {
-            if (MessageBox.Show(
+            if (!ConfirmDialog.Ask(this,
                     "FRP Remove (Qualcomm) — frp နဲ့ config partition ကို erase လုပ်ပါမယ်။\n\n" +
                     "• User data မပျက်ပါ (FRP/config ကိုသာ ဖျက်တယ်)\n" +
                     "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ (ခိုးရာပစ္စည်း မဟုတ်ကြောင်း စစ်ပါ)\n\n" +
                     "ဆက်လုပ်မလား?",
-                    "Confirm FRP Remove", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                    "Confirm FRP Remove"))
                 return;
 
             await RunFlashWorkflowAsync(() => RunEdlAsync("e frp,config", "Qualcomm FRP Remove (frp + config)"));
@@ -940,7 +940,7 @@ namespace PMKUnlocker
 
         private async void BtnQcUserlockReset_Click(object sender, EventArgs e)
         {
-            if (MessageBox.Show(
+            if (!ConfirmDialog.Ask(this,
                     "Userlock Reset (Qualcomm) — userdata နဲ့ metadata (ရှိလျှင်) ကို erase လုပ်ပါမယ်။\n\n" +
                     "• ဖုန်းထဲက data / ဓာတ်ပုံ / အက်ပ် အားလုံး ဖျက်ခံရမယ်\n" +
                     "• Screen lock (PIN / pattern / password) ပျက်သွားမယ်\n" +
@@ -948,8 +948,7 @@ namespace PMKUnlocker
                     "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ (ခိုးရာပစ္စည်း မဟုတ်ကြောင်း စစ်ပါ)\n" +
                     "• data မဖျက်ဘဲ lock ဖျက်ချင်ရင် root/TWRP + ADB လမ်းကို သုံးပါ\n\n" +
                     "ဆက်လုပ်မလား?",
-                    "Confirm Userlock Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    "Confirm Userlock Reset"))
                 return;
 
             await RunFlashWorkflowAsync(
@@ -1056,11 +1055,11 @@ namespace PMKUnlocker
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
                 string preview = string.Join(", ", plan.Take(12).Select(p => p.Name)) + (plan.Count > 12 ? ", …" : "");
-                if (MessageBox.Show(this,
+                if (!ConfirmDialog.Ask(this,
                         $"Restore {plan.Count} partition(s) from:\n{dir}\n\n{preview}\n\n" +
                         "Each partition will be overwritten. This cannot be undone.\n\n" +
                         "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
-                        "Confirm QC Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                        "Confirm QC Restore")) return;
 
                 await RunFlashWorkflowAsync(async () =>
                 {
@@ -1129,11 +1128,11 @@ namespace PMKUnlocker
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
                 string preview = string.Join(", ", plan.Select(p => p.Name));
-                if (MessageBox.Show(this,
+                if (!ConfirmDialog.Ask(this,
                         $"Restore {plan.Count} EFS partition(s) from:\n{dir}\n\n{preview}\n\n" +
                         "Each partition will be overwritten. This cannot be undone.\n\n" +
                         "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
-                        "Confirm EFS Restore", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                        "Confirm EFS Restore")) return;
 
                 await RunFlashWorkflowAsync(async () =>
                 {

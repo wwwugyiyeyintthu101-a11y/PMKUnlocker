@@ -158,7 +158,7 @@ namespace PMKUnlocker
             if (!id.Contains("uid=0"))
             {
                 Log("[!] " + title + ": no root (su) — try Xiaomi Temp Root / Magisk / KernelSU", Color.OrangeRed);
-                MessageBox.Show("Root (su) မရပါ။\n\nADB partition r/w/e အတွက် root လိုအပ်ပါတယ်。",
+                ConfirmDialog.Show("Root (su) မရပါ။\n\nADB partition r/w/e အတွက် root လိုအပ်ပါတယ်。",
                     title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
@@ -373,7 +373,7 @@ namespace PMKUnlocker
             }
             if (string.IsNullOrWhiteSpace(pname))
             {
-                MessageBox.Show("Partition တစ်ခု ရွေးပါ။", "Mount RW", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmDialog.Show("Partition တစ်ခု ရွေးပါ။", "Mount RW", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -386,7 +386,7 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
-                MessageBox.Show("Root (su) မရပါ။\n\n• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ",
+                ConfirmDialog.Show("Root (su) မရပါ။\n\n• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ",
                     "Mount RW", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 Log("[!] Mount RW: su not available", Color.OrangeRed);
                 return;
@@ -432,7 +432,7 @@ namespace PMKUnlocker
             {
                 // Raw partition (frp, nvram…) — mount remount မလုပ်ရဘဲ root dd နဲ့ write
                 Log("[i] " + pname + " is not mounted — raw block (root write via dd).", Color.Gray);
-                DialogResult pick = MessageBox.Show(
+                DialogResult pick = ConfirmDialog.Show(
                     pname + " is not mounted (raw block device)." + Environment.NewLine + Environment.NewLine +
                     "Root write လုပ်မလား?" + Environment.NewLine + Environment.NewLine +
                     "Yes = Zero/erase [" + pname + "] (dd if=/dev/zero) — frp အတွက် FRP clear လို" + Environment.NewLine +
@@ -442,7 +442,7 @@ namespace PMKUnlocker
                     MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (pick == DialogResult.Yes)
                 {
-                    if (MessageBox.Show(
+                    if (ConfirmDialog.Show(
                             "Zero/erase [" + pname + "]?" + Environment.NewLine + Environment.NewLine +
                             "• dd if=/dev/zero → " + (pdev ?? pname) + Environment.NewLine +
                             "• frp ဆိုရင် Google account (FRP) ပျက်သွားမယ်" + Environment.NewLine +
@@ -474,7 +474,7 @@ namespace PMKUnlocker
                 return;
             }
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Remount " + pmp + " (" + pname + ") as Read-Write?" + Environment.NewLine + Environment.NewLine +
                     "• mount -o remount,rw " + pmp + Environment.NewLine +
                     "• SELinux / AVB က remount ကို တားနိုင်တယ်" + Environment.NewLine +

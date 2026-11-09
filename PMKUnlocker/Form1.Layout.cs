@@ -296,7 +296,7 @@ namespace PMKUnlocker
                 string id = (await ProbeSuAsync()).Trim();
                 if (!id.Contains("uid=0"))
                 {
-                    MessageBox.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
+                    ConfirmDialog.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
                                     + "• ဒီဖုန်းမှာ root မရှိပါ (သို့) ဖုန်း screen က su prompt ကို Allow မလုပ်ရသေးပါ" + Environment.NewLine
                                     + "• root မရှိရင် 🔓 FRP Reset (no root) ခလုတ်ကို သုံးပါ",
                         "ROOT FRP Reset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -304,7 +304,7 @@ namespace PMKUnlocker
                     return;
                 }
 
-                if (MessageBox.Show(
+                if (ConfirmDialog.Show(
                         "ROOT FRP Reset (su)" + Environment.NewLine + Environment.NewLine +
                         "• /data/system/**/accounts*.db နဲ့ device_policies.xml ဖျက်" + Environment.NewLine +
                         "• provisioning / setup_complete သတ်မှတ်" + Environment.NewLine +
@@ -1392,7 +1392,7 @@ namespace PMKUnlocker
                         // license သက်တမ်းကုန် → client-side block (server check ထပ်မံ)
                         if (DateTime.UtcNow >= licenseExpiresUtc)
                         {
-                            MessageBox.Show(this,
+                            ConfirmDialog.Show(this,
                                 "Subscription သက်တမ်းကုန်ပါပြီ — tool ကို ပိတ်ပါမည်။\n\nAdmin ကို renew လုပ်ပါ။",
                                 "License expired", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             Environment.Exit(0);
@@ -1607,6 +1607,9 @@ namespace PMKUnlocker
 
         private void ApplyTheme()
         {
+            // window-less modal dialog (ConfirmDialog) ကို လက်ရှိ theme နဲ့ တူအောင်
+            ConfirmDialog.DarkMode = !lightTheme;
+
             if (btnThemeToggle != null) btnThemeToggle.Text = lightTheme ? "🌙 Dark" : "☀ Light";
 
             // Light mode: pure white တွေ မသုံးဘဲ soft blue-gray / muted tone (မတောက်အောင်)

@@ -47,7 +47,7 @@ namespace PMKUnlocker
         {
             if (string.IsNullOrEmpty(spdFirmwareFile) || !File.Exists(spdFirmwareFile))
             {
-                MessageBox.Show("PAC firmware ဖိုင် မရွေးရသေးပါ — 📂 PAC နဲ့ အရင် ရွေးပါ။", "PAC",
+                ConfirmDialog.Show("PAC firmware ဖိုင် မရွေးရသေးပါ — 📂 PAC နဲ့ အရင် ရွေးပါ။", "PAC",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
@@ -270,7 +270,7 @@ namespace PMKUnlocker
             List<string> files = SpdImageFiles(out parts);
             if (files.Count == 0)
             {
-                MessageBox.Show("ဖြည်ထားတဲ့ folder ထဲမှာ partition image (.bin/.img) မတွေ့ပါ။", "SPD",
+                ConfirmDialog.Show("ဖြည်ထားတဲ့ folder ထဲမှာ partition image (.bin/.img) မတွေ့ပါ။", "SPD",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -280,7 +280,7 @@ namespace PMKUnlocker
                 plan += "• " + parts[i].PadRight(16) + " <- " + Path.GetFileName(files[i]) + "\n";
             if (files.Count > 20) plan += "• ... (" + (files.Count - 20) + " more)\n";
 
-            if (MessageBox.Show("spd_dump (CLI) နဲ့ PAC flash လုပ်မလား?\n\n" + plan + "\n" +
+            if (ConfirmDialog.Show("spd_dump (CLI) နဲ့ PAC flash လုပ်မလား?\n\n" + plan + "\n" +
                                 "• ဖုန်းကို Download/FDL mode မှာ ထားပါ\n" +
                                 "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ\n\nဆက်လုပ်မလား?",
                     "Confirm PAC Flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
@@ -438,7 +438,7 @@ namespace PMKUnlocker
 
             string spd = FindSpdDump();
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                 "FRP Reset (Diag mode)?\n\n" +
                 "persist / frp partition ကို erase ပြီး phone ကို reboot လုပ်မည်။\n\n" +
                 "Device: Power off → Vol- (သို့) Vol+ နှိပ်ထားပြီး USB ချိတ်ပါ။",
@@ -467,7 +467,7 @@ namespace PMKUnlocker
 
             string spd = FindSpdDump();
 
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                 "Userlock + FRP Reset (Diag mode)?\n\n" +
                 "⚠ userdata (data) + cache + persist/frp ကို erase မည် —\n" +
                 "ဖုန်းထဲက Data နဲ့ Lock အကုန် ပျက်သွားမယ်!\n\n" +

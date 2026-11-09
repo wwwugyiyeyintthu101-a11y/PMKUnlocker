@@ -43,7 +43,7 @@ namespace PMKUnlocker
             }
             if (adbTargets.Count == 0)
             {
-                MessageBox.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
                                 + "- Developer options > USB debugging ဖွင့်ပါ" + Environment.NewLine
                                 + "- Cable ချိတ်ပြီး RSA prompt ကို Allow ပါ",
                     "Xiaomi Temp Root FRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -137,7 +137,7 @@ namespace PMKUnlocker
             if (pickedEntry != null &&
                 (exploitMatch == null || !string.Equals(exploitMatch.Id, pickedEntry.Id, StringComparison.Ordinal)))
             {
-                MessageBox.Show(
+                ConfirmDialog.Show(
                     "ရွေးထားသော model နဲ့ ချိတ်ထားတဲ့ဖုန်း မတူဘူး။" + Environment.NewLine + Environment.NewLine +
                     "ရွေးထားတာ : " + (string.IsNullOrWhiteSpace(pickedEntry.Name) ? pickedEntry.Id : pickedEntry.Name) + Environment.NewLine +
                     "ချိတ်ထားတာ: " + (string.IsNullOrWhiteSpace(model) ? "?" : model) +
@@ -166,7 +166,7 @@ namespace PMKUnlocker
             string exploitLine = exploitMatch != null
                 ? "Match : " + exploitMatch.Name + (string.IsNullOrWhiteSpace(exploitMatch.Id) ? "" : " (" + exploitMatch.Id + ")")
                 : "Match : none";
-            if (MessageBox.Show(
+            if (ConfirmDialog.Show(
                     "Xiaomi Temp Root" + Environment.NewLine + Environment.NewLine +
                     "Model : " + (string.IsNullOrWhiteSpace(model) ? "?" : model) + Environment.NewLine +
                     "Brand : " + (string.IsNullOrWhiteSpace(brand) ? "?" : brand) +
@@ -545,7 +545,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             if (picked == null) return (false, null);
             if (!Ready(exploitsRoot, picked))
             {
-                MessageBox.Show("payload မရှိသေးဘူး — " + picked.Payload + Environment.NewLine + Environment.NewLine
+                ConfirmDialog.Show("payload မရှိသေးဘူး — " + picked.Payload + Environment.NewLine + Environment.NewLine
                                 + "file ထည့်ပြီးမှ ထပ်စမ်းပါ (exploits\\SUPPORTED_MODELS.txt ကြည့်ပါ)။",
                     "Temp Root", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return (true, null);
