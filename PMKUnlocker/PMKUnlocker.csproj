@@ -109,7 +109,9 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="WriteBuildIntegrity" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+  <!-- SkipToolIntegrity is the CI opt-out: a checkout without the untracked tool inventory cannot write the
+       manifest. Release/publish builds and every local build keep the default (fail closed). -->
+  <Target Name="WriteBuildIntegrity" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipToolIntegrity)' != 'true'">
     <PropertyGroup><IntegrityReleaseArguments Condition="'$(Configuration)' == 'Release'">-VerifyBundled</IntegrityReleaseArguments></PropertyGroup>
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File &quot;$(MSBuildProjectDirectory)\..\scripts\write_runtime_integrity.ps1&quot; -SourceRoot &quot;$(MSBuildProjectDirectory)&quot; -OutputRoot &quot;$(TargetDir).&quot; $(IntegrityReleaseArguments)" />
   </Target>

@@ -25,9 +25,11 @@ change machine-wide execution policy.
 ## CI
 
 `.github/workflows/ci.yml` restores everything, builds the license server and admin,
-compiles the desktop app with `-t:Compile` (the full Build target writes the runtime
-integrity manifest and therefore needs the untracked bundled tools), and runs the
-regression suite. Since `bundled-tools/` and `tools/` are not tracked, CI sets
+runs the desktop app's full Build target with `-p:SkipToolIntegrity=true`, and runs the
+regression suite. The runtime integrity manifest cannot be written without the untracked
+tool inventory, so CI opts out of that one target; every local, release and publish build
+still writes and verifies it by default — `SkipToolIntegrity` is an explicit CI-only
+opt-out. Since `bundled-tools/` and `tools/` are not tracked, CI also sets
 `PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS=1`: only the checks that read those on-disk
 assets report SKIP there, and they stay mandatory on a machine that has them.
 

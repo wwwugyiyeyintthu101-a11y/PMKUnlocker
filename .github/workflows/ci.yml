@@ -41,10 +41,22 @@ jobs:
       - name: Build license admin
         run: dotnet build PMKLicenseAdmin/PMKLicenseAdmin.csproj -c Debug --no-restore
 
-      # Compile-only: the normal Build target also writes the runtime integrity manifest, which
-      # requires the untracked bundled tools. Those are verified by release builds on the dev machine.
-      - name: Compile desktop app
-        run: dotnet build PMKUnlocker/PMKUnlocker.csproj -c Debug -t:Compile --no-restore
+      # Full Build target. The runtime integrity manifest needs the untracked tool inventory, so CI
+      # opts out explicitly; release/publish builds still verify every bundled hash and fail closed.
+      - name: Build desktop app
+        run: dotnet build PMKUnlocker/PMKUnlocker.csproj -c Debug --no-restore -p:SkipToolIntegrity=true
+
+      - name: Verify desktop output
+        shell: pwsh
+        run: |
+          $exe = 'PMKUnlocker/bin/Debug/net8.0-windows/PMKUnlocker.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Desktop build produced no $exe" }
+          if (-not (Test-Path -LiteralPath 'PMKUnlocker/bin/Debug/net8.0-windows/libusb-1.0.dll')) {
+            throw 'Desktop build did not copy libusb-1.0.dll'
+          }
+          if (-not (Test-Path -LiteralPath 'PMKUnlocker/bin/Debug/net8.0-windows/Potato.Fastboot.dll')) {
+            throw 'Desktop build did not copy the potato managed libraries'
+          }
 
       - name: Regression checks
         run: dotnet run --project tests/Regression/Regression.csproj -c Debug --no-restore
