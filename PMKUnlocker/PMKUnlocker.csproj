@@ -8,6 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- PotatoNV library တွေ (x86) နဲ့ libusb-1.0.dll (32-bit) အတွက် x86 ဖြစ်ရမယ် -->
     <PlatformTarget>x86</PlatformTarget>
+    <!-- Platform=x86 ဖြစ်ပေမဲ့ output ကို bin\Debug\net8.0-windows မှာ တစ်သမတ်တည်း ထားမယ်
+         (CI, BUILDING.md နဲ့ tools က ဒီ path ကို မှီခိုထားတယ်) -->
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
     <Version>7.3.5</Version>
     <FileVersion>7.3.5.0</FileVersion>
     <InformationalVersion>7.3.5</InformationalVersion>
