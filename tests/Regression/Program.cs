@@ -499,6 +499,76 @@ try
           glBad.Contains("kernel"),
         "GhostLock rejects non-matching kernel");
 
+    // GhostLock fix floor (CVE-2026-43499) + profile provenance
+    string noteLow = KernelExploit.GhostLockFixNote("5.15.194-android13-8-00038-g853eb7b6b965-ab15936612", "2026-08-01") ?? "";
+    Check(noteLow.Contains("below the fixed 5.15.212") && noteLow.Contains("vendor backport cannot be ruled out"),
+        "Fix note marks a below-floor 5.15 build as possibly backported");
+    string noteNoDate = KernelExploit.GhostLockFixNote("5.15.194-x", "") ?? "";
+    Check(noteNoDate.Contains("patch date unknown"),
+        "Fix note says patch date unknown when the build has none");
+    string noteFixed = KernelExploit.GhostLockFixNote("6.6.140-android15", "2026-06-01") ?? "";
+    Check(noteFixed.Contains("at/above the fixed 6.6.140"),
+        "Fix note reports a build at the fix floor as patched");
+    string noteUnknown = KernelExploit.GhostLockFixNote("4.19.191-x", "") ?? "";
+    Check(noteUnknown.Contains("patch status unknown") && KernelExploit.GhostLockFixNote("", "") == null,
+        "Fix note is honest for an unbranched kernel and silent for an empty one");
+
+    string provRoot = Path.Combine(dir, "prov-exploits");
+    Directory.CreateDirectory(Path.Combine(provRoot, "profiles"));
+    File.WriteAllText(Path.Combine(provRoot, "profiles", "verified.txt"),
+        "# test\n5.15.206-android13-8-00056-x\n");
+    Check(KernelExploit.ProfileProvenance(provRoot, "5.15.206-android13-8-00056-x") == "upstream-verified",
+        "Profile provenance reads the upstream verified list");
+    Check(KernelExploit.ProfileProvenance(provRoot, "5.15.194-android13-8-00038-x").StartsWith("local candidate"),
+        "Profile provenance flags an unlisted release as a local candidate");
+    Check(KernelExploit.ProfileProvenance(Path.Combine(dir, "prov-none"), "5.15.1").Contains("unrecorded"),
+        "Profile provenance is unrecorded without verified.txt");
+
+    // Measured-patched firmware — GhostLock cannot write once the kernel clears the stale waiter
+    string pkRoot = Path.Combine(dir, "patched-exploits");
+    Directory.CreateDirectory(pkRoot);
+    File.WriteAllText(Path.Combine(pkRoot, "patched-kernels.txt"),
+        "# header\n\n5.15.194-android13-8-00038-x | remove_waiter() has the GKI fix\n5.15.189-android13-8-00004-y\n");
+    Check(KernelExploit.PatchedFirmwareNote(pkRoot, " 5.15.194-android13-8-00038-x ") == "remove_waiter() has the GKI fix",
+        "Patched-firmware note returns the per-release reason");
+    Check((KernelExploit.PatchedFirmwareNote(pkRoot, "5.15.189-android13-8-00004-y") ?? "").Contains("remove_waiter"),
+        "Patched-firmware note falls back to the default reason without '|'");
+    Check(KernelExploit.PatchedFirmwareNote(pkRoot, "5.15.189-android13-8-00004") == null &&
+          KernelExploit.PatchedFirmwareNote(pkRoot, "") == null &&
+          KernelExploit.PatchedFirmwareNote(Path.Combine(dir, "pk-none"), "5.15.1") == null,
+        "Patched-firmware note is null for another release, an empty kernel and a missing list");
+    string shippedExploits = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "exploits");
+    Check(File.Exists(Path.Combine(shippedExploits, "patched-kernels.txt")) &&
+          (KernelExploit.PatchedFirmwareNote(shippedExploits,
+              "5.15.194-android13-8-00038-g853eb7b6b965-ab15936612") ?? "").Contains("remove_waiter"),
+        "Shipped patched-kernels.txt flags the bench firmware 5.15.194 with a remove_waiter() reason");
+
+    // Route success claim — separates a refused route from a write the route acknowledged but never landed
+    Check(KernelExploit.RouteClaimedWrite("[route] route_done status=0 clean=1/1 step=0 errno=0 calls=1 success=1") &&
+          KernelExploit.RouteClaimedWrite("multicast route status=0 clean=1/1 step=0 errno=0"),
+        "Route success claim reads route_done success=1 and route status=0");
+    Check(!KernelExploit.RouteClaimedWrite("[route] route_done status=-1 clean=0/1 step=2 errno=35 calls=1 success=0") &&
+          !KernelExploit.RouteClaimedWrite("PI route did not produce a verified write") &&
+          !KernelExploit.RouteClaimedWrite(null),
+        "Route success claim is false for a refused route and for empty output");
+
+    // Leak summary — counters must come from ONE summary line of THIS run, never a stale device log
+    string runA = "[*] attempt=1/4\n[!] slide tracefs raw summary pages=9 bytes=36864 events=214 callers=204 parse_fail=0 candidates=0 cpu_files=8\n";
+    string staleB = "[!] slide tracefs raw summary pages=9 bytes=36864 events=214 callers=348 parse_fail=0 candidates=0 cpu_files=8";
+    string leakLine = KernelExploit.LastLeakSummaryLine(runA + staleB, out int leakN) ?? "";
+    var lc = KernelExploit.LeakCounters(leakLine);
+    Check(leakN == 2 && lc?.Callers == 348 && lc?.Candidates == 0,
+        "Leak counters take the last summary line whole (no 204/348 mix)");
+    var lcOne = KernelExploit.LeakCounters(KernelExploit.LastLeakSummaryLine(runA, out int leakOne));
+    Check(leakOne == 1 && lcOne?.Callers == 204 && lcOne?.ParseFail == 0 && lcOne?.Candidates == 0,
+        "Leak counters keep all six fields from a single summary line");
+    Check(KernelExploit.LastLeakSummaryLine("callers=204 parse_fail=0 candidates=0", out int leakNone) == null &&
+          leakNone == 0 && KernelExploit.LeakCounters(null) == null,
+        "A summary-shaped fragment without the summary line yields no counters");
+    var lcPartial = KernelExploit.LeakCounters("[!] slide tracefs raw summary pages=9 callers=204");
+    Check(lcPartial == null && KernelExploit.LeakCounters("") == null,
+        "An incomplete summary line is refused instead of half-parsed");
+
     // --- MI FLASH (Xiaomi fastboot flash_all.bat parser) ---
     string romBase = Path.Combine(dir, "ROM Air MIUI");
     var parsed = MiFlash.ParseLines(new[]

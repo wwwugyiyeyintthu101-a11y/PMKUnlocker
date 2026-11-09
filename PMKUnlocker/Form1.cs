@@ -9902,6 +9902,10 @@ namespace PMKUnlocker
             string manifestPath = Path.Combine(exploitsRoot, "manifest.json");
             ExploitManifest manifest = KernelExploit.LoadManifest(manifestPath);
             ExploitEntry exploitMatch = KernelExploit.FindMatch(manifest, fp, out string exploitStatus);
+            // measured-patched firmware (exploits\patched-kernels.txt) — the kernel clears the stale waiter,
+            // so GhostLock's stack write cannot land on it no matter which profile is pushed
+            string patchedNote = KernelExploit.PatchedFirmwareNote(exploitsRoot, fp.Kernel);
+            bool unsupportedFirmware = exploitMatch != null && patchedNote != null;
 
             // ရွေးထားတဲ့ model ≠ ချိတ်ထားတဲ့ဖုန်း → ရပ် (Auto = pickedEntry null → ကျော်)
             if (pickedEntry != null &&
@@ -9928,9 +9932,11 @@ namespace PMKUnlocker
 
             string mode = hasRoot
                 ? "temp root (ready)"
-                : exploitMatch != null
-                    ? "kernel exploit → temp root"
-                    : "no-root (ADB only)";
+                : unsupportedFirmware
+                    ? "unsupported firmware (kernel patched)"
+                    : exploitMatch != null
+                        ? "kernel exploit → temp root"
+                        : "no-root (ADB only)";
             string exploitLine = exploitMatch != null
                 ? "Match : " + exploitMatch.Name + (string.IsNullOrWhiteSpace(exploitMatch.Id) ? "" : " (" + exploitMatch.Id + ")")
                 : "Match : none";
@@ -9946,6 +9952,11 @@ namespace PMKUnlocker
                     (hasRoot
                         ? "• Temp root ရှိပြီး — FRP မလုပ်ဘူး" + Environment.NewLine +
                           "• ဆက်လုပ်ရန်: FRP Reset (ROOT) ခလုတ်"
+                        : unsupportedFirmware
+                            ? "• ဒီ firmware ကို GhostLock မထောက်ပံ့ဘူး — kernel မှာ CVE-2026-43499 fix ပါပြီ" + Environment.NewLine +
+                              "• " + patchedNote + Environment.NewLine +
+                              "• Exploit ကို မစမ်းတော့ဘူး — reboot / profile အသစ်ကလည်း မပြောင်းနိုင်" + Environment.NewLine +
+                              "• No-root MIUI path နဲ့ ဆက်မယ်"
                         : exploitMatch != null
                             ? "• su မရ — kernel exploit payload စမ်းမယ် (ART-style)" + Environment.NewLine +
                               "• Root ရရင် ရပ်မယ် — FRP Reset (ROOT) နဲ့ ဆက်" + Environment.NewLine +
@@ -10030,7 +10041,17 @@ namespace PMKUnlocker
 
             // Step A2: ART-style kernel exploit (su မရရင် payload စမ်း)
             double exploitSec = -1;
-            if (!hasRoot && exploitMatch != null)
+            if (!hasRoot && unsupportedFirmware)
+            {
+                // measured kernel: remove_waiter() fix present → no stale waiter → the PI write can never land
+                Log("[!] UNSUPPORTED FIRMWARE — " + fp.Kernel, Color.OrangeRed);
+                Log("    " + patchedNote, Color.Orange);
+                Log("[i] GhostLock (CVE-2026-43499) ကို မစမ်းတော့ဘူး — kernel က stale waiter ကို ရှင်းလိုက်လို့ " +
+                    "stack write မရောက်နိုင်။", Color.Orange);
+                Log("[i] A reboot or a rebuilt GLK1 profile cannot change a patched kernel.", Color.Gray);
+                Log("[i] FRP အတွက် no-root path / BROM auth-bypass / vendor tool ကို သုံးပါ။", Color.Gray);
+            }
+            else if (!hasRoot && exploitMatch != null)
             {
                 var swExploit = Stopwatch.StartNew();
                 (bool exRoot, double exSec) = await TryKernelExploitAsync(exploitsRoot, exploitMatch, fp);
@@ -10075,7 +10096,10 @@ namespace PMKUnlocker
                 return;
             }
 
-            Log("[4/4] No temp root → No-root MIUI path: provision + wizard skip...", Color.Cyan);
+            Log(unsupportedFirmware
+                    ? "[4/4] No temp root — firmware unsupported (kernel patched) → No-root MIUI path: provision + wizard skip..."
+                    : "[4/4] No temp root → No-root MIUI path: provision + wizard skip...",
+                Color.Cyan);
 
             // Step B: MIUI/Xiaomi provision settings (no-root path only)
             if (!tempRootAborted)
@@ -10484,6 +10508,12 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 (hostMode ? " [host]" : " [device]") +
                 (attempt > 0 ? " · retry " + attempt + "/1" : ""), Color.Cyan);
 
+            if (!hostMode && ex.Id.IndexOf("ghostlock", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string fixNote = KernelExploit.GhostLockFixNote(fp.Kernel, fp.Patch);
+                if (!string.IsNullOrEmpty(fixNote)) Log("[i] " + fixNote, Color.Orange);
+            }
+
             string local = KernelExploit.PayloadFullPath(exploitsRoot, ex);
             if (!File.Exists(local))
             {
@@ -10497,6 +10527,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             int timeoutSec = ex.TimeoutSec <= 0 ? 30 : ex.TimeoutSec;
             double realSec = -1;
             string runOut = "";
+            string profileRel = null;
 
             if (hostMode)
             {
@@ -10636,7 +10667,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     }
                     await ExecuteCommandCleanAsync("adb.exe", "shell chmod 644 \"" + remoteProfile + "\"",
                         "Kernel Exploit - chmod profile", false, false, true);
-                    Log("[OK] profile push (GLK1) · " + matchedRel, Color.LightGreen);
+                    profileRel = matchedRel;
+                    string provenance = KernelExploit.ProfileProvenance(exploitsRoot, matchedRel);
+                    Log("[OK] profile push (GLK1) · " + matchedRel + " · " + provenance,
+                        provenance == "upstream-verified" ? Color.LightGreen : Color.Orange);
                 }
                 else
                 {
@@ -10694,6 +10728,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
                 // ယခင် run ကနေ ကျန်ခဲ့တဲ့ ksu marker ကို ရှင်း — stale marker false-positive ကာကွယ်
                 await ExecuteCommandQuickAsync("adb.exe", "shell rm -f /data/local/tmp/.ghostlock_ksu.log");
+                // run ဟောင်းရဲ့ device log ကို ဖျက်ပြီး ဒီ run ရဲ့ လိုင်းတွေပဲ ကျန်စေ —
+                // failure signature က ဟောင်း run ရဲ့ counter/verdict ကို မဖတ်စေဖို့
+                await ExecuteCommandQuickAsync("adb.exe",
+                    "shell rm -f /data/local/tmp/zircon-app-run.log /data/local/tmp/ghostlock-run.log");
 
                 string runCmd;
                 if (remote.StartsWith("/"))
@@ -10752,7 +10790,9 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                                  t.Contains("no offsets") || t.Contains("external offsets") ||
                                  t.Contains("profile release mismatch") || t.Contains("cannot load profile") ||
                                  t.Contains("no entrypoint") ||
-                                 t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 // "parse_fail=0" က အောင်မြင်တဲ့ counter — error အရောင် မပေးနဲ့
+                                 (!t.Contains("parse_fail=0") &&
+                                  t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0) ||
                                  t.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0)
                             lc = Color.OrangeRed;
                         else if (t.Contains("offsets matched") || t.Contains("child uid") ||
@@ -10873,7 +10913,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
 
             Log("[!] Exploit finished but no root (su probe empty/fail).", Color.OrangeRed);
 
-            // (၁) ဖြစ်ရပ်အကြောင်းရင်း — device run log tail ကို stdout filter မှာ ကျန်ခဲ့ရင်တောင် ပြ ("no offsets" စတဲ့ root cause)
+            // (၁) ဖြစ်ရပ်အကြောင်းရင်း — ဒီ run ရဲ့ device log tail (run မတိုင်မီ ဟောင်းကို ဖျက်ထားတယ်)
             {
                 var devShown = new System.Collections.Generic.HashSet<string>(
                     (runOut ?? "").Replace("\r", "").Split('\n').Select(r => r.TrimEnd()), StringComparer.Ordinal);
@@ -10886,7 +10926,11 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     {
                         string t = Regex.Replace(raw, "\u001b\\[[0-9;]*m", "").TrimEnd();
                         if (t.Length == 0 || !devShown.Add(t)) continue;
-                        if (!header) { Log("    ---- device run log (tail) ----", Color.Gray); header = true; }
+                        if (!header)
+                        {
+                            Log("    ---- " + Path.GetFileName(lg) + " (this run) ----", Color.Gray);
+                            header = true;
+                        }
                         bool bad = t.IndexOf("[!]", StringComparison.Ordinal) >= 0 ||
                                    t.IndexOf("no offsets", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                    t.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -10897,21 +10941,97 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 }
             }
 
-            // (ခ) failure signature ဖတ် — same-boot burn / flaky leak ကို ခွဲခြားပြီး reboot-retry ဒါမှမဟုတ် hint
+            // (ခ) failure signature — ဒီ run ရဲ့ stdout၊ မလောက်ရင် ဒီ run ရဲ့ device log ကို ဖတ်တယ်။
+            // run မတိုင်မီ /data/local/tmp က log နှစ်ခုလုံးကို ဖျက်ထားတာမို့ ဟောင်း run ရဲ့ လိုင်း မပါနိုင်ဘူး။
             string sigSrc = runOut ?? "";
-            if (sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) < 0 &&
-                sigSrc.IndexOf("stack writer", StringComparison.OrdinalIgnoreCase) < 0)
+            string sigSource = "this run's stdout";
+
+            // Exploit က internal attempt တစ်ခုစီအတွက် summary လိုင်း တစ်ကြောင်း ထုတ်တယ် —
+            // counters အားလုံးကို လိုင်းတစ်ကြောင်းတည်း (နောက်ဆုံး attempt) ကနေ ယူမှ တစ်ခုနဲ့တစ်ခု မရောဘူး။
+            string leakSummary = KernelExploit.LastLeakSummaryLine(sigSrc, out int leakSummaryCount);
+
+            if (leakSummary == null)
             {
-                // stdout ထဲ မပါရင် device run log ကနေ ပြန်ရှာ
-                foreach (string lg in new[] { "/data/local/tmp/zircon-app-run.log", "/data/local/tmp/ghostlock-run.log" })
+                // stdout မှာ summary မပါ (payload က buffered stdout ဆုံးရှုံး) → ဒီ run ရဲ့ log နှစ်ဖိုင်လုံး ဖတ်၊
+                // summary ကို ရှာတွေ့တဲ့အထိပဲ ဆက် (ghostlock-run = wrapper, zircon-app-run = exploit ရဲ့ slide detail)
+                foreach (string lg in new[] { "/data/local/tmp/ghostlock-run.log", "/data/local/tmp/zircon-app-run.log" })
                 {
-                    string tail = await ExecuteCommandQuickAsync("adb.exe", "shell tail -n 60 " + lg);
-                    if (!string.IsNullOrWhiteSpace(tail)) sigSrc += "\n" + tail;
-                    if (sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) >= 0) break;
+                    string tail = await ExecuteCommandQuickAsync("adb.exe", "shell tail -n 200 " + lg);
+                    if (string.IsNullOrWhiteSpace(tail)) continue;
+                    sigSrc += "\n" + tail;
+                    sigSource = "this run's device log";
+                    leakSummary = KernelExploit.LastLeakSummaryLine(sigSrc, out leakSummaryCount);
+                    if (leakSummary != null) break;
                 }
             }
+
             bool burnt = sigSrc.IndexOf("refusing retry", StringComparison.OrdinalIgnoreCase) >= 0 ||
                          sigSrc.IndexOf("stack writer ran", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // leak plan screened 0 candidates out of a fully parsed tracefs page set (parse_fail=0):
+            // profile's caller list does not describe this kernel — a reboot cannot change that.
+            var leak = KernelExploit.LeakCounters(leakSummary);
+            int leakCandidates = leak?.Candidates ?? -1;
+            int leakCallers = leak?.Callers ?? -1;
+            int leakParseFail = leak?.ParseFail ?? -1;
+            if (leak != null)
+                Log("[i] Leak counters (" + sigSource + ", summary #" + leakSummaryCount +
+                    " of this run): " + leakSummary!.Trim(), Color.Gray);
+            bool leakPlanMismatch = leakCandidates == 0 && leakCallers > 0 && leakParseFail == 0;
+
+            if (leakPlanMismatch)
+            {
+                Log("[!] Leak stage screened 0 candidates from " + leakCallers +
+                    " parsed tracefs callers (parse_fail=0) — this kernel does not fit the profile.",
+                    Color.OrangeRed);
+                if (profileRel != null)
+                    Log("[i] Profile " + profileRel + " · " +
+                        KernelExploit.ProfileProvenance(exploitsRoot, profileRel), Color.Orange);
+                Log("[i] A reboot cannot change a profile mismatch — no retry.", Color.Orange);
+                return (false, -1);
+            }
+
+            // "Write 1 failed" = the W1 SELinux write did not verify. Two shapes:
+            //   route reported success (success=1 / status=0) yet SELinux did not change → the write never
+            //     landed: a kernel that clears the stale waiter (remove_waiter() fix) or a profile page that
+            //     is in the direct map but wrong;
+            //   route refused → the profile's kernel_phys_load / kernel_phys_offset do not describe this build.
+            // Neither can be changed by a reboot — no retry.
+            // (observed shape: "W1: SELinux attempt 1/1" then "[-] Write 1 failed")
+            bool w1Exhausted = sigSrc.Contains("Write 1 failed");
+            if (w1Exhausted)
+            {
+                if (profileRel != null)
+                    Log("[i] Profile " + profileRel + " · " +
+                        KernelExploit.ProfileProvenance(exploitsRoot, profileRel), Color.Orange);
+                string runningNote = KernelExploit.PatchedFirmwareNote(exploitsRoot, fp.Kernel);
+                if (runningNote != null || KernelExploit.RouteClaimedWrite(sigSrc))
+                {
+                    if (runningNote != null)
+                    {
+                        Log("[!] UNSUPPORTED FIRMWARE — " + fp.Kernel, Color.OrangeRed);
+                        Log("    " + runningNote, Color.Orange);
+                    }
+                    else
+                    {
+                        Log("[!] `Write 1 failed` after the route reported success — the write was acknowledged " +
+                            "but the SELinux value did not change.", Color.OrangeRed);
+                        Log("[i] Either the kernel already carries the remove_waiter() fix (CVE-2026-43499) " +
+                            "or this profile's phys page is in the direct map but points at the wrong page.",
+                            Color.Orange);
+                    }
+                    Log("[i] Check the firmware's fix status first; if it is not patched, re-extract " +
+                        "kernel_phys_load / kernel_phys_offset from vendor_boot.img.", Color.Orange);
+                }
+                else
+                {
+                    Log("[i] `Write 1 failed` = kernel_phys_load / kernel_phys_offset in the GLK1 profile are " +
+                        "missing or wrong for this build (MediaTek). Re-extract both from vendor_boot.img.",
+                        Color.Orange);
+                }
+                Log("[i] A reboot cannot change a kernel or a profile value — no retry.", Color.Orange);
+                return (false, -1);
+            }
 
             if (attempt == 0)
             {
