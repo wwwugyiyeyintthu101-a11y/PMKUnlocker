@@ -426,10 +426,14 @@ namespace PMKUnlocker
             }
 
             int flashCount = selected.Count(o => o.Kind == "flash");
+            int eraseFirstCount = chkMiEraseFirst.Checked
+                ? MiFlash.EraseFirstFor(selected, new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Count
+                : 0;
             DialogResult ask = MessageBox.Show(this,
                 "MI Fastboot Flashing — " + flashCount + " file(s), " + selected.Count + " op(s)" +
-                (chkMiEraseFirst.Checked ? " (+ " + MiFlash.EraseFirst.Length + " erase first)" : "") + "\n\n" +
-                "Erase first: " + (chkMiEraseFirst.Checked ? "ON" : "OFF") +
+                (chkMiEraseFirst.Checked ? " (+ " + eraseFirstCount + " erase first)" : "") + "\n\n" +
+                "Erase first: " + (chkMiEraseFirst.Checked ? "ON (only partitions being flashed)" : "OFF") +
                 "    Auto Reboot: " + (chkMiAutoReboot.Checked ? "ON" : "OFF"),
                 "MI Fastboot Flashing", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (ask != DialogResult.Yes) return;
@@ -504,9 +508,8 @@ namespace PMKUnlocker
                 var batErase = new HashSet<string>(
                     selected.Where(o => o.Kind == "erase").Select(o => o.Partition),
                     StringComparer.OrdinalIgnoreCase);
-                foreach (string p in MiFlash.EraseFirst)
+                foreach (string p in MiFlash.EraseFirstFor(selected, batErase, guardSkipped))
                 {
-                    if (batErase.Contains(p) || guardSkipped.Contains(p)) continue;
                     if (stopRequested) break;
                     bool okE = await ExecuteCommandCleanAsync("fastboot.exe", "erase " + p, "Erase [" + p + "]", quiet: true, quietFail: true);
                     Log(" Erasing [ erase ] -> [ " + p + " ]... " + (okE ? "Ok" : "Failed"), okE ? Color.LightGreen : Color.OrangeRed);

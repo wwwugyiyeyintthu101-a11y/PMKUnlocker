@@ -159,6 +159,7 @@ internal static class ReviewSafety
             if (!IsAndroidSparse(full)) continue;
 
             long expanded = ReadSparseExpandedSize(full);
+            ValidateSparseProgramRange(expanded, program, fileName);
             string rawName = Path.GetFileNameWithoutExtension(fileName) + SparseRawSuffix;
             string rawPath = Path.Combine(Path.GetDirectoryName(full)!, rawName);
             rawName = Path.GetRelativePath(searchPath, rawPath);
@@ -176,6 +177,31 @@ internal static class ReviewSafety
 
         if (converted > 0) doc.Save(xmlPath);
         return converted;
+    }
+
+    // The XML tells fh_loader how many sectors to write. If the expanded image cannot cover
+    // file_sector_offset + num_partition_sectors, the tool reads past EOF or writes a short
+    // partition; refuse before producing any bytes.
+    internal static void ValidateSparseProgramRange(long expandedBytes, XElement program, string imageName)
+    {
+        long Number(string name, long fallback)
+        {
+            string? raw = (string?)program.Attribute(name);
+            if (raw == null) return fallback;
+            if (!long.TryParse(raw, out long n) || n < 0)
+                throw new InvalidDataException("Unsupported " + name + " in " + imageName);
+            return n;
+        }
+        long sector = Number("SECTOR_SIZE_IN_BYTES", 512);
+        if (sector <= 0) throw new InvalidDataException("Unsupported sector size in " + imageName);
+        long sectors = Number("num_partition_sectors", 0);
+        if (sectors <= 0) return;
+        long offset = checked(Number("file_sector_offset", 0) * sector);
+        long needed = checked(offset + sectors * sector);
+        if (needed > expandedBytes)
+            throw new InvalidDataException(
+                imageName + ": expanded size " + expandedBytes + " B cannot cover the XML range (" +
+                needed + " B) — the firmware XML and the sparse image disagree.");
     }
 
     internal static bool IsAndroidSparse(string path)

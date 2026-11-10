@@ -755,6 +755,56 @@ try
     catch (InvalidDataException) { externalScriptRefused = true; }
     Check(externalScriptRefused, "EDL script outside the install folder is refused");
 
+    // ===== P2: device-supplied labels, erase-first, sparse range, QC identity =====
+    Check(ShopServices.IsSafePartitionName("boot_a") && ShopServices.IsSafePartitionName("persist"),
+        "Partition labels made only of letters, digits, _ and - are accepted");
+    Check(!ShopServices.IsSafePartitionName("boot; rm -rf /data") && !ShopServices.IsSafePartitionName("a\"b") &&
+          !ShopServices.IsSafePartitionName("") && !ShopServices.IsSafePartitionName("../../etc"),
+        "Partition labels with shell metacharacters or path traversal are rejected");
+    Check(ShopServices.IsSafeDevicePath("/dev/block/by-name/boot") && ShopServices.IsSafeDevicePath("/dev/block/sda12"),
+        "Full /dev/block device paths are accepted");
+    Check(!ShopServices.IsSafeDevicePath("/dev/block/../../etc/passwd") && !ShopServices.IsSafeDevicePath("/dev/block/\"x") &&
+          !ShopServices.IsSafeDevicePath("/etc/passwd"),
+        "Device paths with traversal, quotes or outside /dev are rejected");
+
+    var eraseSelected = new List<MiFlashOp>
+    {
+        new MiFlashOp { Kind = "flash", Partition = "boot_a" },
+        new MiFlashOp { Kind = "flash", Partition = "system" },
+        new MiFlashOp { Kind = "erase", Partition = "cache" }
+    };
+    Check(MiFlash.EraseFirstFor(eraseSelected, new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)).SequenceEqual(new[] { "boot_a" }),
+        "Erase-first only erases partitions this run rewrites, so boot_b survives a system-only flash");
+    var noBoot = new List<MiFlashOp> { new MiFlashOp { Kind = "flash", Partition = "system" } };
+    Check(MiFlash.EraseFirstFor(noBoot, new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Count == 0,
+        "Erase-first erases nothing when no erase-first partition is selected for flashing");
+    Check(MiFlash.EraseFirstFor(eraseSelected, new HashSet<string>(new[] { "boot_a" }, StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Count == 0,
+        "Erase-first skips a partition the bat already erases");
+
+    var sparseProgram = XElement.Parse(
+        "<program filename=\"boot.img\" SECTOR_SIZE_IN_BYTES=\"4096\" num_partition_sectors=\"4\" file_sector_offset=\"0\"/>");
+    ReviewSafety.ValidateSparseProgramRange(16384, sparseProgram, "boot.img");
+    bool sparseRangeRefused = false;
+    try { ReviewSafety.ValidateSparseProgramRange(16383, sparseProgram, "boot.img"); }
+    catch (InvalidDataException) { sparseRangeRefused = true; }
+    Check(sparseRangeRefused, "A sparse image smaller than its XML sector range is refused before writing");
+    var offsetProgram = XElement.Parse(
+        "<program SECTOR_SIZE_IN_BYTES=\"512\" num_partition_sectors=\"2\" file_sector_offset=\"4\"/>");
+    bool sparseOffsetRefused = false;
+    try { ReviewSafety.ValidateSparseProgramRange(3000, offsetProgram, "offset.img"); }
+    catch (InvalidDataException) { sparseOffsetRefused = true; }
+    Check(sparseOffsetRefused, "A file_sector_offset is counted when the sparse range is validated");
+
+    var identityA = new[] { new GptPartition("boot_a", 100, 200, ""), new GptPartition("system", 300, 900, "") };
+    var identityB = new[] { new GptPartition("boot_a", 100, 200, ""), new GptPartition("system", 300, 950, "") };
+    Check(QcDeviceIdentity.Fingerprint(identityA) == QcDeviceIdentity.Fingerprint(identityA.ToArray()),
+        "The same GPT layout yields the same restore fingerprint");
+    Check(QcDeviceIdentity.Fingerprint(identityA) != QcDeviceIdentity.Fingerprint(identityB),
+        "A different GPT layout yields a different restore fingerprint");
+
     // ===== MtkFirmware layer: scatter parser / risk / preflight / backend / redactor =====
     string fwDir = Path.Combine(dir, "fw"); Directory.CreateDirectory(fwDir);
     string GoodScatter(string blocks) =>

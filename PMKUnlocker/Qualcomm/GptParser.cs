@@ -130,3 +130,12 @@ internal static class GptParser
             .Replace("'", "&apos;");
     }
 }
+
+// A restore writes several partitions through short-lived sessions. Re-checking the live GPT
+// before each write proves the same phone is still on the port: a swapped unit or a changed
+// layout produces a different fingerprint and the run stops instead of writing into a stranger.
+internal static class QcDeviceIdentity
+{
+    internal static string Fingerprint(IEnumerable<GptPartition> partitions) =>
+        string.Join("\n", partitions.Select(p => p.Name + "|" + p.FirstLba + "|" + p.LastLba));
+}

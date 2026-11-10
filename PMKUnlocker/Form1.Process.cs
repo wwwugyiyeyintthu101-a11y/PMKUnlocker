@@ -512,14 +512,17 @@ namespace PMKUnlocker
                 {
                     string imgHuman = FormatBytesLong(imgSize);
                     string partHuman = FormatBytes(p.LengthHex);
-                    DialogResult r = ConfirmDialog.Show(
-                        "Image က partition ထက် ကြီ်နေတယ်!\n\n" +
+                    Log("[!] Refusing to write " + partition + ": image " + imgHuman +
+                        " is larger than the partition " + partHuman + " — it would overwrite neighbors.",
+                        Color.OrangeRed);
+                    ConfirmDialog.Show(
+                        "Image က partition ထက် ကြီးနေတယ်!\n\n" +
                         "• Partition : " + partition + " (" + partHuman + ")\n" +
                         "• Image    : " + imgHuman + "\n\n" +
                         "ဒီအတိုင်း write ရင် data corruption / brick ဖြစ်နိုင်တယ်။\n" +
-                        "ဆက်လုပ်မလား?",
-                        "Partition Size Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                    if (r != DialogResult.Yes) return false;
+                        "ဒါကြောင့် မရေးပါဘူး — မှန်ကန်တဲ့ image ပြန်ရွေးပါ။",
+                        "Partition Size Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
                 }
             }
             catch (Exception ex)

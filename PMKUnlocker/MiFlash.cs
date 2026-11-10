@@ -28,6 +28,20 @@ internal static class MiFlash
     // (missing partition ကို Failed ပြပြီး ဆက်တယ် — MST log အတိုင်း)
     internal static readonly string[] EraseFirst = { "opcust", "opconfig", "boot_a", "boot_b", "expdb", "metadata" };
 
+    // Erase-first only makes sense for a partition this run is about to rewrite. Erasing a
+    // partition that is not in the plan (say boot_a when only system is ticked) leaves the
+    // phone without a boot image even though every selected write succeeded.
+    internal static List<string> EraseFirstFor(IEnumerable<MiFlashOp> selected,
+        ISet<string> batErase, ISet<string> skipped)
+    {
+        var flashing = new HashSet<string>(
+            selected.Where(o => o.Kind == "flash").Select(o => o.Partition),
+            StringComparer.OrdinalIgnoreCase);
+        return EraseFirst
+            .Where(p => flashing.Contains(p) && !batErase.Contains(p) && !skipped.Contains(p))
+            .ToList();
+    }
+
     internal static string? FindFlashAllBat(string folder)
     {
         try

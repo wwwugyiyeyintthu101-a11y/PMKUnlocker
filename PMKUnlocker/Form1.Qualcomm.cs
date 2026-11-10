@@ -642,7 +642,8 @@ namespace PMKUnlocker
 
         // Native QC dispatch — replaces `python edl.py <command>` for the Qualcomm tab.
         // Opens one firehose session (Sahara + ping + sig auth), then runs the verb.
-        private async Task<bool> RunNativeEdlAsync(string command, string title, bool clearPartitions)
+        private async Task<bool> RunNativeEdlAsync(string command, string title, bool clearPartitions,
+            QcRestoreGuard guard = null)
         {
             if (isTaskRunning || (flashWorkflowRunning && !flashWorkflowContext.Value))
             {
@@ -653,7 +654,7 @@ namespace PMKUnlocker
             isTaskRunning = true;
             try
             {
-                return await RunNativeEdlCoreAsync(command, title, clearPartitions);
+                return await RunNativeEdlCoreAsync(command, title, clearPartitions, guard);
             }
             finally
             {
@@ -661,7 +662,8 @@ namespace PMKUnlocker
             }
         }
 
-        private async Task<bool> RunNativeEdlCoreAsync(string command, string title, bool clearPartitions)
+        private async Task<bool> RunNativeEdlCoreAsync(string command, string title, bool clearPartitions,
+            QcRestoreGuard guard = null)
         {
             string port = cmbPorts.SelectedItem?.ToString();
             if (string.IsNullOrEmpty(port) || !port.StartsWith("COM"))
@@ -704,6 +706,7 @@ namespace PMKUnlocker
 
                 using var session = await FirehoseSession.OpenAsync(port, loader, sig, NativeEdlLog, cts.Token);
                 if (flashWorkflowContext.Value) workflowDidOp = true;
+                if (guard != null) await EnforceDeviceIdentityAsync(session, guard, cts.Token);
 
                 switch (args[0].ToLowerInvariant())
                 {
@@ -1071,6 +1074,7 @@ namespace PMKUnlocker
                         "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
                         "Confirm QC Restore")) return;
 
+                var restoreGuard = new QcRestoreGuard();
                 await RunFlashWorkflowAsync(async () =>
                 {
                     int done = 0;
@@ -1078,7 +1082,7 @@ namespace PMKUnlocker
                     {
                         if (stopRequested) break;
                         bool ok = await RunEdlCommandAsync(
-                            "w " + f.Name + " \"" + f.Path + "\"", "Qualcomm Restore — " + f.Name);
+                            "w " + f.Name + " \"" + f.Path + "\"", "Qualcomm Restore — " + f.Name, restoreGuard);
                         if (!ok)
                             throw new IOException("Restore stopped at " + f.Name + " — the remaining partitions were NOT written.");
                         done++;
@@ -1144,6 +1148,7 @@ namespace PMKUnlocker
                         "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
                         "Confirm EFS Restore")) return;
 
+                var efsGuard = new QcRestoreGuard();
                 await RunFlashWorkflowAsync(async () =>
                 {
                     int done = 0;
@@ -1151,7 +1156,7 @@ namespace PMKUnlocker
                     {
                         if (stopRequested) break;
                         bool ok = await RunEdlCommandAsync(
-                            "w " + p.Name + " \"" + p.Path + "\"", "Qualcomm EFS Restore — " + p.Name);
+                            "w " + p.Name + " \"" + p.Path + "\"", "Qualcomm EFS Restore — " + p.Name, efsGuard);
                         if (!ok)
                             throw new IOException("EFS restore stopped at " + p.Name + " — the remaining partitions were NOT written.");
                         done++;
@@ -1199,9 +1204,28 @@ namespace PMKUnlocker
                 "IMEI Read (EFS)", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private async Task<bool> RunEdlCommandAsync(string command, string title)
+        private async Task<bool> RunEdlCommandAsync(string command, string title, QcRestoreGuard guard = null)
         {
-            return await RunNativeEdlAsync(command, title, false);
+            return await RunNativeEdlAsync(command, title, false, guard);
+        }
+
+        private sealed class QcRestoreGuard
+        {
+            public string Fingerprint = "";
+        }
+
+        // Each partition opens a fresh session; re-read the live GPT and prove it is the same
+        // phone before writing the next file.
+        private static async Task EnforceDeviceIdentityAsync(FirehoseSession session, QcRestoreGuard guard,
+            CancellationToken ct)
+        {
+            var layout = await session.ReadGptLayoutAsync(ct);
+            string fingerprint = QcDeviceIdentity.Fingerprint(layout.Partitions);
+            if (guard.Fingerprint.Length == 0) { guard.Fingerprint = fingerprint; return; }
+            if (!string.Equals(guard.Fingerprint, fingerprint, StringComparison.Ordinal))
+                throw new IOException(
+                    "The phone's GPT changed between partitions — a different device may now be on this port. " +
+                    "Restore stopped without writing the remaining files.");
         }
 
         // Firehose loader manual pick — loader picker ရဲ့ "Manual / saved loader" ကနေ / Loader file row ကနေ ခေါ်တယ်

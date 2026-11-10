@@ -127,6 +127,31 @@ internal static class ShopServices
         return full;
     }
 
+    // Device-supplied partition labels go straight into `su -c` and tool arguments, so only
+    // characters that cannot change the command are accepted.
+    internal static bool IsSafePartitionName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 64) return false;
+        foreach (char c in name.Trim())
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '-') return false;
+        return true;
+    }
+
+    // A full device node (e.g. /dev/block/sda12) is also acceptable, but no '..' segments
+    // and no shell metacharacters.
+    internal static bool IsSafeDevicePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 200) return false;
+        if (!path.StartsWith("/dev/", StringComparison.Ordinal)) return false;
+        foreach (string segment in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment == "." || segment == "..") return false;
+            foreach (char c in segment)
+                if (!char.IsLetterOrDigit(c) && c != '_' && c != '-' && c != '.') return false;
+        }
+        return true;
+    }
+
     internal static string FindTool(string root, string name)
     {
         var tools = LoadTools();

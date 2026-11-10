@@ -24,13 +24,7 @@ namespace PMKUnlocker
 {
     public partial class Form1
     {
-        private static bool IsValidPartitionName(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return false;
-            foreach (char c in name.Trim())
-                if (!char.IsLetterOrDigit(c) && c != '_' && c != '-') return false;
-            return true;
-        }
+        private static bool IsValidPartitionName(string name) => ShopServices.IsSafePartitionName(name);
 
         // ရွေးထားတဲ့ (checkbox ခြစ်ထားတဲ့) partition စာရင်း — filter ဖြင့် မမြင်ရသေးတဲ့ row တွေ မပါ
         private List<string> GetCheckedPartitions()
@@ -106,6 +100,12 @@ namespace PMKUnlocker
 
         private async Task<bool> RunPartitionOpAsync(string op, string partition, string filePath, string title)
         {
+            // The label often comes from the phone itself; validate before it reaches any shell.
+            if (!IsValidPartitionName(partition) && !ShopServices.IsSafeDevicePath(partition))
+            {
+                Log("[x] Invalid partition name or device path — rejected before running anything.", Color.Red);
+                return false;
+            }
             if (op == "w" && filePath != null && !WarnIfImageTooLarge(partition, filePath))
                 return false;
 
