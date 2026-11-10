@@ -53,8 +53,8 @@ public class AdminForm : Form
 
         var pnlConn = MakeCard(12, 56, 1076, 96);
         var lblKey = MakeLabel("Admin Key (X-Admin-Key)", 14, 12);
-        // Admin key — source မှာ hardcode မလုပ်တော့; server ထုတ်လိုက်သော adminkey.txt ကနေ ကူးထည့်ပါ
-        txtKey = MakeBox(14, 34, 280, "admin key (adminkey.txt)");
+        // Admin key — source မှာ hardcode မလုပ်တော့; server က ပထမဆုံး start မှာ ပြသလိုက်တဲ့ key ကို ကူးထည့်ပါ
+        txtKey = MakeBox(14, 34, 280, "admin key (printed by the license server)");
         txtKey.UseSystemPasswordChar = true;
 
         var lblSrv = MakeLabel("ဆာဗာ URL", 310, 12);
@@ -287,7 +287,7 @@ public class AdminForm : Form
         get
         {
             string k = (txtKey.Text ?? "").Trim();
-            return k == "admin key (adminkey.txt)" ? "" : k; // placeholder မပို့ရ
+            return k == "admin key (printed by the license server)" ? "" : k; // placeholder မပို့ရ
         }
     }
     private string Email => FieldVal(txtEmail, "user@gmail.com");

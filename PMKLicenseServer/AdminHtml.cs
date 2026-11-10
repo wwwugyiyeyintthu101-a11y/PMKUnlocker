@@ -86,9 +86,22 @@ function planLabel(p){
   return {monthly:'၁ လ',quarterly:'၃ လ',halfyearly:'၆ လ',yearly:'၁၂ လ'}[p]||p;
 }
 async function api(path,body){
-  const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Admin-Key':K()},body:body?JSON.stringify(body):undefined});
+  let r;
+  try{
+    r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Admin-Key':K()},body:body?JSON.stringify(body):undefined});
+  }catch(e){
+    setMsg('Server နဲ့ ချိတ်မရပါ: '+e.message,false);
+    return null;
+  }
   if(r.status===401){setMsg('Admin key မှားနေသည်',false);return null}
-  return await r.json();
+  let data=null;
+  try{data=await r.json()}catch(e){}
+  if(!r.ok){
+    setMsg((data&&data.message)||('Server error '+r.status+(r.status===429?' — နှေးနှေးခေါ်ပါ':'')),false);
+    return null;
+  }
+  if(data===null){setMsg('Server က အလွတ် response ပြန်တယ် ('+r.status+')',false);return null}
+  return data;
 }
 async function loadList(){
   const data=await api('/api/admin/list'); if(!data)return;

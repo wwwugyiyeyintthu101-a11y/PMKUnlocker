@@ -1,8 +1,11 @@
+using System.Diagnostics;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using PMKLicenseServer;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,34 +21,125 @@ builder.Services.AddRateLimiter(options =>
             AutoReplenishment = true
         }));
 });
+
+// Behind a reverse proxy every request looks like one IP, so all shops share a single 60/min
+// bucket. Only headers from explicitly listed proxies are honoured.
+string[] trustedProxies = builder.Configuration.GetSection("TrustedProxies").Get<string[]>() ?? Array.Empty<string>();
+var knownProxies = trustedProxies.Select(IPAddress.Parse).ToArray();
+if (knownProxies.Length > 0)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        foreach (IPAddress address in knownProxies) options.KnownProxies.Add(address);
+    });
+}
+
 var app = builder.Build();
 
-// Admin key: config မှာ ပေးထားမှ သုံးမယ် — မပေး/known-default ဆို random 256-bit ထုတ်ပြီး
-// adminkey.txt (source control မပါ) မှာ သိမ်းမယ်၊ console မှာလည်း ပြမယ်။
+// The API carries passwords, remember-me tokens and the admin key. Plain HTTP is only
+// acceptable on this machine; exposing it on a LAN address needs an explicit opt-in.
+string configuredUrls = builder.Configuration["urls"] ?? "";
+if (!string.Equals(builder.Configuration["AllowInsecureHttp"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    foreach (string raw in configuredUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out Uri? uri)) continue;
+        bool loopback = uri.IsLoopback ||
+            uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || uri.Host == "::1";
+        if (uri.Scheme == Uri.UriSchemeHttps || loopback) continue;
+        Console.Error.WriteLine(
+            "Refusing to bind the license API over plain HTTP at " + raw + ". Use HTTPS, " +
+            "terminate TLS in front of loopback, or set AllowInsecureHttp=true deliberately.");
+        Environment.Exit(2);
+    }
+}
+
+if (knownProxies.Length > 0) app.UseForwardedHeaders();
+
+// Admin key: only its SHA-256 hash is kept at rest, so reading adminkey.txt never yields a
+// working admin credential. The generated key is printed once; save it then. A legacy
+// plaintext file is adopted and rewritten as a hash on the next start.
 const string LegacyDefaultKey = "pmk-admin-2026"; // ယခင် hardcode — ယခု အသုံးမပြုတော့
-string adminKey = builder.Configuration["AdminKey"] ?? "";
+const string KeyHashPrefix = "sha256:";
+
+string Sha256Hex(string value) =>
+    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+void TightenAcl(string path, bool directory)
+{
+    // Only managed deployments (ProgramData) are hardened. A dev/test data folder in %TEMP%
+    // must stay usable by the non-elevated account that created it.
+    string commonData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+    string full = Path.GetFullPath(path);
+    if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(commonData) ||
+        !full.StartsWith(Path.GetFullPath(commonData) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        return;
+    if (!File.Exists(full) && !Directory.Exists(full)) return;
+    try
+    {
+        var psi = new ProcessStartInfo("icacls.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        psi.ArgumentList.Add(full);
+        psi.ArgumentList.Add("/inheritance:r");
+        psi.ArgumentList.Add("/grant:r");
+        psi.ArgumentList.Add(directory ? "*S-1-5-18:(OI)(CI)F" : "*S-1-5-18:F");
+        psi.ArgumentList.Add(directory ? "*S-1-5-32-544:(OI)(CI)F" : "*S-1-5-32-544:F");
+        using Process? p = Process.Start(psi);
+        if (p == null) return;
+        if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } Console.WriteLine("Warning: icacls timed out for " + full); return; }
+        if (p.ExitCode != 0) Console.WriteLine("Warning: icacls could not tighten " + full);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("Warning: could not tighten ACL on " + full + ": " + ex.Message);
+    }
+}
+
+string adminKeyHash = "";
+string configuredKey = builder.Configuration["AdminKey"] ?? "";
 string keyFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json"))!, "adminkey.txt");
-if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
+Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
+TightenAcl(Path.GetDirectoryName(keyFile)!, directory: true);
+
+if (!string.IsNullOrWhiteSpace(configuredKey) && configuredKey != LegacyDefaultKey)
+    adminKeyHash = Sha256Hex(configuredKey.Trim());
+else
 {
     try
     {
         if (File.Exists(keyFile))
         {
-            string k = File.ReadAllText(keyFile).Trim();
-            if (k.Length >= 32) adminKey = k;
+            string stored = File.ReadAllText(keyFile).Trim();
+            if (stored.StartsWith(KeyHashPrefix, StringComparison.OrdinalIgnoreCase) && stored.Length == KeyHashPrefix.Length + 64)
+                adminKeyHash = stored[KeyHashPrefix.Length..].ToUpperInvariant();
+            else if (stored.Length >= 32 && stored != LegacyDefaultKey)
+            {
+                adminKeyHash = Sha256Hex(stored);
+                File.WriteAllText(keyFile, KeyHashPrefix + adminKeyHash);
+                TightenAcl(keyFile, directory: false);
+                Console.WriteLine("Admin key file upgraded to a hash: " + keyFile);
+            }
         }
     }
     catch { }
-    if (string.IsNullOrWhiteSpace(adminKey) || adminKey == LegacyDefaultKey)
+    if (adminKeyHash.Length == 0)
     {
-        adminKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
-        File.WriteAllText(keyFile, adminKey);
-        Console.WriteLine("=== Admin key generated (stored in " + keyFile + ") ===");
+        string generated = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        adminKeyHash = Sha256Hex(generated);
+        File.WriteAllText(keyFile, KeyHashPrefix + adminKeyHash);
+        TightenAcl(keyFile, directory: false);
+        Console.WriteLine("=== Admin key generated (only its hash is stored in " + keyFile + ") ===");
+        Console.WriteLine("Admin key (save it now — it cannot be read back): " + generated);
     }
 }
 string dataFile = Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json");
 Directory.CreateDirectory(Path.GetDirectoryName(dataFile)!);
+TightenAcl(dataFile, directory: false);
 // Exactly one server process may own this JSON store. A second instance fails
 // startup rather than racing a separate in-memory lock against the same file.
 using var databaseLease = new FileStream(dataFile + ".lock", FileMode.OpenOrCreate,
@@ -182,11 +276,12 @@ DateTime ExpiryFrom(DateTime from, string plan) =>
 
 bool IsAdmin(HttpContext ctx)
 {
-    if (string.IsNullOrWhiteSpace(adminKey)) return false; // key မရှိ → လုံးဝ ပိတ်
+    if (adminKeyHash.Length == 0) return false; // key မရှိ → လုံးဝ ပိတ်
     string got = ctx.Request.Headers["X-Admin-Key"].ToString();
-    if (got.Length == 0 || got.Length != adminKey.Length) return false;
+    if (got.Length == 0) return false;
+    string gotHash = Sha256Hex(got);
     return CryptographicOperations.FixedTimeEquals(
-        Encoding.UTF8.GetBytes(got), Encoding.UTF8.GetBytes(adminKey));
+        Encoding.UTF8.GetBytes(gotHash), Encoding.UTF8.GetBytes(adminKeyHash));
 }
 
 IResult J(object o) => Results.Json(o, apiJsonOpts);

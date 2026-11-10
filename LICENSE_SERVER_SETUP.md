@@ -28,10 +28,16 @@ For local development, build the server project and run its executable with
 separate, quoted arguments. Production hosting must provide HTTPS; the checked-in
 loopback listener alone is not a public service deployment.
 
-If `AdminKey` is not configured, the service creates a random key in `adminkey.txt`
-beside the database. It no longer prints the secret to the console. Restrict access
-to the data directory to the service account and administrators. Enter that key
-in the Admin app or the service's `/admin` page. Approve pending registrations
+If `AdminKey` is not configured, the service generates a random key on first start,
+prints it once to the console, and stores only its SHA-256 hash in `adminkey.txt`
+beside the database. Save the printed key then — the file cannot be used to recover
+it. A legacy plaintext `adminkey.txt` is adopted and rewritten as a hash on the next
+start. In a managed deployment (under `%ProgramData%`) the data directory is
+restricted to SYSTEM and Administrators. Enter the key in the Admin app or the
+service's `/admin` page. Behind a reverse proxy, list its IPs under `TrustedProxies`
+so rate limiting sees the real client address; binding plain HTTP to a non-loopback
+address is refused unless `AllowInsecureHttp` is set to `true` deliberately.
+Approve pending registrations
 before customer login. New passwords must have 8–256 characters; remembered
 tokens expire after 30 days and are invalidated by password changes or blocking.
 
