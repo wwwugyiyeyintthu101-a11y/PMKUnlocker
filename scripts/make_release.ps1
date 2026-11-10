@@ -7,7 +7,7 @@
 # Then create a GitHub release for tag v<version> and upload BOTH:
 #   installer\output\PMKMobileTool-<ver>-Setup.exe
 #   installer\output\update.json
-# and put "owner/repo" into %LocalAppData%\PMKMobileTool\pmk_update_repo.txt on client PCs.
+# Clients read only the pinned repository compiled into PMKUnlocker\UpdateChecker.cs.
 # NOTE: the repository must be PUBLIC — clients download release assets unauthenticated.
 param(
     [Parameter(Mandatory = $true)]
@@ -26,6 +26,8 @@ $candidatesRoot = Join-Path $root 'release-candidates'
 
 if (!(Test-Path -LiteralPath $iscc)) { throw "Inno Setup compiler not found: $iscc" }
 if ($Repo -notmatch '^[\w.-]+/[\w.-]+$') { throw '-Repo must be "owner/repo"' }
+$pinnedRepo = 'wwwugyiyeyintthu101-a11y/PMKUnlocker'
+if ($Repo -ne $pinnedRepo) { throw "Client updates are pinned to '$pinnedRepo'; refusing to build a manifest for '$Repo'." }
 
 if (!$ReuseCandidate) {
     & (Join-Path $PSScriptRoot 'check_release.ps1')
@@ -71,4 +73,3 @@ Write-Output "Next steps:"
 Write-Output "  1. git tag v$verCore && git push origin v$verCore"
 Write-Output "  2. GitHub -> Releases -> New release on tag v$verCore"
 Write-Output "     upload: $($setup.Name)  +  update.json   (repo must be PUBLIC)"
-Write-Output "  3. On client PCs: write 'owner/repo' into %LocalAppData%\PMKMobileTool\pmk_update_repo.txt"

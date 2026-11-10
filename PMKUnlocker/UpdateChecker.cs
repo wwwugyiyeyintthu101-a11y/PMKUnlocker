@@ -17,9 +17,7 @@ internal sealed class UpdateInfo
 internal enum GatePhase { Checking, CheckFailed, Downloading, Verified, Failed }
 
 // GitHub Releases auto-update — login gate (update မလုပ်ဘဲ အထဲမဝင်ရ)
-//   default repo: wwwugyiyeyintthu101-a11y/PMKUnlocker (file မရှိရင် ဒါသုံး)
-//   override: %LocalAppData%\PMKMobileTool\pmk_update_repo.txt ထဲ "owner/repo" (ဒါမှမဟုတ် full https://github.com/owner/repo)
-//   "off" / "none" / "disable" → check ပိတ် (dev only — gate လည်း ပိတ်သွားမယ်)
+//   release source: DefaultRepo (build-time constant — no user-writable override)
 //   Release တစ်ခုမှာ asset ၂ ခု တင်ရမယ်:
 //     - PMKMobileTool-<ver>-Setup.exe
 //     - update.json  = { "version": "7.3.0", "url": "...Setup.exe", "sha256": "<hex>", "notes": "..." }
@@ -32,16 +30,12 @@ internal static class UpdateChecker
     // login stage မှာ စတင်တဲ့ check — gate က ဒါကိုပဲ စောင့်ယူ (HTTP call တစ်ခါပဲ)
     internal static Task<UpdateInfo?>? PendingCheck;
 
-    // login gate — update ရှိရင် UpdateInfo; နောက်ဆုံး version (သို့) repo off → null (ဝင်ခွင့်ပေး)
+    // login gate — update ရှိရင် UpdateInfo; နောက်ဆုံး version → null (ဝင်ခွင့်ပေး)
     // check fail / timeout / offline → exception (caller က strict block)
     internal static async Task<UpdateInfo?> AwaitCheckForGateAsync(int maxWaitMs)
     {
         Task<UpdateInfo?>? t = PendingCheck;
-        if (t == null)
-        {
-            if (string.IsNullOrWhiteSpace(Repo)) return null;   // update source off
-            t = CheckAsync();
-        }
+        if (t == null) t = CheckAsync();
         PendingCheck = null;
         if (await Task.WhenAny(t, Task.Delay(maxWaitMs)) != t)
             throw new TimeoutException("update check timed out (" + (maxWaitMs / 1000) + "s)");
@@ -50,7 +44,7 @@ internal static class UpdateChecker
 
     // Update gate — login form နဲ့ remember-me auto-login နှစ်လမ်းစလုံး ဒီကနေ ဖြတ်တယ်
     // update ရှိ → update လုပ်ရမယ် (No နှိပ်ရင် app ပိတ်); check fail/offline → continue (warning);
-    // နောက်ဆုံး version (သို့) update source off ဆို → true (ဝင်ခွင့်ပေး)
+    // နောက်ဆုံး version ဖြစ်လျှင် → true (ဝင်ခွင့်ပေး)
     internal static async Task<bool> EnforceGateAsync(IWin32Window? owner,
         Action<GatePhase, string>? onStatus = null, Action<int>? onProgress = null)
     {
@@ -70,7 +64,7 @@ internal static class UpdateChecker
                 "Update check", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return true;
         }
-        if (info == null) return true;   // နောက်ဆုံး version (သို့) update source off
+        if (info == null) return true;   // နောက်ဆုံး version
 
         DialogResult r = Ask(owner,
             "A new version (v" + info.Version + ") is required.  (current: v" + CurrentVersion + ")\n\n" +
@@ -114,28 +108,8 @@ internal static class UpdateChecker
             ? MessageBox.Show(owner, text, caption, buttons, icon)
             : MessageBox.Show(text, caption, buttons, icon);
 
-    internal static string RepoFile => ShopServices.DataPath("pmk_update_repo.txt");
-
-    internal static string Repo
-    {
-        get
-        {
-            try
-            {
-                if (File.Exists(RepoFile))
-                {
-                    string s = File.ReadAllText(RepoFile).Trim();
-                    if (s.Equals("off", StringComparison.OrdinalIgnoreCase) ||
-                        s.Equals("none", StringComparison.OrdinalIgnoreCase) ||
-                        s.Equals("disable", StringComparison.OrdinalIgnoreCase))
-                        return "";
-                    if (s.Length > 0) return s;
-                }
-            }
-            catch { }
-            return DefaultRepo;
-        }
-    }
+    // Pinned at build time — a file in the user profile must not redirect updates to another repo.
+    internal static string Repo => DefaultRepo;
 
     internal static Version CurrentVersion
     {
@@ -171,7 +145,6 @@ internal static class UpdateChecker
     internal static async Task<UpdateInfo?> CheckAsync(CancellationToken ct = default)
     {
         string repo = Repo;
-        if (string.IsNullOrWhiteSpace(repo)) return null;
 
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         string json = "";
