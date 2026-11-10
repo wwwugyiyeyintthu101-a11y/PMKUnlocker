@@ -739,6 +739,22 @@ try
         else if (File.Exists(integrityPath)) File.Delete(integrityPath);
     }
 
+    // tools.json is user-writable; the elevated app must refuse paths outside protected roots.
+    Check(ShopServices.ConfiguredToolProblem("adb.exe", Path.Combine(AppContext.BaseDirectory, "adb.exe")) == null,
+        "Configured tool inside the install folder is accepted");
+    Check(ShopServices.ConfiguredToolProblem("adb.exe", Path.Combine(Path.GetTempPath(), "adb.exe")) != null,
+        "Configured tool in a user-writable folder is refused");
+    Check(ShopServices.ConfiguredToolProblem("QSaharaServer.exe", Path.Combine(AppContext.BaseDirectory, "cmd.exe")) != null,
+        "Configured tool must keep the requested file name");
+    string programFilesForTools = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+    if (!string.IsNullOrWhiteSpace(programFilesForTools))
+        Check(ShopServices.ConfiguredToolProblem("adb.exe", Path.Combine(programFilesForTools, "PMK", "adb.exe")) == null,
+            "Configured tool under Program Files is accepted");
+    bool externalScriptRefused = false;
+    try { ShopServices.VerifyToolFile(Path.Combine(Path.GetTempPath(), "edl.py")); }
+    catch (InvalidDataException) { externalScriptRefused = true; }
+    Check(externalScriptRefused, "EDL script outside the install folder is refused");
+
     // ===== MtkFirmware layer: scatter parser / risk / preflight / backend / redactor =====
     string fwDir = Path.Combine(dir, "fw"); Directory.CreateDirectory(fwDir);
     string GoodScatter(string blocks) =>

@@ -436,6 +436,16 @@ namespace PMKUnlocker
                 if (!File.Exists(PathsFile)) return;
                 string[] lines = File.ReadAllLines(PathsFile);
                 if (lines.Length > 0) edlScriptPath = lines[0].Trim();
+                // pmk_paths.txt is user-writable; an elevated run must not interpret a script from there.
+                if (!string.IsNullOrEmpty(edlScriptPath))
+                {
+                    try { edlScriptPath = ShopServices.VerifyToolFile(edlScriptPath); }
+                    catch (InvalidDataException ex)
+                    {
+                        Debug.WriteLine("LoadEdlPaths: " + ex.Message);
+                        edlScriptPath = "";
+                    }
+                }
                 // lines[1] (QC loader) / lines[8] (SPD loader) — မသိမ်းတော့ (user request)
                 if (lines.Length > 3) hisiBootloadersPath = lines[3].Trim();
                 if (lines.Length > 4) edlSigPath = lines[4].Trim();

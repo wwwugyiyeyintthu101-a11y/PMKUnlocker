@@ -28,12 +28,15 @@ namespace PMKUnlocker
 
         private string FindSpdDump()
         {
-            var tools = ShopServices.LoadTools();
-            if (tools.TryGetValue("spd_dump.exe", out string configured) && File.Exists(configured)) return configured;
+            string configured = ShopServices.FindTool(Application.StartupPath, "spd_dump.exe");
+            if (!string.IsNullOrEmpty(configured)) return configured;
             string sprd = Path.Combine(Application.StartupPath, "spd", "sprd", "spd_dump.exe");
-            if (File.Exists(sprd)) return sprd;
-            string s = FindFileInToolFolders("spd_dump.exe");
-            return string.IsNullOrEmpty(s) ? "spd_dump" : s;
+            if (File.Exists(sprd))
+            {
+                ToolIntegrity.Verify(sprd);
+                return sprd;
+            }
+            return "spd_dump";
         }
 
         private string FindUnpac()

@@ -52,15 +52,86 @@ internal static class ShopServices
     internal static void SaveTool(string name, string path)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("Selected tool does not exist.", path);
+        string full = VerifyConfiguredTool(name, path);
         var tools = LoadTools();
-        tools[name] = Path.GetFullPath(path);
+        tools[name] = full;
         File.WriteAllText(DataPath("tools.json"), JsonSerializer.Serialize(tools, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    // tools.json is user-writable and this app runs elevated, so a configured path is executable code.
+    // Only the install folder and admin-only locations are accepted; bundled lookups are hash-checked.
+    private static readonly string[] TrustedToolRoots = BuildTrustedToolRoots();
+
+    private static string[] BuildTrustedToolRoots()
+    {
+        var roots = new List<string> { AppContext.BaseDirectory };
+        foreach (Environment.SpecialFolder folder in new[]
+                 {
+                     Environment.SpecialFolder.ProgramFiles,
+                     Environment.SpecialFolder.ProgramFilesX86
+                 })
+        {
+            string path = Environment.GetFolderPath(folder);
+            if (!string.IsNullOrWhiteSpace(path)) roots.Add(path);
+        }
+        string programW6432 = Environment.GetEnvironmentVariable("ProgramW6432") ?? "";
+        if (!string.IsNullOrWhiteSpace(programW6432)) roots.Add(programW6432);
+        var full = new List<string>();
+        foreach (string root in roots)
+        {
+            try { full.Add(Path.GetFullPath(root)); }
+            catch (Exception) { }
+        }
+        return full.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool IsUnder(string full, string root)
+    {
+        string prefix = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // null = accepted; otherwise the reason the path is refused. No file I/O, so tests can assert it.
+    internal static string? ConfiguredToolProblem(string name, string path)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "empty tool name";
+        if (string.IsNullOrWhiteSpace(path)) return "empty path";
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception) { return "invalid path"; }
+        if (!string.Equals(Path.GetFileName(full), name, StringComparison.OrdinalIgnoreCase))
+            return "file name does not match the requested tool";
+        foreach (string root in TrustedToolRoots)
+            if (IsUnder(full, root)) return null;
+        return "outside the tool folder and Program Files";
+    }
+
+    internal static string VerifyConfiguredTool(string name, string path)
+    {
+        string? problem = ConfiguredToolProblem(name, path);
+        if (problem != null)
+            throw new InvalidDataException(
+                "Configured tool '" + name + "' was refused (" + problem + "): " + path +
+                ". Move it into the installed tool folder and choose it again.");
+        return Path.GetFullPath(path);
+    }
+
+    // Scripts and other files that are interpreted on the host follow the same location rule.
+    internal static string VerifyToolFile(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (!TrustedToolRoots.Any(root => IsUnder(full, root)))
+            throw new InvalidDataException(
+                "Tool file is outside the installed tool folder and Program Files: " + full);
+        return full;
     }
 
     internal static string FindTool(string root, string name)
     {
         var tools = LoadTools();
-        if (tools.TryGetValue(name, out string? configured) && File.Exists(configured)) return configured;
+        if (tools.TryGetValue(name, out string? configured) && File.Exists(configured))
+            return VerifyConfiguredTool(name, configured);
         foreach (string folder in new[] { "", "tools", "samsung", "spd", "python", "mtk", "edl" })
         {
             string candidate = Path.Combine(root, folder, name);

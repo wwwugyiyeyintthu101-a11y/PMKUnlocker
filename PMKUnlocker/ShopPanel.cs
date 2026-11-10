@@ -175,8 +175,18 @@ public partial class Form1
             grid.Rows.Clear();
             foreach (string name in shopToolNames)
             {
-                string path = FindFileInToolFolders(name);
-                grid.Rows.Add(name, path.Length == 0 ? "Missing - configure tool" : "File found - runtime/device untested", path);
+                string path = "";
+                string status;
+                try
+                {
+                    path = FindFileInToolFolders(name);
+                    status = path.Length == 0 ? "Missing - configure tool" : "File found - runtime/device untested";
+                }
+                catch (InvalidDataException ex)
+                {
+                    status = "Refused - " + ex.Message;
+                }
+                grid.Rows.Add(name, status, path);
             }
         }
         var actions = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 44 };
