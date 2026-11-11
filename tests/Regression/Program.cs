@@ -1237,6 +1237,42 @@ try
     Check(new MtkCommandResult(0, new[] { "Reset command was sent. Rebooting device to system - unplug the USB cable." }).HasError == false,
         "new MTK engine: reset confirmation is not an error");
 
+    // Locked-BROM diagnosis (2026-11-10 capture, M2006C3LG): the phone reported SBC/SLA/DAA and refused DA_Send.
+    // The notice must appear for a refusal and for a failed auth-less run, and must stay silent for a boot whose
+    // bypass worked — "Auth file is required" is printed on every DAA unit, successful or not.
+    string[] lockedLines = {
+        "Preloader - \tSBC enabled:\t\tTrue",
+        "Preloader - \tSLA enabled:\t\tTrue",
+        "Preloader - \tDAA enabled:\t\tTrue",
+        "Preloader - [LIB]: Auth file is required. Use --auth option.",
+        "Preloader - SLA required ...",
+        "Preloader - Bad sla challenge :(" };
+    var lockDiag = MtkBromLock.Detect(new(0, lockedLines));
+    Check(lockDiag != null && lockDiag.Flags == "SBC/SLA/DAA",
+        "locked BROM: a refused DA names SBC/SLA/DAA");
+    Check(lockDiag != null && lockDiag.Reason.Contains("SLA"),
+        "locked BROM: a failed SLA challenge is reported as the reason");
+    Check(MtkBromLock.Detect(new(0, new[] {
+            lockedLines[0], lockedLines[1], lockedLines[2], lockedLines[3], lockedLines[4],
+            "DAXFlash - Uploading xflash stage 1 from MTK_DA_V5.bin",
+            "DAXFlash - Successfully received DA sync" })) == null,
+        "locked BROM: a unit whose bypass worked is not called locked");
+    Check(MtkBromLock.Detect(new(0, new[] {
+            "Preloader - [LIB]: Auth file is required. Use --auth option.",
+            "Preloader - CPU: MT6765/MT8768t(Helio P35/G35)",
+            "\u001b[31mPreloader - Error on DA_Send\u001b[0m" })) != null,
+        "locked BROM: auth required plus a failed run is a lock");
+    Check(MtkBromLock.Detect(new(0, new[] {
+            "Preloader - CPU: MT6765/MT8768t(Helio P35/G35)",
+            "\u001b[31mDAXFlash - Failed to write boot\u001b[0m" })) == null,
+        "locked BROM: an unrelated failure is not a lock");
+    Check(MtkBromLock.Detect(new(0, new[] {
+            "Preloader - \tSBC enabled:\t\tTrue",
+            "Preloader - \tSLA enabled:\t\tFalse",
+            "\u001b[1;33mPreloader - SLA required ...\u001b[0m",
+            "\u001b[31mPreloader - Error on DA_Send\u001b[0m" }))?.Flags == "SBC",
+        "locked BROM: only the flags the unit reported True are named");
+
     Check(MtkClientEngine.LuhnValid("490154203237518") && MtkClientEngine.LuhnValid("356938035643809"),
         "IMEI write: valid 15-digit Luhn IMEIs accepted");
     Check(!MtkClientEngine.LuhnValid("490154203237519") && !MtkClientEngine.LuhnValid("4901542032375") && !MtkClientEngine.LuhnValid("49015420323a518"),

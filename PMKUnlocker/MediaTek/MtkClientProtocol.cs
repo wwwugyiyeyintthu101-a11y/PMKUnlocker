@@ -18,6 +18,45 @@ internal sealed record MtkCommandResult(int ExitCode, IReadOnlyList<string> Line
     }
 }
 
+/// <summary>
+/// Why a BROM session stopped before a DA ran, when the reason was vendor authorisation (SBC/SLA/DAA).
+/// A marker alone never triggers this: a successful bypass prints "Auth file is required" on every DAA unit,
+/// and "SLA required" is announced before the challenge is answered. Only a run that then failed — or a refusal
+/// the client itself names — counts, so the notice cannot tell an operator to go hunting for a file a boot did
+/// not need.
+/// </summary>
+internal sealed record MtkBromLock(string Flags, string Reason)
+{
+    private static readonly string[] ConfigFlags = { "SBC", "SLA", "DAA" };
+
+    internal static MtkBromLock? Detect(MtkCommandResult result)
+    {
+        if (result?.Lines == null || result.Lines.Count == 0) return null;
+        bool authMissing = Has(result, "Auth file is required");
+        bool slaAsked = Has(result, "SLA required");
+        bool slaRefused = Has(result, "Bad sla challenge") || Has(result, "Send auth error") ||
+                          Has(result, "Send sla challenge response len error") ||
+                          Has(result, "Error on DA_Send") || Has(result, "DA_Send status error");
+        if (!slaRefused && !((authMissing || slaAsked) && result.HasError)) return null;
+
+        var flags = ConfigFlags
+            .Where(f => result.Lines.Any(l =>
+                Regex.IsMatch(Plain(l), @"\b" + f + @"\s+enabled:\s*True\b", RegexOptions.IgnoreCase)))
+            .ToList();
+        string reason = slaRefused
+            ? "the DA upload was refused after the SLA challenge"
+            : authMissing
+                ? "this unit requires its own vendor auth file (DAA)"
+                : "the BROM asked for an SLA challenge";
+        return new MtkBromLock(flags.Count > 0 ? string.Join("/", flags) : "SBC/SLA/DAA", reason);
+    }
+
+    private static bool Has(MtkCommandResult result, string token) =>
+        result.Lines.Any(l => Plain(l).Contains(token, StringComparison.OrdinalIgnoreCase));
+
+    private static string Plain(string line) => Regex.Replace(line, @"\x1B\[[0-9;]*[a-zA-Z]", "");
+}
+
 internal sealed partial class MtkClientEngine
 {
     internal static IReadOnlyList<MtkPartition> ParseGpt(MtkCommandResult result)

@@ -41,6 +41,8 @@ public partial class Form1
     // Loader auto-detect: catalog loader resolved for the connected chip + the last chip we reported
     private MtkChipsetMatch mtkAutoMatch;
     private string mtkLastChipNotice = "";
+    // A locked-BROM notice is a per-run diagnosis: one run, one message, however many commands failed in it
+    private bool mtkLockNoticeShown;
     // Brand combo modes: "Auto Detect" = mtkclient's own DA (validated default), "Auto + catalog DA" = pass the resolved loader
     const string MtkAutoMode = "Auto Detect";
     const string MtkAutoCatalogMode = "Auto + catalog DA";
@@ -684,6 +686,26 @@ public partial class Form1
             DescribeMatch(mtkAutoMatch) + ". Unplug, re-plug and run the operation again.", Color.Orange);
     }
 
+    // A locked BROM stops every operation at the same place — the DA is refused — so name the one file that can
+    // change the outcome instead of leaving the operator with "mtkclient reported an error". This diagnoses the
+    // run that just failed; nothing is re-sent, and no auth file is guessed or substituted.
+    private void ReportMtkBromLock(MtkCommandResult result)
+    {
+        if (IsDisposed || mtkLockNoticeShown) return;
+        var locked = MtkBromLock.Detect(result);
+        if (locked == null) return;
+        mtkLockNoticeShown = true;
+        Log("[!] BROM is locked (" + locked.Flags + ") — " + locked.Reason + ".", Color.Orange);
+        if (string.IsNullOrWhiteSpace(mtkAuthPath))
+            Log("[i] Set this model's vendor auth file in INFO ▸ Auth, then unplug, re-plug and run again. " +
+                "This unit refuses the DA without vendor authorisation, so flash, backup and unlock all stop here.",
+                Color.Cyan);
+        else
+            Log("[!] The auth file in use was not accepted — use the file issued for this model and SoC.", Color.Orange);
+        lblMtkDeviceStatus.Text = "Locked BROM · auth file required";
+        lblMtkDeviceStatus.ForeColor = Color.Orange;
+    }
+
     // The DA reached the phone but could not take over (custom DA without the xflash extensions).
     static bool LoaderBootError(string line) =>
         line.Contains("DA Extensions failed", StringComparison.OrdinalIgnoreCase) ||
@@ -821,6 +843,7 @@ public partial class Form1
                 "Two clients on one BROM corrupt both sessions, and a takeover mid-session answers 0xfe to every byte (RUN 15).");
         await RunFlashWorkflowAsync(async () =>
         {
+            mtkLockNoticeShown = false;
             mediaTekEngine = new MtkClientEngine();
             using var cancel = new CancellationTokenSource(); mediaTekCancel = cancel;
             // Port က dead field — engine က --serialport ဘယ်တော့မှ မထည့် (auto USB detect)
@@ -873,11 +896,13 @@ public partial class Form1
                 {
                     // detect first — the self-heal needs the match this run produced
                     try { ApplyMediaTekLoaderFromOutput(lines); HandleMediaTekLoaderFailure(result); } catch { }
+                    try { ReportMtkBromLock(result); } catch { }
                 }));
                 else
                 {
                     ApplyMediaTekLoaderFromOutput(lines);
                     HandleMediaTekLoaderFailure(result);
+                    ReportMtkBromLock(result);
                 }
             }
             return result;
@@ -1093,11 +1118,17 @@ public partial class Form1
         }
         if (has("HW code:")) return ("  * Code ... " + after("HW code:"), Color.LightSkyBlue);
         if (has("ME_ID:")) return ("  * MEID ... " + after("ME_ID:"), Color.LightSkyBlue);
-        if (has("Auth file is required")) return ("  * Auth file ... not provided (BROM bypass)", Color.Orange);
+        if (has("Auth file is required")) return ("  * Auth file ... required by this unit (DAA)", Color.Orange);
+        if (has("SLA required")) return ("  * Security ... SLA challenge requested (0x1D0D)", Color.Orange);
+        if (has("Bad sla challenge")) return ("  * Security ... SLA challenge refused", Color.Red);
 
         // ---- exploit ----
-        if (has("Device is protected")) return (" Looking for supported exploit functions...Ok", Color.LightGreen);
-        if (has("Bypassing security")) return (" Executing Mediatek BROM Exploit...", Color.Gold);
+        // A protected BROM is the ordinary state on DAA units and the bypass may still work, so it is reported as
+        // what happened — not as "Looking for supported exploit functions...Ok", which claimed success before the
+        // exploit had even been attempted (and printed Ok on units that then failed at DA_Send).
+        if (has("Device is protected")) return ("  * Security ... device protected", Color.Orange);
+        if (has("Bypassing security")) return (" Attempting BROM security bypass...", Color.Gold);
+        if (has("Skipping exploitation")) return (" Skipping exploitation (stock DA)...", Color.Gray);
         if (has("Done sending payload")) return (" Executing Mediatek BROM Exploit...Ok", Color.LightGreen);
         if (has("Exploitation") || has("Successfully sent payload")) return null;
         if (has("No preloader given")) return (" Dumping Preloader from Device...Ok ( From Device )", Color.LightGreen);
