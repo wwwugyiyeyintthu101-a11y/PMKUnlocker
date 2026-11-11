@@ -13,6 +13,11 @@ public partial class Form1
 {
     private TextBox mediaTekScatter;
     private DataGridView mediaTekGrid;
+    private DataGridView mediaTekInfoGrid;   // INFO tab — live GPT စာရင်း (read-only)
+    // The list's heading and its three action buttons are fields because the live-session row (built later, only
+    // when a boot recipe is installed) takes the band under them and the whole block moves up to make room.
+    private Label lblInfoPartitions;
+    private Button btnMtkInfoRead, btnMtkInfoWrite, btnMtkInfoErase;
     private Label mediaTekSummary;
     private CheckBox mediaTekSkipUserdata;
     private CheckBox mediaTekFlashableOnly;
@@ -134,8 +139,17 @@ public partial class Form1
         // ================= INFO TAB =================
         TabPage infoTab = mtkModes.TabPages[0];
         Button btnMtkReadInfo = Create3DButton("🔍 Read Info / GPT", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
-        btnMtkReadInfo.Click += async (_, _) => { try { await RunMediaTekWorkflowAsync(async () => { await ReadMediaTekGptAsync(true); }); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
-        if (toolTipMain != null) Tip(btnMtkReadInfo, "mtkclient printgpt — read device GPT into Flash grid.");
+        btnMtkReadInfo.Click += async (_, _) =>
+        {
+            try
+            {
+                // Live session ရှိရင် ဖုန်းကို ထပ်မချိတ်ရ — session ပေါ်မှာတင် table ပြန်ဖတ်ပြီး ဒီ tab မှာတင် ပြ
+                if (nativeDa != null) { await NativeGuarded("read info", () => NativeReadDeviceTableAsync()); return; }
+                await RunMediaTekWorkflowAsync(async () => { await ReadMediaTekGptAsync(true); });
+            }
+            catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); }
+        };
+        if (toolTipMain != null) Tip(btnMtkReadInfo, "printgpt — read device GPT into the INFO list and the Flash grid. Over a live native DA session the same read runs without a replug and stays on this tab; otherwise mtkclient (one plug cycle).");
 
         Button btnMtkSaveGpt = Create3DButton("📋 Save GPT", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnMtkSaveGpt.Click += async (_, _) => { try { await SaveMediaTekGptAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
@@ -164,13 +178,68 @@ public partial class Form1
         Label lblInfoHint = new()
         {
             Location = new Point(UiX(0) + 500, UiY(0) + 10),
-            Size = new Size(340, 66),
-            Text = "Power off the phone, connect in MediaTek mode (BROM / Preloader), then select its COM port. DA / Auth / Preloader depend on the device. Read Info loads the live partition table into FLASH tab.",
+            // 56 px hugs the measured 4 lines at this width and stops the label's own background from reaching the
+            // live-session badge the native row puts at y=88 under SERVICE.
+            Size = new Size(340, 56),
+            Text = "Power off the phone, connect in MediaTek mode (BROM / Preloader), then select its COM port. DA / Auth / Preloader depend on the device. Read Info loads the live partition table into the list below (and the FLASH grid).",
             ForeColor = Color.Gray,
             Font = new Font("Segoe UI", 8f),
             AutoEllipsis = false
         };
         infoTab.Controls.Add(lblInfoHint);
+
+        // INFO မှာလည်း live GPT စာရင်း ပြ — Read Info / GPT နှိပ်တာနဲ့ ဒီမှာ တိုက်ရိုက် ပေါ်လာမယ်
+        // (FLASH tab ရဲ့ grid နဲ့ column ဖွဲ့စည်းပုံ တူတူ — ✓ / Partition / Image / Offset / Size / Status)
+        lblInfoPartitions = new()
+        {
+            Text = "📋  PARTITIONS (live GPT)  —  tick, then Read / Write / Erase",
+            Location = new Point(0, 104),
+            AutoSize = true,
+            ForeColor = Color.FromArgb(86, 145, 250),
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+        };
+        infoTab.Controls.Add(lblInfoPartitions);
+
+        mediaTekInfoGrid = new DataGridView
+        {
+            Location = new Point(0, 126),
+            Size = new Size(856, 312),
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            RowHeadersVisible = false,
+            BackgroundColor = Color.FromArgb(28, 31, 38),
+            BorderStyle = BorderStyle.FixedSingle,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            Font = new Font("Segoe UI", 8.5f)
+        };
+        mediaTekInfoGrid.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
+        mediaTekInfoGrid.DefaultCellStyle.ForeColor = Color.Gainsboro;
+        mediaTekInfoGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(86, 145, 250);
+        mediaTekInfoGrid.DefaultCellStyle.SelectionForeColor = Color.White;
+        mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(23, 26, 32);
+        mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(86, 145, 250);
+        mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+        SetDoubleBuffered(mediaTekInfoGrid);
+        mediaTekInfoGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "selected", HeaderText = "✓", Width = 34, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
+        foreach (var col in new[] { ("partition", "Partition"), ("file", "Image"), ("offset", "Offset"), ("size", "Size"), ("status", "Status") })
+            mediaTekInfoGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = col.Item1, HeaderText = col.Item2, ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        // tick ကို cell ထဲမှာ commit ဖြစ်မှ Read/Write/Erase က မြင်တယ် (FLASH grid နဲ့ အတူတူ)
+        mediaTekInfoGrid.CurrentCellDirtyStateChanged += (_, _) => { if (mediaTekInfoGrid.IsCurrentCellDirty) mediaTekInfoGrid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        infoTab.Controls.Add(mediaTekInfoGrid);
+
+        btnMtkInfoRead = Create3DButton("📥 Read", 0, 446, UiBtnW, UiBtnH, ButtonTheme.Cyan);
+        btnMtkInfoRead.Click += async (_, _) => { try { await ReadMediaTekInfoSelectedAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null) Tip(btnMtkInfoRead, "Dump the ticked partition(s) to a folder — over the live native DA session when one is open (one boot, no replug per partition), otherwise in ONE mtkclient session (printgpt + r per partition). Each file's size comes from the live GPT.");
+
+        btnMtkInfoWrite = Create3DButton("⬆️ Write", 155, 446, UiBtnW, UiBtnH, ButtonTheme.Orange);
+        btnMtkInfoWrite.Click += async (_, _) => { try { await WriteMediaTekInfoSelectedAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null) Tip(btnMtkInfoWrite, "Write an image to the ONE ticked partition — over the live native DA when one is open (no replug, readback verified), otherwise mtkclient. The image must be raw and exactly the partition's size; preloader / gpt / otp / flashinfo are refused. Confirmation required.");
+
+        btnMtkInfoErase = Create3DButton("🗑️ Erase", 310, 446, UiBtnW, UiBtnH, ButtonTheme.Red);
+        btnMtkInfoErase.Click += async (_, _) => { try { await EraseMediaTekInfoSelectedAsync(); } catch (Exception ex) { Log("[FAIL] " + ex.Message, Color.Red); } };
+        if (toolTipMain != null) Tip(btnMtkInfoErase, "Erase the ticked partition(s) — over the live native DA when one is open (the session stays live, no reset, no replug), otherwise in ONE mtkclient session with reset. preloader / gpt / otp / flashinfo are refused. Confirmation required.");
+        infoTab.Controls.AddRange(new Control[] { btnMtkInfoRead, btnMtkInfoWrite, btnMtkInfoErase });
 
         // ================= UNLOCK TAB =================
         TabPage unlockTab = mtkModes.TabPages[1];
@@ -1315,6 +1384,7 @@ public partial class Form1
                 foreach (var p in table) mediaTekGrid.Rows.Add(false, p.Name, "", "0x" + p.Offset.ToString("x"), FormatBytesLong(p.Length), "Live GPT");
             }
             finally { EndMediaTekGridFill(); }
+            FillMediaTekInfoGrid(table.Select(p => (p.Name, "0x" + p.Offset.ToString("x"), FormatBytesLong(p.Length))));
             // Device info panel ပြ
             string cpu = FindMtkInfo(result.Lines, @"CPU:\s+(.+)");
             string emmcId = FindMtkInfo(result.Lines, @"EMMC ID:\s+(\S+)");
@@ -1322,12 +1392,140 @@ public partial class Form1
             if (!string.IsNullOrEmpty(cpu) || !string.IsNullOrEmpty(emmcId))
                 lblMtkDeviceStatus.Text = cpu + " · " + emmcId + (emmcUser != "" ? " · " + FormatBytesLong(Convert.ToInt64(emmcUser, 16)) : "");
             lblMtkDeviceStatus.ForeColor = Color.LightGreen;
-            // FLASH tab ပြ
-            if (mtkModes != null && mtkModes.TabCount >= 4) mtkModes.SelectedIndex = 3;
-            Log("[OK] GPT loaded: " + table.Count + " partitions → FLASH tab", Color.LightGreen);
+            // FLASH grid ကိုပါ ဖြည့်ထားတယ် — ဒါပေမဲ့ စာရင်းကို INFO မှာတင် ချက်ချင်း မြင်စေချင်လို့ tab မပြောင်း
+            Log("[OK] GPT loaded: " + table.Count + " partitions → INFO list / FLASH grid", Color.LightGreen);
         }
         return table;
     }
+    // INFO tab ရဲ့ live GPT စာရင်း — FLASH grid နဲ့ ကော်လံပုံစံ တူတူ (✓ / Partition / Image / Offset / Size / Status)
+    private void FillMediaTekInfoGrid(IEnumerable<(string Name, string Offset, string Size)> rows)
+    {
+        if (mediaTekInfoGrid == null || mediaTekInfoGrid.IsDisposed) return;
+        mediaTekInfoGrid.Rows.Clear();
+        foreach (var (name, offset, size) in rows) mediaTekInfoGrid.Rows.Add(false, name, "", offset, size, "Live GPT");
+    }
+    private List<string> InfoSelectedMediaTekNames() => mediaTekInfoGrid.Rows.Cast<DataGridViewRow>()
+        .Where(r => r.Cells[0].Value is true).Select(r => (string)r.Cells[1].Value).ToList();
+    // INFO tick တွေကို ONE session နဲ့ ဖတ် — native session ရှိရင် ကြိုးမဖြုတ်ဘဲ တစ်ဆက်တည်း၊ မရှိရင် mtkclient multi
+    private async Task ReadMediaTekInfoSelectedAsync()
+    {
+        List<string> names = InfoSelectedMediaTekNames();
+        if (names.Count == 0)
+        {
+            Log("[!] Nothing is ticked on the INFO list — tick the partitions to read first. Nothing was read.", Color.Orange);
+            return;
+        }
+        string bad = names.FirstOrDefault(n => !Regex.IsMatch(n, @"^[A-Za-z0-9_-]+$"));
+        if (bad != null)
+        {
+            Log("[FAIL] Unsafe partition name '" + bad + "' in the INFO selection — nothing was read.", Color.Red);
+            return;
+        }
+        string dest;
+        using (var pick = new FolderBrowserDialog { Description = "Select where the dumps go" })
+        {
+            if (pick.ShowDialog(this) != DialogResult.OK)
+            {
+                Log("[*] Read declined — no folder was chosen, nothing was read.", Color.Gray);
+                return;
+            }
+            dest = pick.SelectedPath;
+        }
+        // Live session ရှိရင် ဖုန်းကို ထပ်မချိတ်ရ — tick ထားတဲ့ partition တွေကို session ပေါ်မှာတင် တစ်ခုချင်း ဖတ်တယ်
+        if (nativeDa != null)
+        {
+            await NativeGuarded("INFO read", () => NativeInfoReadAsync(names, dest));
+            return;
+        }
+        await RunMediaTekWorkflowAsync(async () =>
+        {
+            var sw = Stopwatch.StartNew();
+            string script = "printgpt;" + string.Join(";", names.Select(n => $"r {n} {n}.bin"));
+            var r = await MediaTekCommandAsync(new[] { "multi", script });
+            var (live, _) = ParseGptLines(r.Lines);
+            if (live.Count > 0) SetLiveTable(live, null);
+            if (live.Count == 0)
+            {
+                foreach (string l in r.ErrorLines.Take(6)) Log("  ! " + l.Trim(), Color.OrangeRed);
+                throw new IOException("Partition table was not read — nothing was dumped.");
+            }
+            string sess = mediaTekEngine.SessionDirectory;
+            foreach (string name in names)
+            {
+                var part = live.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (part == null)
+                    throw new IOException("This device's GPT has no partition named '" + name + "' — the other files were kept, that one was not read.");
+                string staged = Path.Combine(sess, part.Name + ".bin");
+                long got = File.Exists(staged) ? new FileInfo(staged).Length : -1;
+                if (got != part.Length)
+                    throw new IOException($"Read incomplete: {part.Name} (expected {part.Length}, got {got})");
+                File.Move(staged, Path.Combine(dest, part.Name + ".bin"), true);
+                Log($"  * Read {part.Name} ... {MstBytes(part.Length)}", Color.LightGreen);
+            }
+            Log($"  * Result ... {names.Count} partition(s) read", Color.LightGreen);
+            Log(" [OK] " + dest, Color.LightGreen);
+            Log($" Elapsed Time... {sw.Elapsed.TotalSeconds:F0} seconds", Color.Gainsboro);
+        });
+    }
+    // Write — INFO tick တစ်ခုတည်း၊ image file ကို partition size နဲ့ တိတိကျကျ တိုက်စစ်တယ် (Restore နဲ့ အတူတူ)
+    private async Task WriteMediaTekInfoSelectedAsync()
+    {
+        List<string> names = InfoSelectedMediaTekNames();
+        if (names.Count != 1)
+            throw new InvalidOperationException("Write needs exactly ONE ticked partition on the INFO list (" +
+                names.Count + " ticked). Nothing was sent.");
+        using var pick = new OpenFileDialog { Filter = "Partition image|*.img;*.bin|All files|*.*" };
+        if (pick.ShowDialog(this) != DialogResult.OK)
+        {
+            Log("[*] Write declined — no image was chosen, nothing was sent.", Color.Gray);
+            return;
+        }
+        // Live session — image file ကို session ပေါ်မှာတင် ရေးတယ်၊ ကြိုးမဖြုတ်ရ
+        if (nativeDa != null)
+        {
+            await NativeGuarded("INFO write " + names[0], () => NativeInfoWriteAsync(names[0], pick.FileName));
+            return;
+        }
+        await RunMediaTekPartitionAsync("w", names[0], pick.FileName);
+    }
+    // Erase — INFO tick တွေ၊ confirm ပြီးမှ native session သို့မဟုတ် `e a,b;reset` တစ် session
+    private async Task EraseMediaTekInfoSelectedAsync()
+    {
+        List<string> names = InfoSelectedMediaTekNames();
+        if (names.Count == 0)
+        {
+            Log("[!] Nothing is ticked on the INFO list — tick the partitions to erase first. Nothing was erased.", Color.Orange);
+            return;
+        }
+        string bad = names.FirstOrDefault(n => !SafeMediaTekTarget(n));
+        if (bad != null)
+        {
+            Log("[FAIL] '" + bad + "' cannot be erased from the INFO list (preloader / gpt / otp / flashinfo are refused). Nothing was erased.", Color.Red);
+            return;
+        }
+        if (MessageBox.Show(this,
+                "Erase " + names.Count + " partition(s)?\n\n" + string.Join("\n", names) +
+                "\n\nThe data on them is gone" +
+                (nativeDa != null ? ". The live session stays open; no reset is sent." : " and the phone resets right after.") +
+                " Erasing a boot or system partition leaves the phone unable to boot until that image is written back.",
+                "Erase partitions", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        {
+            Log("[*] Erase declined — nothing was erased.", Color.Gray);
+            return;
+        }
+        // Live session — partition တွေကို session ပေါ်မှာတင် ဖျက်တယ်၊ reset မလွှတ်လို့ ဆက်အလုပ်လုပ်လို့ရတယ်
+        if (nativeDa != null)
+        {
+            await NativeGuarded("INFO erase", () => NativeInfoEraseAsync(names));
+            return;
+        }
+        await RunMediaTekWorkflowAsync(() => MtkEraseAndResetAsync(string.Join(",", names),
+            "[OK] " + names.Count + " partition(s) erased. Verify the phone boots after the reset."));
+    }
+    private static readonly string[] MediaTekNeverProgram = { "preloader", "gpt", "pgpt", "sgpt", "otp", "flashinfo" };
+    private static bool SafeMediaTekTarget(string name) =>
+        Regex.IsMatch(name, @"^[A-Za-z0-9_-]+$") &&
+        !MediaTekNeverProgram.Contains(name.ToLowerInvariant());
     // scatter-validated live GPT ကို disk ပေါ် persist — app restart / backup / restore မှာ extra plug cycle မလိုတော့
     private string MtkGptCacheFile()
     {
@@ -2429,7 +2627,7 @@ public partial class Form1
     private async Task<bool> RunMediaTekPartitionAsync(string op, string partition, string file)
     {
         if (op is not ("r" or "w")) throw new InvalidOperationException("Use selected-image flashing; raw erase is not exposed in this module.");
-        if (!Regex.IsMatch(partition, @"^[A-Za-z0-9_-]+$") || new[] { "preloader", "gpt", "pgpt", "sgpt", "otp", "flashinfo" }.Contains(partition.ToLowerInvariant()))
+        if (!SafeMediaTekTarget(partition))
             throw new InvalidOperationException("Only named USER partitions are supported.");
         if (op == "w" && MessageBox.Show(this, "Overwrite " + partition + " with the selected image?", "Restore image", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return false;
         bool completed = false;

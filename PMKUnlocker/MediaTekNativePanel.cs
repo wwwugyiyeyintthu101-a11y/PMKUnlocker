@@ -283,7 +283,7 @@ public partial class Form1
     // no session is a logged refusal, never a boot, and the mtkclient workflows refuse the reverse way, because a
     // live session owns the only BROM face and two clients on one BROM corrupt both (RUN 15).
 
-    /// <summary>Boot Device / Reboot Device / Eject Device plus the live-session badge, on the MTK INFO tab under SERVICE.</summary>
+    /// <summary>Boot Device / Reboot Device / Eject Device / Seccfg State plus the live-session badge, on the MTK INFO tab under the partition list.</summary>
     private void BuildNativeInfoGroup()
     {
         btnInfoNativeBoot = Create3DButton("🔌 Boot Device", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Cyan);
@@ -301,33 +301,44 @@ public partial class Form1
         if (toolTipMain != null)
             Tip(btnInfoNativeEject, "Release the live session and the pipe it holds. The mtkclient operations need this ejected — they cannot share the phone with a live session.");
 
-        TabPage infoTab = mtkModes.TabPages[0];
-        Panel grpNativeInfo = CreateGroupPanel("BOOT DEVICE (NATIVE)", UiX(0), UiY(2), 3, btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject);
-
-        // B5.2 — the seccfg lock STATE, read over the live session. Its own group on the next row: the LIVE badge
-        // already owns the right-hand columns of the BOOT DEVICE row, and a fourth button there would sit under it.
+        // B5.2 — the seccfg lock STATE, read over the live session (read-only: no measured unlock payload).
         btnInfoNativeSeccfg = Create3DButton("🔐 Seccfg State", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
         btnInfoNativeSeccfg.Click += async (_, _) => await NativeGuarded("seccfg state", NativeSeccfgStateAsync);
         if (toolTipMain != null)
             Tip(btnInfoNativeSeccfg, "READ the seccfg config block head over the live session (the extent the device's own GPT names seccfg) and print the bootloader lock state: 0x00 = LOCKED, 0x03 = UNLOCKED, anything else shown raw. Read-only by construction — no WRITE or ERASE frame is sent, and the unlock payload has never been measured, so this tool does not lock or unlock through a DA session.");
-        Panel grpSeccfgInfo = CreateGroupPanel("SECCFG (NATIVE)", UiX(0), UiY(4), 1, btnInfoNativeSeccfg);
-        // The badge used to start at UiX(0)+332, inside the BOOT DEVICE frame's own width (3 columns reach x=495),
-        // and the frame paints in front of it — so the state line appeared to begin mid-sentence. It now sits in
-        // the clear space to the right of the SECCFG frame (that group is one column wide), on the same band, and
-        // wraps rather than ellipsising because the LIVE line carries the transport description, which is long.
+
+        TabPage infoTab = mtkModes.TabPages[0];
+
+        // THE BAND. The live-session row sits directly under SERVICE, where the session it controls is opened, and the
+        // partition list gives back the 64 px it costs: heading to 160 and the list to 178..440 (13 rows). The row used
+        // to be placed at the tab grid's rows 2 and 4 (y=95 and y=175), which is *inside* the list — the grid painted
+        // over it, so only the top few pixels of each button showed and the list heading was cut in half.
+        // At 15 columns the frame is 480 px wide; four columns reach 650, which keeps them clear of the hint the
+        // SERVICE row carries on its right (that line ends at y=81) and of the badge at x=660.
+        lblInfoPartitions.Location = new Point(0, 160);
+        mediaTekInfoGrid.Location = new Point(0, 178);
+        mediaTekInfoGrid.Height = 262;
+
+        // One frame, four columns, in the order the session lives: boot it, reboot it, eject it, read its lock state.
+        // Seccfg used to have its own frame on the row below because the badge sat inside this row's right edge; the
+        // badge is now beside the frame, so the fourth button fits and the row costs one band instead of two.
+        Panel grpNativeInfo = CreateGroupPanel("NATIVE DA SESSION", 15, 88, 4,
+            btnInfoNativeBoot, btnInfoNativeReboot, btnInfoNativeEject, btnInfoNativeSeccfg);
+
+        // The badge is 196 px wide here, so its lines are written to wrap: a state line, then the one sentence that
+        // says what the state means. It sits past the frame's right edge (4 columns reach x=650).
         lblNativeBadge = new Label
         {
-            Location = new Point(UiX(0) + 185, UiY(4) + 14),
-            Size = new Size(650, 44),
+            Location = new Point(660, 88),
+            Size = new Size(196, 64),
             Text = "Session: not booted",
             ForeColor = Color.Gray,
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            Font = new Font("Segoe UI", 8f, FontStyle.Bold),
             AutoEllipsis = false
         };
         if (toolTipMain != null)
             Tip(lblNativeBadge, "Live native DA session state. While it reads LIVE, the mtkclient operations (FLASH, Unlock, Backup) are refused — Eject Device first; two clients on one BROM corrupt both sessions.");
         infoTab.Controls.Add(grpNativeInfo);
-        infoTab.Controls.Add(grpSeccfgInfo);
         infoTab.Controls.Add(lblNativeBadge);
     }
 
@@ -476,8 +487,10 @@ public partial class Form1
         if (lblNativeBadge == null || lblNativeBadge.IsDisposed) return;
         if (booted)
         {
-            lblNativeBadge.Text = "Session: LIVE — " + nativeDa.TransportDescription + ", HW 0x" + nativeDa.DeviceHwCode.ToString("X4") +
-                " — FLASH grid Read/Write/Erase run over this session";
+            // The short pipe name, not TransportDescription: that one names every endpoint and interface and cannot fit
+            // the badge's 196 px. The full description is on the NATIVE tab's state line and in native-da.log.
+            lblNativeBadge.Text = "Session: LIVE — " + (nativePipeName ?? "live pipe") + ", HW 0x" + nativeDa.DeviceHwCode.ToString("X4") +
+                "\nRead / Write / Erase run over this session";
             lblNativeBadge.ForeColor = Color.LightGreen;
         }
         else if (nativeBusy)
@@ -487,7 +500,7 @@ public partial class Form1
         }
         else
         {
-            lblNativeBadge.Text = "Session: not booted — Boot Device replays the recorded recipe once, then the FLASH grid works without replug";
+            lblNativeBadge.Text = "Session: not booted — press Boot Device once; Read / Write / Erase then work here without a replug";
             lblNativeBadge.ForeColor = Color.Gray;
         }
     }
@@ -785,12 +798,10 @@ public partial class Form1
         {
             lblNativeState.Text = MtkNativeBench.StatusLine(true, nativeDa.TransportDescription, nativeDa.DeviceHwCode, table.Extents.Count);
             SetNativeDeviceStatus(storage);
+            // The table fills both grids, and the page never moves on its own: the operator pressed a button and gets
+            // the result in front of him — the INFO list here, or the FLASH grid if that is where he already is.
+            // (It used to pull FLASH forward, which took the INFO tab's own list off screen the moment it filled.)
             FillFlashGridFromNativeTable(table);
-            // PMK's word (2026-11-04): "Live GPT: 43 partition(s) ရောက်တာနဲ့ Partition ဇယားကွက်ပေါ်လာစေချင်တယ်".
-            // The rows were already there — on the FLASH page, while a boot is started from NATIVE, so the operator
-            // watched a line count a table he could not see. The session survives the switch and the NATIVE tab is
-            // one click away again.
-            ShowMediaTekFlashPage();
         });
         foreach (MtkDaExtent extent in table.Extents.Take(12))
             NativeSay("    " + extent.Describe);
@@ -854,20 +865,8 @@ public partial class Form1
                     FormatBytesLong((long)extent.ByteLength), "Live GPT");
         }
         finally { EndMediaTekGridFill(); }
-    }
-
-    /// <summary>Brings the FLASH page forward, found by its own caption so a later tab inserted above it cannot
-    /// silently turn this into "show whichever page happens to sit at index 3".</summary>
-    private void ShowMediaTekFlashPage()
-    {
-        for (int i = 0; i < mtkModes.TabPages.Count; i++)
-        {
-            if (string.Equals(mtkModes.TabPages[i].Text, "FLASH", StringComparison.Ordinal))
-            {
-                mtkModes.SelectedIndex = i;
-                return;
-            }
-        }
+        FillMediaTekInfoGrid(table.Extents.Select(e =>
+            (e.Name, "0x" + e.ByteOffset.ToString("x"), FormatBytesLong((long)e.ByteLength))));
     }
 
     private async Task NativeDumpAsync()
@@ -879,6 +878,75 @@ public partial class Form1
         await nativeDa.ReadPartitionToFileAsync(name, dest, p => NativeProgress("dump " + name, p), nativeCancel.Token).ConfigureAwait(false);
         nativeLastDump = dest;
         NativeSay("[OK] Dump written: " + dest);
+    }
+
+    /// <summary>
+    /// INFO grid Read over the session already open. The mtkclient route attaches at USB enumeration, so every
+    /// command costs a physical unplug/replug; the live DA keeps one boot and reads one partition after another.
+    /// Each extent is resolved from the device's own GPT by the session, so a stale INFO row is refused by name.
+    /// </summary>
+    private async Task NativeInfoReadAsync(IReadOnlyList<string> names, string destination)
+    {
+        RequireNativeSession();
+        Directory.CreateDirectory(destination);
+        NativeSay("[*] Native DA: reading " + names.Count + " INFO partition(s) over the session already open — no replug between them.");
+        foreach (string name in names)
+        {
+            nativeCancel.Token.ThrowIfCancellationRequested();
+            string file = Path.Combine(destination, name + ".bin");
+            NativeSay("[*] Native DA: reading " + name + "...");
+            await nativeDa.ReadPartitionToFileAsync(name, file, p => NativeProgress("read " + name, p),
+                nativeCancel.Token).ConfigureAwait(false);
+            NativeSay("  * Read " + name + " ... " + MtkDaExtent.SizeText((ulong)new FileInfo(file).Length));
+        }
+        NativeSay("[OK] Native DA: " + names.Count + " partition(s) read to " + destination +
+                  " — the phone was never replugged for it.");
+    }
+
+    /// <summary>
+    /// INFO grid Write over the live session. Same contract as the mtkclient INFO Write: one raw image, exactly
+    /// the partition's size, never preloader/gpt/otp/flashinfo — enforced again by the session and the DA guard.
+    /// </summary>
+    private async Task NativeInfoWriteAsync(string name, string image)
+    {
+        RequireNativeSession();
+        if (ReviewSafety.IsAndroidSparse(image))
+            throw new InvalidDataException(image + " is a sparse image and the native session writes raw bytes only — " +
+                "flash it through FLASH SELECTED instead. Nothing was sent to the device.");
+        // Size ကို confirm မတိုင်မီ စစ် — မကိုက်တဲ့ image အတွက် အော်ပရေတာကို မမေးရ
+        MtkDaExtent resolved = await nativeDa.RequirePartitionAsync(name, nativeCancel.Token);
+        long imageLength = new FileInfo(image).Length;
+        if (imageLength != (long)resolved.ByteLength)
+            throw new InvalidDataException(name + " is " + resolved.ByteLength + " byte(s) and " + image +
+                " is " + imageLength + ". Write needs an exact-size raw partition image; nothing was sent.");
+        MtkDaExtent extent = await NativeConfirmProgramAsync(name, "write", image);
+        if (extent == null) return;
+        await nativeDa.WritePartitionAsync(extent.Name, image, p => NativeProgress("write " + extent.Name, p),
+            verify: true, ct: nativeCancel.Token).ConfigureAwait(false);
+        NativeSay("[OK] Native DA: " + extent.Name + " written from " + Path.GetFileName(image) + " and read back identical.");
+    }
+
+    /// <summary>
+    /// INFO grid Erase over the live session. All ticked names are resolved against the device's own GPT before
+    /// the first frame, so a phone without one of them erases none. No reset is sent: the session stays open so
+    /// the next INFO action runs without a replug (the mtkclient route's trailing reset is what spends its boot).
+    /// </summary>
+    private async Task NativeInfoEraseAsync(IReadOnlyList<string> names)
+    {
+        RequireNativeSession();
+        MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
+        IReadOnlyList<MtkDaExtent> plan = MtkNativeBench.NvErasePlan(table, names,
+            "The device's own GPT names none of the ticked partitions, so nothing was erased.", out string refusal);
+        if (plan == null) throw new InvalidOperationException(refusal);
+        NativeSay("[*] Native DA: erasing " + plan.Count + " INFO partition(s) over the session already open — no replug.");
+        foreach (MtkDaExtent extent in plan)
+        {
+            nativeCancel.Token.ThrowIfCancellationRequested();
+            NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
+            await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
+        }
+        NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased. The session is still live — read/write the " +
+                  "next partition, or press Eject Device / Reboot Device when done.");
     }
 
     private async Task NativeRestoreAsync()
