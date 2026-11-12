@@ -656,7 +656,7 @@ namespace PMKUnlocker
             // Firmware flash panel (edl.py) — title label ဖယ် (user request)
             txtQcFirmware = new TextBox
             {
-                Location = new Point(UiX(0), UiY(2) + 22),
+                Location = new Point(UiX(0), 22),
                 Size = new Size(390, 26),
                 ReadOnly = true,
                 BackColor = Color.FromArgb(38, 42, 50),
@@ -665,10 +665,10 @@ namespace PMKUnlocker
                 Font = new Font("Segoe UI", 9f)
             };
 
-            btnQcPickFirmware = Create3DButton("📂 Folder", UiX(0) + 400, UiY(2) + 20, 100, 28, ButtonTheme.Purple);
+            btnQcPickFirmware = Create3DButton("📂 Folder", UiX(0) + 440, 22, 90, 28, ButtonTheme.Purple);
             btnQcPickFirmware.Click += BtnQcPickFirmware_Click;
 
-            btnQcStartFlash = Create3DButton("◉ FLASH", UiX(0) + 510, UiY(2) + 16, 175, 36, ButtonTheme.Red);
+            btnQcStartFlash = Create3DButton("◉ FLASH", UiX(0) + 545, 18, 165, 36, ButtonTheme.Red);
             btnQcStartFlash.Click += BtnQcStartFlash_Click;
             if (toolTipMain != null)
                 Tip(btnQcStartFlash, "Flash rawprogram XML partitions via fh_loader (EDL 9008). Requires COM port + firmware folder.");
@@ -677,7 +677,7 @@ namespace PMKUnlocker
             chkQcBackupEfsFirst = new CheckBox
             {
                 Text = "Backup EFS (persist/modemst) first",
-                Location = new Point(375, 100),
+                Location = new Point(UiX(0), 64),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -686,7 +686,7 @@ namespace PMKUnlocker
             chkQcSkipUserdata = new CheckBox
             {
                 Text = "Skip userdata",
-                Location = new Point(610, 100),
+                Location = new Point(UiX(0) + 270, 64),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -695,7 +695,7 @@ namespace PMKUnlocker
             chkQcResetFrpAfter = new CheckBox
             {
                 Text = "Reset FRP after flash",
-                Location = new Point(375, 126),
+                Location = new Point(UiX(0) + 395, 64),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 200, 90),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -704,16 +704,17 @@ namespace PMKUnlocker
             chkQcAutoReboot = new CheckBox
             {
                 Text = "Auto reboot",
-                Location = new Point(UiX(0) + 697, UiY(2) + 25),
+                Location = new Point(UiX(0) + 715, 24),
                 AutoSize = true,
                 Checked = true,
                 ForeColor = Color.FromArgb(0, 230, 118),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
 
+            // Each group sits at the top-left of its own sub-tab page (UiX(0), UiY(0) = 15, 15 in page coords).
             Panel grpQcInfo = CreateGroupPanel("INFO", UiX(0), UiY(0), 2, btnQcReadInfo, btnQcReset);
-            Panel grpQcBackup = CreateGroupPanel("BACKUP", UiX(0) + 360, UiY(0), 3, btnQcSaveGpt, btnQcFullBackup, btnQcEfsBackup);
-            Panel grpQcUnlock = CreateGroupPanel("UNLOCK", UiX(0), UiY(2), 2, btnQcFrpRemove, btnQcUserlockReset);
+            Panel grpQcBackup = CreateGroupPanel("BACKUP", UiX(0), UiY(0), 3, btnQcSaveGpt, btnQcFullBackup, btnQcEfsBackup);
+            Panel grpQcUnlock = CreateGroupPanel("UNLOCK", UiX(0), UiY(0), 2, btnQcFrpRemove, btnQcUserlockReset);
 
             // RESTORE — backup folder (rl dump / EFS dump) ထဲက <partition>.bin တွေကို ပြန်ရေး
             btnQcRestoreBackup = Create3DButton("♻ Restore Backup", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Green);
@@ -741,7 +742,7 @@ namespace PMKUnlocker
                     "EFS backup folder (persist/modemst1/modemst2/fsg/fsc .bin) ထဲက IMEI ကို\r\n" +
                     "heuristic scan (plain + hex-encoded ASCII, Luhn) နဲ့ ရှာမယ်။ sticker/About phone နဲ့ ပြန်တိုက်ပါ။");
 
-            Panel grpQcRestore = CreateGroupPanel("RESTORE / IMEI REPAIR", UiX(0), UiY(5), 3, btnQcRestoreBackup, btnQcEfsRestore, btnQcImeiReadEfs);
+            Panel grpQcRestore = CreateGroupPanel("RESTORE / IMEI REPAIR", UiX(0), UiY(2), 3, btnQcRestoreBackup, btnQcEfsRestore, btnQcImeiReadEfs);
             // SETUP group (📦 EDL Module / 🧩 Firehose Loader) — user request နဲ့ ဖယ်လိုက်
             // (loader ရွေးဖို့ = အပေါ်က LOADER PICKER၊ edl.py path = auto-find + dialog)
 
@@ -768,17 +769,82 @@ namespace PMKUnlocker
             cmbQcModel.SelectedIndexChanged += CmbQcModel_SelectedIndexChanged;
             LoadQcLoaderDb();   // event wire ပြီးမှ — Auto Detect default select က model combo ပါ fill အောင်
 
-            // flash block — UNLOCK (UiY(2)+64=159) အောက် 16px gap အထိ 55px တက်
-            txtQcFirmware.Location = new Point(UiX(0), UiY(4) + 22);
-            btnQcPickFirmware.Location = new Point(UiX(0) + 400, UiY(4) + 20);
-            btnQcStartFlash.Location = new Point(UiX(0) + 510, UiY(4) + 15);
-            chkQcAutoReboot.Location = new Point(UiX(0) + 697, UiY(4) + 23);
+            // ---- Sub-tabs: INFO / UNLOCK / BACKUP / FLASH (same shape as the MediaTek tab) ----
+            // Loader picker stays above them, so the phone's Firehose loader is picked once and every
+            // operation on the tab keeps using it.
+            qcModes = new TabControl
+            {
+                Location = new Point(15, 93),
+                Size = new Size(880, 300),
+                Appearance = TabAppearance.Normal,
+                DrawMode = TabDrawMode.Normal,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            };
+            qcModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(28, 31, 38) });
+            qcModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(28, 31, 38) });
+            qcModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(28, 31, 38) });
+            qcModes.TabPages.Add(new TabPage("FLASH") { BackColor = Color.FromArgb(28, 31, 38) });
+            foreach (TabPage tp in qcModes.TabPages)
+            {
+                tp.Padding = new Padding(8);
+                tp.ForeColor = Color.Gainsboro;
+            }
 
-            tabQc.Controls.AddRange(new Control[] {
-    grpQcInfo, grpQcBackup, grpQcUnlock, grpQcLoaderPicker, grpQcRestore,
+            TabPage qcInfoTab = qcModes.TabPages[0];
+            qcInfoTab.Controls.Add(grpQcInfo);
+            qcInfoTab.Controls.Add(new Label
+            {
+                Location = new Point(UiX(0), UiY(0) + 74),
+                Size = new Size(830, 60),
+                Text = "Power the phone off, hold Vol- and plug USB to enter EDL (9008), then pick its Firehose loader above. Read Info loads the live partition table into the grid at the bottom; Reset Device leaves EDL and reboots.",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            });
+
+            TabPage qcUnlockTab = qcModes.TabPages[1];
+            qcUnlockTab.Controls.Add(grpQcUnlock);
+            qcUnlockTab.Controls.Add(new Label
+            {
+                Location = new Point(UiX(0), UiY(0) + 74),
+                Size = new Size(830, 60),
+                Text = "Both actions run over EDL with the loader picked above. FRP Remove erases frp; Userlock Reset erases userdata — every user file on the phone is lost. The phone's owner must agree.",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            });
+
+            TabPage qcBackupTab = qcModes.TabPages[2];
+            qcBackupTab.Controls.AddRange(new Control[] { grpQcBackup, grpQcRestore });
+            qcBackupTab.Controls.Add(new Label
+            {
+                Location = new Point(UiX(0), UiY(2) + 74),
+                Size = new Size(830, 60),
+                Text = "Save GPT writes the partition XML; Full Backup dumps every partition; EFS Backup dumps persist/modemst1/modemst2/fsg/fsc. Restore writes the <partition>.bin files from a backup folder after checking each one against the live partition table.",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            });
+
+            TabPage qcFlashTab = qcModes.TabPages[3];
+            qcFlashTab.Controls.AddRange(new Control[] {
                 txtQcFirmware, btnQcPickFirmware, btnQcStartFlash, chkQcAutoReboot,
-    chkQcBackupEfsFirst, chkQcSkipUserdata, chkQcResetFrpAfter
-});
+                chkQcBackupEfsFirst, chkQcSkipUserdata, chkQcResetFrpAfter
+            });
+            qcFlashTab.Controls.Add(new Label
+            {
+                Location = new Point(UiX(0), 108),
+                Size = new Size(830, 80),
+                Text = "Pick the folder that holds rawprogram*.xml and its loaders, then Flash. Backup EFS first dumps persist/modemst before the XML is written; Skip userdata leaves userdata untouched; Reset FRP after flash clears frp once the flash succeeds.",
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            });
+
+            tabQc.Controls.AddRange(new Control[] { grpQcLoaderPicker, qcModes });
+
+            // sub-tab အမြင့် = လက်ရှိ page content အမြင့် (ပိုလွတ်နေတဲ့ နေရာ မထား) —
+            // ဒါမှ partition box က sub-tab အောက် တိုက်ရိုက် ကပ်လာမယ်
+            qcModes.SelectedIndexChanged += (s, e) => { FitQcModesToPage(); SyncPartitionPanel(false); };
+            if (qcModes.SelectedIndex < 0) qcModes.SelectedIndex = 0;
+            FitQcModesToPage();
+
             // --- 6. SAMSUNG TAB (adb / fastboot) ---
             btnSamInfo = Create3DButton("ℹ️ Read Info", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnSamInfo.Click += async (s, e) => await RunBrandInfoAsync("Samsung");
@@ -1375,6 +1441,7 @@ namespace PMKUnlocker
                 // COM port list ကို "Scan Port" မနှိပ်ဘဲ အလိုအလျောက် refresh (၃ စက္ကန့်တစ်ခါ)
                 // — ဖုန်း ချိတ်/ဖြုတ်လုပ်တာနဲ့ port က ချက်ချင်း ပေါ်လာအောင်။
                 BuildDevicePickers();      // MTK/QC/Samsung/SPD tab တစ်ခုစီမှာ Brand → Model → CPU list
+                FitQcModesToPage();        // handle ရပြီးမှ tab header တကယ့် အမြင့် ရ — QC panel ကို content အတိုင်း ချိန်
                 SyncPartitionPanel(false); // content host တွေ ပြောင်းပြီးမှ row အမြင့် ပြန်ချိန်
                 ApplyDoubleBuffering();    // tab switch white flicker ကာ
                 RefillPortCombo();

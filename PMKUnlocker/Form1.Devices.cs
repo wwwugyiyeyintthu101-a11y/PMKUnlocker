@@ -449,8 +449,12 @@ namespace PMKUnlocker
 
             TabPage page = tabControl.SelectedTab;
             // tabHisi — partition grid မလို (user request); ကျန် tab အားလုံး ပြ
-            bool show = (page == tabQc || page == tabSamsung ||
-                         page == tabSpd || page == tabAdb);
+            // QC: INFO/FLASH မှာပဲ ပြ — UNLOCK/BACKUP က grid မသုံးလို့ ဖျောက် (qcModes index 1,2)
+            bool show;
+            if (page == tabQc)
+                show = qcModes != null && qcModes.SelectedIndex != 1 && qcModes.SelectedIndex != 2;
+            else
+                show = (page == tabSamsung || page == tabSpd || page == tabAdb);
             panelPartition.Visible = show;
 
             if (show)
@@ -499,6 +503,48 @@ namespace PMKUnlocker
             }
         }
 
+        // QC sub-tab control ရဲ့ အမြင့်ကို selected page ရဲ့ content အမြင့်အတိုင်း ချိန်
+        // (300 fixed ထားရင် content အောက် ကွက်လပ် ကျန်ပြီး partition box အောက်ကျသွားတယ်)
+        private void FitQcModesToPage()
+        {
+            if (qcModes == null || qcModes.TabPages.Count == 0) return;
+            TabPage page = qcModes.SelectedTab;
+            if (page == null) return;
+
+            // page က ရွေးမထားရင် Visible=false ဖြစ်နေတတ်လို့ Visible ကို မစစ်ဘူး (size ကတော့ မှန်နေတယ်)
+            // hint Label တွေက fixed height (60/80) ထားထားလို့ စာသား အောက်မှာ ကွက်လပ် ကျန်တယ် —
+            // တကယ့် wrapped text အမြင့်အတိုင်း ချုံ့ (မချဲ့)၊ ဒါမှ sub-tab က content ကို တိတိကျကျ လိုက်မယ်
+            foreach (Control c in page.Controls)
+            {
+                if (c is Label lb && !lb.AutoSize && !string.IsNullOrEmpty(lb.Text))
+                {
+                    int want = TextRenderer.MeasureText(lb.Text, lb.Font,
+                        new Size(Math.Max(40, lb.Width - 4), int.MaxValue),
+                        TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height + 2;
+                    if (want > 10 && want < lb.Height) lb.Height = want;
+                }
+            }
+
+            int bottom = 0;
+            foreach (Control c in page.Controls)
+                if (c.Bottom > bottom) bottom = c.Bottom;
+            if (bottom <= 0) return;
+
+            int header = 24;
+            try
+            {
+                int y = qcModes.DisplayRectangle.Y;
+                if (y > 4) header = y;
+            }
+            catch { }
+
+            int height = header + page.Padding.Top + bottom + page.Padding.Bottom;
+            if (height < 130) height = 130;   // အနိမ့်ဆုံး — sub-tab strip ဖတ်လို့ရအောင်
+            else if (height > 340) height = 340;
+            if (qcModes.Height == height) return;
+            qcModes.Height = height;
+        }
+
         // tab content ရဲ့ အောက်ဆုံး အမြင့် (TabPage coords) + tab header — row1 အတွက် လိုအပ်တဲ့ အမြင့်
         private int TabNeededHeight(TabPage page)
         {
@@ -533,7 +579,7 @@ namespace PMKUnlocker
                 if (y > 1) pageTop = y;
             }
             catch { }
-            return pageTop + bottom + 8;   // +8 = partition header နဲ့ content ကြား gap
+            return pageTop + bottom + 4;   // +4 = partition header နဲ့ content ကြား အနည်းဆုံး gap
         }
 
         // control က root (TabPage) ထဲမှာ ပါ/မပါ
@@ -1353,8 +1399,8 @@ namespace PMKUnlocker
                 _pickerHost[tabSpd] = ShiftTabContentDown(tabSpd, 94);
                 _pickerHost[tabAdb] = ShiftTabContentDown(tabAdb, 40);
                 _pickerHost[tabHisi] = ShiftTabContentDown(tabHisi, 40);
-                // QC: device list မပြ (loader picker ပဲ) — panel 76px ဖြစ်လို့ content 80
-                _pickerHost[tabQc] = ShiftTabContentDown(tabQc, 80);
+                // QC: device list မပြ (loader picker ပဲ) — picker က (15,11)၊ sub-tabs က (15,93) မှာ တည့်တည့်
+                // ရှိပြီးသားမို့ content ကို ထပ်ရွှေ့ရင် qcModes က picker အောက် ဝင်သွားမယ် — host မလုပ်ဘူး
 
                 AddDevicePickerToTab(tabSamsung, "samsung", "SAMSUNG", 26, "SAMSUNG DEVICE LIST", true);
                 AddDevicePickerToTab(tabSpd, "spreadtrum", "SPD", 26, "SPREADTRUM / UNISOC DEVICE LIST", true);

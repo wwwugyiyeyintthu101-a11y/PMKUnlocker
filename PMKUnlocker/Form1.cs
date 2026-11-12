@@ -49,6 +49,7 @@ namespace PMKUnlocker
         private TabPage tabFb;
         private TabPage tabMtk;
         private TabPage tabQc;
+        private TabControl qcModes;
         private TabPage tabSamsung;
         private TabPage tabSpd;
         private TabPage tabHisi;
