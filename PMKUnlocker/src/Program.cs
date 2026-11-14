@@ -108,7 +108,6 @@ namespace PMKUnlocker
         // ဆက်ရှိ — နောက် tool ဖွင့်ရင် port ဖွင့်ထားလို့ ချက်ချင်း reuse။
         private static void EnsureLicenseServer()
         {
-#if DEBUG
             try
             {
                 string url = LicenseClient.BaseUrl;
@@ -120,12 +119,17 @@ namespace PMKUnlocker
 
                 if (IsPortOpen(port)) return;   // ဆွဲပြီးသား run နေ
 
+                // Release: server ကို tool ဖိုလ်ဒါထဲ (သို့) server\ အောက်မှာ ထည့်ထားတာ ရှာတယ်
                 string baseDir = AppContext.BaseDirectory;
-                string[] candidates =
+                var candidates = new List<string>
                 {
-                    Path.GetFullPath(Path.Combine(baseDir, @"..\..\..\..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.exe")),
-                    Path.GetFullPath(Path.Combine(baseDir, @"..\..\..\..\PMKLicenseServer\bin\Debug\net10.0\PMKLicenseServer.exe")),
+                    Path.Combine(baseDir, "PMKLicenseServer.exe"),
+                    Path.Combine(baseDir, "server", "PMKLicenseServer.exe"),
                 };
+#if DEBUG
+                candidates.Add(Path.GetFullPath(Path.Combine(baseDir, @"..\..\..\..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.exe")));
+                candidates.Add(Path.GetFullPath(Path.Combine(baseDir, @"..\..\..\..\PMKLicenseServer\bin\Debug\net10.0\PMKLicenseServer.exe")));
+#endif
                 string? exe = null;
                 foreach (string c in candidates) if (File.Exists(c)) { exe = c; break; }
                 if (exe == null) return;   // server မရှိ → login က offline path ကို သွားမယ်
@@ -142,7 +146,6 @@ namespace PMKUnlocker
                 for (int i = 0; i < 30 && !IsPortOpen(port); i++) Thread.Sleep(100);
             }
             catch { }
-#endif
         }
 
         private static bool IsPortOpen(int port)
