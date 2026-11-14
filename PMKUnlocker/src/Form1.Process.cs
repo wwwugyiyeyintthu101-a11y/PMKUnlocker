@@ -92,7 +92,10 @@ namespace PMKUnlocker
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("[*] Initializing Task...", Color.Orange);
             }
-            SetProgress(10, "Initializing");
+            // 0% is the start of the job, whether this command owns the bar or is one slice of a bigger flow.
+            // Inside a flow the step label ("Mi Flash 19/24") belongs to the flow — don't overwrite it here,
+            // otherwise the whole run reads "Initializing" while the percentage climbs.
+            if (!HasAggregate) SetProgress(AggregatePercent(0), "Initializing");
 
             int exitCode = -1;
             bool timedOut = false;
@@ -176,7 +179,7 @@ namespace PMKUnlocker
                                     Match m = Regex.Match(line, @"(\d+(?:\.\d+)?)\s*%");
                                     if (m.Success && double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double p))
                                     {
-                                        SetProgress((int)p, "Flashing");
+                                        SetProgress(AggregatePercent((int)p), "Flashing");
                                     }
                                     handled = true;
                                 }
@@ -321,7 +324,7 @@ namespace PMKUnlocker
             if (failure != null)
             {
                 RestorePartitionRows();
-                SetProgress(0, "Failed", "0 MB/s");
+                AggregateFail("Failed");
                 if (!quietFail)
                 {
                     Log("[✘] " + taskTitle + " could not be started: " + failure, Color.Red);
@@ -346,7 +349,7 @@ namespace PMKUnlocker
             if (timedOut && timeoutMeansSuccess)
             {
                 RestorePartitionRows();
-                SetProgress(100, "Completed", "Done");
+                SetProgress(AggregatePercent(100), "Completed", "Done");
                 Log("[i] " + taskTitle + " — " + timeoutSec + "s timeout; process killed (device rebooted/dropped, treated as OK).", Color.Gray);
                 LogHistory(taskTitle + " (timeout)", true, Math.Round(sw.Elapsed.TotalSeconds));
                 return true;
@@ -355,7 +358,7 @@ namespace PMKUnlocker
             if (exitCode == 0)
             {
                 RestorePartitionRows();
-                SetProgress(100, "Completed", "Done");
+                SetProgress(AggregatePercent(100), "Completed", "Done");
                 if (!quiet)
                 {
                     Log("[OK] " + taskTitle + " - Completed Successfully!", Color.LightGreen);
@@ -370,7 +373,7 @@ namespace PMKUnlocker
             if (exitCode != 0 && tolerateRaw != null && tolerateRaw(rawSnapshot))
             {
                 RestorePartitionRows();
-                SetProgress(100, "Skipped", "Done");
+                SetProgress(AggregatePercent(100), "Skipped", "Done");
                 Log("[i] " + taskTitle + " — expected condition (partition not present), skipped (OK).", Color.Gray);
                 if (!quiet)
                 {
@@ -384,7 +387,7 @@ namespace PMKUnlocker
             if (timedOut)
             {
                 RestorePartitionRows();
-                SetProgress(0, "Failed", "0 MB/s");
+                AggregateFail("Failed");
                 if (!quietFail)
                 {
                     Log("[FAIL] " + taskTitle + " — timed out after " + (timeoutSec > 0 ? timeoutSec + "s" : "6h hard cap") + " (process killed).", Color.OrangeRed);
@@ -406,7 +409,7 @@ namespace PMKUnlocker
             }
 
             RestorePartitionRows();
-            SetProgress(0, "Failed", "0 MB/s");
+            AggregateFail("Failed");
             if (!quietFail)
             {
                 Log("[FAIL] " + taskTitle + " (exit code " + exitCode + ")" + ExitCodeNote(exitCode), Color.OrangeRed);

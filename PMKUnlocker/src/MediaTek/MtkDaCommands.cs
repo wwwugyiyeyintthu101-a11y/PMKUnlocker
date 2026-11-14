@@ -260,6 +260,7 @@ internal sealed partial class MtkDaSession
         MtkStorageInfo storage = await CheckExtentAsync(byteOffset, byteLength, ct).ConfigureAwait(false);
         MtkLimits limits = await QueryLimitsAsync(ct).ConfigureAwait(false);
         ResetReadProbe();
+        _reportedPercent = -1;
 
         WriteCommand(MtkDaCommand.Read);
         await ReadStatusAsync("READ accept", ct).ConfigureAwait(false);
@@ -356,6 +357,7 @@ internal sealed partial class MtkDaSession
     {
         RequireReady();
         EnterOperation("write 0x" + byteOffset.ToString("x") + " + 0x" + byteLength.ToString("x"));
+        _reportedPercent = -1;
         try
         {
             if (byteLength <= 0) throw new IOException("A zero-length write was never observed on this wire.");
@@ -751,9 +753,16 @@ internal sealed partial class MtkDaSession
         _currentOp = null;
     }
 
-    private static void Report(Action<int> progress, long done, long total)
+    private void Report(Action<int> progress, long done, long total)
     {
         if (progress == null || total <= 0) return;
-        progress.Invoke((int)Math.Min(100, done * 100 / total));
+        int percent = (int)Math.Min(100, done * 100 / total);
+        // A 64 KiB frame lands ~13 000 times on an 832 MiB read, and every call used to leave a synchronous Invoke on
+        // the UI thread — 13 000 round trips that never let WinForms go idle, so the bar, the clock and the Stop
+        // button all froze even though the labels were being rewritten. The bar has 101 states; only a new one is
+        // worth a marshal. Reset per extent (ResetProgressReport), so the next partition starts reporting again.
+        if (percent == _reportedPercent) return;
+        _reportedPercent = percent;
+        progress.Invoke(percent);
     }
 }

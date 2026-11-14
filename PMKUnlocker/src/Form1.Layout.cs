@@ -251,7 +251,11 @@ namespace PMKUnlocker
             btnFbArb = Create3DButton("🛡 Check ARB", UiX(1), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Purple);
             btnFbArb.Click += async (s, e) =>
             {
-                if (!await FastbootReadyAsync("Fastboot ARB")) return;
+                if (!await FastbootReadyAsync("Fastboot ARB"))
+                {
+                    SetProgress(0, "No fastboot device", "0 MB/s");
+                    return;
+                }
                 await ShowFastbootVarsAsync("getvar anti", "Fastboot ARB");
             };
 
@@ -512,6 +516,7 @@ namespace PMKUnlocker
             var miColPart = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Partition Name",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 26,
                 SortMode = DataGridViewColumnSortMode.NotSortable
@@ -519,6 +524,7 @@ namespace PMKUnlocker
             var miColFile = new DataGridViewTextBoxColumn
             {
                 HeaderText = "File Name",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 24,
                 SortMode = DataGridViewColumnSortMode.NotSortable
@@ -526,6 +532,7 @@ namespace PMKUnlocker
             var miColOffset = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Offset",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 16,
                 SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -534,6 +541,7 @@ namespace PMKUnlocker
             var miColLength = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Length",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 15,
                 SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -542,6 +550,7 @@ namespace PMKUnlocker
             var miColSize = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Size",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 9,
                 SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -550,6 +559,7 @@ namespace PMKUnlocker
             var miColType = new DataGridViewTextBoxColumn
             {
                 HeaderText = "Phys",
+                ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = 10,
                 SortMode = DataGridViewColumnSortMode.NotSortable
@@ -562,6 +572,14 @@ namespace PMKUnlocker
                 foreach (DataGridViewRow r in dgvMiParts.Rows)
                     if (!(r.Cells[0].Value is bool b && b)) { all = false; break; }
                 foreach (DataGridViewRow r in dgvMiParts.Rows) r.Cells[0].Value = !all;
+            };
+            // FullRowSelect က checkbox click ကို row-select အဖြစ်ပဲ ယူလို့ tick column ကို ကိုယ်တိုင် toggle
+            dgvMiParts.CellClick += (s2, e2) =>
+            {
+                if (e2.RowIndex < 0 || e2.ColumnIndex != 0) return;
+                DataGridViewCell cell = dgvMiParts.Rows[e2.RowIndex].Cells[0];
+                cell.Value = !(cell.Value is bool on && on);
+                dgvMiParts.InvalidateRow(e2.RowIndex);
             };
             grpMiFlash.Controls.Add(dgvMiParts);
             if (toolTipMain != null)

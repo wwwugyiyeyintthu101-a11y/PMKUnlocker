@@ -65,6 +65,7 @@ internal static class AdminHtml
   <button onclick="upsert()">Save (create or update)</button>
   <button class="approve" onclick="approve()">Approve / သက်မှတ်ပေး</button>
   <button class="ok" onclick="renew()">Renew + plan period</button>
+  <button class="sec" onclick="resetLink()">Reset link ထုတ်</button>
   <button class="danger" onclick="setBlock(true)">Block</button>
   <button class="sec" onclick="setBlock(false)">Unblock</button>
   <button class="danger" onclick="del()">Delete</button>
@@ -156,6 +157,14 @@ async function renew(){
 async function setBlock(b){
   const r=await api('/api/admin/block',{email:E(),blocked:b});
   if(r){setMsg(r.message||r.ok,r.ok);if(r.ok)loadList()}
+}
+async function resetLink(){
+  const r=await api('/api/admin/reset-link',{email:E()});
+  if(!r)return;
+  if(!r.ok){setMsg(r.message||'Reset link မထုတ်နိုင်ပါ',false);return}
+  try{await navigator.clipboard.writeText(r.url);setMsg('Link copied — customer ကို ပို့ပါ: '+r.url,true)}
+  catch(e){setMsg('Copy မရပါ — ကိုယ်တိုင် copy လုပ်ပါ: '+r.url,true)}
+  prompt('Reset link (၃၀ မိနစ်) — copy လုပ်ပြီး customer ကို ပို့ပါ',r.url);
 }
 async function del(){
   if(!confirm('Delete '+E()+'?'))return;

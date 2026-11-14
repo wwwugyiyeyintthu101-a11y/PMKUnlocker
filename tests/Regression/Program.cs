@@ -692,6 +692,64 @@ try
     try { MiFlash.ValidateDevice(parsed, "product: air"); } catch (InvalidDataException) { noGuard = true; }
     Check(noGuard, "Missing product guard blocks flashing");
 
+    // --- vendor guard scaffolding (stock dandelion flash_all.bat): set/probe/NEQ/GTR/exit tails ---
+    var vendorOps = MiFlash.ParseLines(new[]
+    {
+        "fastboot %* getvar product 2>&1 | findstr /r /c:\"^product: *dandelion\" || exit /B 1",
+        "set jio=0",
+        "for /f \"tokens=2 delims=: \" %%i in ('fastboot %* getvar jio 2^>^&1 ^| findstr /r /c:\"jio:\"')  do (set jio=%%i)",
+        "if %jio% NEQ 0 (",
+        "        echo current device is JIO device",
+        "        exit /B 1",
+        ")",
+        "set CURRENT_ANTI_VER=1",
+        "for /f \"tokens=2 delims=: \" %%i in ('fastboot %* getvar anti 2^>^&1 ^| findstr /r /c:\"anti:\"')  do (set version=%%i)",
+        "if [%version%] EQU [] set version=0",
+        "if %version% GTR %CURRENT_ANTI_VER% (",
+        "        echo current device antirollback version is greater than this package",
+        "        exit /B 1",
+        ")",
+        "fastboot %* flash boot %~dp0images\\boot.img || @echo \"Flash boot error\" && exit /B 1",
+        "fastboot %* reboot"
+    }, romBase);
+    Check(vendorOps.Count == 2 && vendorOps[0].Kind == "flash" && vendorOps[0].Partition == "boot" &&
+          vendorOps[1].Kind == "reboot",
+        "vendor bat: set/probe/abort guards consumed, flash+reboot kept");
+    Check(vendorOps.All(o => o.ExpectedProduct == "dandelion" && o.ExpectedJio == "0" && o.ExpectedAntiMax == "1"),
+        "vendor bat: product / jio / anti-max guard metadata carried on every op");
+    bool vendorOk = true;
+    try
+    {
+        MiFlash.ValidateDevice(vendorOps, "(bootloader) product: dandelion\n(bootloader) anti: 1\n(bootloader) jio: 0");
+        MiFlash.ValidateDevice(vendorOps, "product: dandelion\nanti: 0");
+    }
+    catch (InvalidDataException) { vendorOk = false; }
+    Check(vendorOk, "vendor bat: matching anti and missing jio (defaults to 0) pass validation");
+    bool newerAnti = false;
+    try { MiFlash.ValidateDevice(vendorOps, "product: dandelion\nanti: 2"); } catch (InvalidDataException) { newerAnti = true; }
+    Check(newerAnti, "vendor bat: device anti newer than the package is rejected");
+    bool jioUnit = false;
+    try { MiFlash.ValidateDevice(vendorOps, "product: dandelion\nanti: 1\njio: 1"); } catch (InvalidDataException) { jioUnit = true; }
+    Check(jioUnit, "vendor bat: JIO unit is rejected before any write");
+    bool unknownCmp = false;
+    try { MiFlash.ParseLines(new[] { "if %foo% GTR 1 (", ")", "fastboot flash boot boot.img" }, romBase); }
+    catch (InvalidDataException) { unknownCmp = true; }
+    Check(unknownCmp, "vendor guard applied to an unknown variable is rejected");
+    bool abortBody = false;
+    try
+    {
+        MiFlash.ParseLines(new[]
+        {
+            "set jio=0",
+            "for /f \"tokens=2 delims=: \" %%i in ('fastboot %* getvar jio 2^>^&1 ^| findstr /r /c:\"jio:\"')  do (set jio=%%i)",
+            "if %jio% NEQ 0 (",
+            "fastboot flash boot boot.img",
+            ")"
+        }, romBase);
+    }
+    catch (InvalidDataException) { abortBody = true; }
+    Check(abortBody, "vendor abort block may not hide a fastboot command");
+
     Check(!MiFlash.GuardMatches("crc", "crc: 11") && MiFlash.GuardMatches("crc", "(bootloader) crc: 1"),
         "Conditional CRC guard matches the exact value");
     bool chained = false;
@@ -1272,6 +1330,62 @@ try
             "\u001b[1;33mPreloader - SLA required ...\u001b[0m",
             "\u001b[31mPreloader - Error on DA_Send\u001b[0m" }))?.Flags == "SBC",
         "locked BROM: only the flags the unit reported True are named");
+    // 2026-11-12 capture: the flash died on OUR argv (mtk.exe exited 2 on a verb its parser does not know) long
+    // after the DA had booted, and the notice sent the operator hunting for a DAA file the unit never asked for.
+    Check(MtkBromLock.Detect(new(2, new[] {
+            "Preloader - \tDAA enabled:\t\tTrue",
+            "Preloader - [LIB]: Auth file is required. Use --auth option.",
+            "Preloader - Booting device into custom payload...Ok",
+            "mtk.exe: error: argument command: invalid choice: 'wfscatter'" })) == null,
+        "locked BROM: a run that booted a DA is never called locked, even when it then failed on our own argv");
+    Check(MtkBromLock.Detect(new(1, new[] {
+            "Preloader - [LIB]: Auth file is required. Use --auth option.",
+            "Preloader - Extensions were accepted" })) == null,
+        "locked BROM: an accepted extension handshake outranks the auth marker");
+    Check(MtkBromLock.Detect(new(2, new[] {
+            "Preloader - [LIB]: Auth file is required. Use --auth option.",
+            "mtk.exe: error: unrecognized arguments: --bogus" })) == null,
+        "locked BROM: the client rejecting its own command line is not a lock");
+
+    // The FLASH route (2026-11-12): the bundled client has no scatter verb, so a scatter package is one multi
+    // script of per-name writes over the phone's own GPT. Shape, refusals and evidence all stay byte-exact here.
+    Check(MtkFlashRoute.TokenNeedsStaging(@"C:\ROM folder\boot.img") &&
+          MtkFlashRoute.TokenNeedsStaging("a,b.img") && MtkFlashRoute.TokenNeedsStaging("a;b.img") &&
+          !MtkFlashRoute.TokenNeedsStaging("pmk-stage-0-boot.img") && !MtkFlashRoute.TokenNeedsStaging(@"C:\ROM\boot.img"),
+        "MTK flash route: separators a multi script splits on force a staged copy, plain paths ride in place");
+    Check(MtkFlashRoute.BuildScript(
+            new[] { new MtkFlashRoute.WriteTarget("boot", "boot.img"), new MtkFlashRoute.WriteTarget("tee1", "tee.img") },
+            new[] { ("tee1", "tee-back.img") }) == "printgpt;w boot boot.img;w tee1 tee.img;r tee1 tee-back.img;reset",
+        "MTK flash route: script is printgpt, one w per name, the readbacks, then reset");
+    Check(RejectMtk(() => MtkFlashRoute.BuildScript(Array.Empty<MtkFlashRoute.WriteTarget>(), Array.Empty<(string, string)>())),
+        "MTK flash route: an empty write list is refused, not sent as a bare reset");
+    Check(RejectMtk(() => MtkFlashRoute.BuildScript(new[] { new MtkFlashRoute.WriteTarget("boot", @"C:\ROM folder\boot.img") }, Array.Empty<(string, string)>())),
+        "MTK flash route: an unstaged path with a space never reaches the client");
+    Check(RejectMtk(() => MtkFlashRoute.BuildScript(new[] { new MtkFlashRoute.WriteTarget("bo ot", "boot.img") }, Array.Empty<(string, string)>())),
+        "MTK flash route: a partition name outside [A-Za-z0-9_-] is refused");
+    var routeOutcome = MtkFlashRoute.Classify(
+        new[] {
+            "GPT Table:",
+            @"Wrote boot.img to sector 10 with sector count 20.",
+            @"Wrote C:\ROM folder\system.img to sector 90 with sector count 8000." },
+        new[] {
+            new MtkFlashRoute.WriteTarget("preloader", "preloader.img"),
+            new MtkFlashRoute.WriteTarget("boot", "boot.img"),
+            new MtkFlashRoute.WriteTarget("system", @"C:/ROM folder/system.img"),
+            new MtkFlashRoute.WriteTarget("userdata", "userdata.img") },
+        new[] { "boot", "system", "userdata", "recovery" });
+    Check(routeOutcome.Skipped.SequenceEqual(new[] { "preloader" }),
+        "MTK flash route: a name this phone's table lacks is a skip, not a failure");
+    Check(routeOutcome.Written.SequenceEqual(new[] { "boot", "system" }),
+        "MTK flash route: written means the client named that exact image, slashes normalised");
+    Check(routeOutcome.Failed.SequenceEqual(new[] { "userdata" }),
+        "MTK flash route: a selected name in the table with no Wrote line failed");
+    var reusedEvidence = MtkFlashRoute.Classify(
+        new[] { "Wrote boot.img to sector 10 with sector count 20." },
+        new[] { new MtkFlashRoute.WriteTarget("boot", "boot.img"), new MtkFlashRoute.WriteTarget("recovery", "boot.img") },
+        new[] { "boot", "recovery" });
+    Check(reusedEvidence.Written.SequenceEqual(new[] { "boot" }) && reusedEvidence.Failed.SequenceEqual(new[] { "recovery" }),
+        "MTK flash route: one Wrote line cannot stand for two partitions");
 
     Check(MtkClientEngine.LuhnValid("490154203237518") && MtkClientEngine.LuhnValid("356938035643809"),
         "IMEI write: valid 15-digit Luhn IMEIs accepted");

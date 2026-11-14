@@ -115,6 +115,9 @@ namespace PMKUnlocker
             Log("========================================================", Color.FromArgb(0, 180, 255));
             Log("Removing FRP...", Color.Orange);
 
+            // Three real stages: provisioning flags, wizard disable (one package at a time), package data clear.
+            BeginAggregateProgress(3, "Removing FRP");
+
             // ၁။ အဓိက အဆင့် — provisioning + setup complete (ဒါက Android 12+ မှာ အလုပ်လုပ်တယ်)
             await ExecuteCommandQuickAsync("adb.exe", "shell settings put secure user_setup_complete 1");
             await ExecuteCommandQuickAsync("adb.exe", "shell settings put global device_provisioned 1");
@@ -122,6 +125,7 @@ namespace PMKUnlocker
                 "shell settings get global device_provisioned")).Trim();
             Log("[OK] device_provisioned=1, user_setup_complete=1" +
                 (string.IsNullOrWhiteSpace(chk) ? "" : "  (verify: device_provisioned=" + chk + ")"), Color.LightGreen);
+            AggregateStep(1, "Disabling setup wizard");
 
             // ၂။ Setup wizard ကို user 0 အတွက် disable (best effort — package အလိုက် ကွာတယ်)
             string[] wizards = { "com.google.android.setupwizard", "com.android.setupwizard",
@@ -140,8 +144,10 @@ namespace PMKUnlocker
                 Log("[i] Huawei setup wizard packages included.", Color.Gray);
             }
             int disabled = 0;
-            foreach (string pkg in wizards)
+            for (int wi = 0; wi < wizards.Length; wi++)
             {
+                SetProgress(AggregatePercent(wi * 100 / wizards.Length), "Disabling " + wizards[wi]);
+                string pkg = wizards[wi];
                 string outp = (await ExecuteCommandQuickAsync("adb.exe", "shell pm disable-user --user 0 " + pkg)).Trim();
                 string low = outp.ToLowerInvariant();
                 if (low.Contains("new state: disabled"))
@@ -173,8 +179,11 @@ namespace PMKUnlocker
                 clearPkgs.Add("com.huawei.android.hwsetupwizard");
                 clearPkgs.Add("com.huawei.android.wizard");
             }
-            foreach (string pkg in clearPkgs)
+            AggregateStep(2, "Clearing package data");
+            for (int ci = 0; ci < clearPkgs.Count; ci++)
             {
+                string pkg = clearPkgs[ci];
+                SetProgress(AggregatePercent(ci * 100 / clearPkgs.Count), "Clearing " + pkg);
                 string outp = (await ExecuteCommandQuickAsync("adb.exe", "shell pm clear " + pkg)).Trim();
                 if (outp.ToLowerInvariant().Contains("success"))
                     Log("[OK] " + pkg + " data cleared", Color.LightGreen);
@@ -184,6 +193,7 @@ namespace PMKUnlocker
 
             Log("[i] Press Reboot System (or restart the phone) - the launcher should come up.", Color.Orange);
             Log("[OK] ADB FRP steps done.", Color.LightGreen);
+            EndAggregateProgress(true, "Completed");
         }
 
         private async void BtnSamFrp_Click(object sender, EventArgs e) { await RunAdbFrpResetAsync("Samsung"); }

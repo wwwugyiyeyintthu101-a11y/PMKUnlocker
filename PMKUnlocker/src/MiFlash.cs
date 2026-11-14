@@ -14,6 +14,8 @@ internal sealed class MiFlashOp
     public string Cond = "";            // bat guard: "partition-type:NAME" | "crc" — device မပြရင် ကျော်
     public string ExpectedProduct = "";
     public string ExpectedAnti = "";
+    public string ExpectedAntiMax = ""; // vendor form: getvar anti must be <= this value
+    public string ExpectedJio = "";     // vendor form: getvar jio must equal this value (default 0)
     public string Options = "";
 
     public string Label => Kind == "flash" ? Path.GetFileName(File) :
@@ -72,13 +74,22 @@ internal static class MiFlash
         var ops = new List<MiFlashOp>();
         string fastbootVar = "";
         string condVar = "";
-        string expectedProduct = "", expectedAnti = "";
-        bool inBlock = false;
+        string expectedProduct = "", expectedAnti = "", expectedAntiMax = "", expectedJio = "";
+        bool inBlock = false, skipBlock = false;
+        var literals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // set NAME=value
+        var probes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);     // getvar KEY -> BAT var
         foreach (string rawLine in lines)
         {
             string line = rawLine.Trim();
             if (line.Length == 0) continue;
             if (line.StartsWith("@")) { line = line.Substring(1).TrimStart(); if (line.Length == 0) continue; }
+            // vendor abort block — body is echo/exit only; the guard itself is enforced by ValidateDevice
+            if (skipBlock)
+            {
+                if (line == ")") { skipBlock = false; continue; }
+                if (Regex.IsMatch(line, @"^(?:rem\b.*|::.*|echo\b.*|@?exit\s+/B\s+1)$", RegexOptions.IgnoreCase)) continue;
+                throw new InvalidDataException("Unsupported rollback-block control flow.");
+            }
             if (line == ")")
             {
                 if (!inBlock) throw new InvalidDataException("Unmatched BAT block end.");
@@ -90,6 +101,70 @@ internal static class MiFlash
 
             Match setM = Regex.Match(line, @"^set\s+""?FASTBOOT\s*=\s*([^""]*)""?\s*$", RegexOptions.IgnoreCase);
             if (setM.Success) { fastbootVar = setM.Groups[1].Value.Trim(); continue; }
+
+            // vendor guard scaffolding: set NAME=literal
+            Match setL = Regex.Match(line, @"^set\s+""?([A-Za-z_][A-Za-z0-9_]*)""?\s*=\s*(.*)$", RegexOptions.IgnoreCase);
+            if (setL.Success)
+            {
+                string val = setL.Groups[2].Value.Trim().Trim('"');
+                if (val.IndexOfAny(new[] { '%', '&', '|', '<', '>' }) >= 0)
+                    throw new InvalidDataException("Unsupported BAT variable assignment: " + line);
+                literals[setL.Groups[1].Value] = val;
+                continue;
+            }
+
+            // vendor guard scaffolding: for /f ... in ('fastboot %* getvar KEY ...') do (set VAR=%%i)
+            Match probeM = Regex.Match(line,
+                @"^for\s+/f\s+""[^""]*""\s+%%([A-Za-z])\s+in\s+\(\s*'(.*)'\s*\)\s*do\s*\(\s*set\s+([A-Za-z0-9_]+)\s*=\s*%%\1\s*\)\s*$",
+                RegexOptions.IgnoreCase);
+            if (probeM.Success)
+            {
+                string inner = probeM.Groups[2].Value;
+                Match pv = Regex.Match(inner,
+                    @"^fastboot(?:\s+%\*)?\s+getvar\s+([A-Za-z0-9_-]+)\s*(?:2\^>\^&1|2>&1)?\s*\^?\|\s*findstr\s+/r\s+/c:""[^""]*""\s*$",
+                    RegexOptions.IgnoreCase);
+                if (!pv.Success) throw new InvalidDataException("Unsupported BAT probe command.");
+                string key = pv.Groups[1].Value.ToLowerInvariant();
+                if ((key != "jio" && key != "anti") || !inner.Contains(key + ":", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Unsupported BAT probe: " + key);
+                probes[key] = probeM.Groups[3].Value;
+                continue;
+            }
+
+            // if [%version%] EQU [] set version=0 — empty probe result defaults to 0
+            Match ifDefault = Regex.Match(line,
+                @"^if\s+\[\s*%([A-Za-z0-9_]+)%\s*\]\s+EQU\s+\[\s*\]\s+set\s+([A-Za-z0-9_]+)\s*=\s*[0-9]+\s*$",
+                RegexOptions.IgnoreCase);
+            if (ifDefault.Success)
+            {
+                string target = ifDefault.Groups[2].Value;
+                if (!probes.Values.Any(v => v.Equals(target, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidDataException("Unsupported BAT default assignment.");
+                continue;
+            }
+
+            // vendor rollback/jio abort block — only the two known comparisons are accepted
+            Match ifCmp = Regex.Match(line,
+                @"^if\s+%([A-Za-z0-9_]+)%\s+(NEQ|GTR|GEQ|LSS|LEQ|EQU)\s+(\S+)\s*\(\s*$",
+                RegexOptions.IgnoreCase);
+            if (ifCmp.Success)
+            {
+                string varName = ifCmp.Groups[1].Value;
+                string cmp = ifCmp.Groups[2].Value.ToUpperInvariant();
+                string rhsRaw = ifCmp.Groups[3].Value;
+                string rhs = rhsRaw;
+                Match rf = Regex.Match(rhsRaw, @"^%([A-Za-z0-9_]+)%$");
+                if (rf.Success) rhs = literals.TryGetValue(rf.Groups[1].Value, out string? lv) ? lv : "";
+                string key = probes.FirstOrDefault(kv =>
+                    kv.Value.Equals(varName, StringComparison.OrdinalIgnoreCase)).Key ?? "";
+                if (!uint.TryParse(rhs, out _))
+                    throw new InvalidDataException("Unsupported rollback guard value: " + rhsRaw);
+                if (key == "jio" && cmp == "NEQ") expectedJio = rhs;
+                else if (key == "anti" && cmp == "GTR") expectedAntiMax = rhs;
+                else throw new InvalidDataException("Unsupported rollback control flow: " + line);
+                skipBlock = true;
+                continue;
+            }
 
             // `fastboot args` | `fastboot.exe args` | `"...\fastboot.exe" args`
             Match fm = Regex.Match(line, @"^""[^""]*fastboot\.exe""\s+(.*)$", RegexOptions.IgnoreCase);
@@ -104,7 +179,9 @@ internal static class MiFlash
             if (failureTail >= 0)
             {
                 string tail = tailCheck.Substring(failureTail + 2).Trim();
-                if (!Regex.IsMatch(tail, @"^@?echo\s+[^&|<>]*(?:&&\s*exit\s+/B\s+1)?$", RegexOptions.IgnoreCase))
+                // vendor bats end a guard probe with a bare `exit /B 1`; flash lines end with
+                // `@echo "..." && exit /B 1`. Both stop the run — host aborts on a failed command anyway.
+                if (!Regex.IsMatch(tail, @"^(?:@?echo\s+[^&|<>]*(?:&&\s*exit\s+/B\s+1)?|@?exit\s+/B\s+1)$", RegexOptions.IgnoreCase))
                     throw new InvalidDataException("Unsupported BAT failure control flow.");
                 tailCheck = tailCheck.Substring(0, failureTail);
             }
@@ -228,7 +305,13 @@ internal static class MiFlash
             ops[^1].Options = string.Join(" ", options);
         }
         if (inBlock) throw new InvalidDataException("Unclosed BAT conditional block.");
-        foreach (var op in ops) { op.ExpectedProduct = expectedProduct; op.ExpectedAnti = expectedAnti; }
+        foreach (var op in ops)
+        {
+            op.ExpectedProduct = expectedProduct;
+            op.ExpectedAnti = expectedAnti;
+            op.ExpectedAntiMax = expectedAntiMax;
+            op.ExpectedJio = expectedJio;
+        }
         return ops;
     }
 
@@ -247,6 +330,24 @@ internal static class MiFlash
                 throw new InvalidDataException("Firmware product guard missing or device model mismatch; nothing written.");
             if (op.ExpectedAnti.Length > 0 && Value("anti") != op.ExpectedAnti)
                 throw new InvalidDataException("Rollback guard mismatch; nothing written.");
+            if (op.ExpectedAntiMax.Length > 0)
+            {
+                // vendor form: bat reads anti into a var and refuses when it is GTR the package version
+                string antiText = Value("anti");
+                bool ok = antiText.Length == 0;
+                if (!ok)
+                    ok = uint.TryParse(antiText, out uint anti) &&
+                         uint.TryParse(op.ExpectedAntiMax, out uint max) && anti <= max;
+                if (!ok) throw new InvalidDataException("Device anti rollback is newer than this firmware; nothing written.");
+            }
+            if (op.ExpectedJio.Length > 0)
+            {
+                // vendor form: `set jio=0` then overwrite from getvar; a JIO unit reports non-zero
+                string jio = Value("jio");
+                if (jio.Length == 0) jio = "0";
+                if (!jio.Equals(op.ExpectedJio, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("JIO device mismatch; nothing written.");
+            }
         }
     }
 

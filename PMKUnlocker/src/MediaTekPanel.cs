@@ -58,9 +58,14 @@ public partial class Form1
     // form we could bind on, and an unknown binding is honest "we do not know", not a guess).
     private string mediaTekTableBinding;
     // Operation Progress — flash တစ်ခုတည်းအတွက် (writes 0→95, workflow end 100)။
-    // python wfscatter က GPT+images တစ်ပြိုင်နက်ရေးတယ် — staging/prep မရှိ (sparse = python ဘက် streaming)
-    private int mtkProgressTotal, mtkProgressDone;
+    // The client writes the bytes it is given verbatim, so sparse images are expanded on this PC first; that host
+    // work is the prep band (0→15) and the writes start above it.
+    private int mtkProgressTotal, mtkProgressDone, mtkProgressFloor;
     private long mtkProgressBytes, mtkPrepTotal, mtkProgressCurTotal;
+    // Read-only multi ops (backup, verify) — python restarts its bar for every partition, so count restarts and
+    // compose one 0→100 across the whole selection instead of letting the strip restart N times.
+    private int mtkReadTotal, mtkReadDone;
+    private double mtkReadLastPp;
     // first Write line မှာ speed-denominator watch ကို restart — DA handshake ကို speed ထဲ မထည့်ချင်လို့
     private bool mtkWriteWatchArmed;
     // PMK reset က TOPRGU stub နဲ့ chip ကို reset လုပ်တဲ့အခါ USB link က mid-handshake ပြတ်တယ်; mtkclient ရဲ့
@@ -870,7 +875,7 @@ public partial class Form1
         finally { EndMediaTekGridFill(); }
     }
     // USER ရွေးချယ်နိုင်တဲ့ entries + preloader/preloader_backup (EMMC_BOOT1_BOOT2, MST ပုံစံ)
-    // pgpt/sgpt/gpt/otp/flashinfo ကို python wfscatter က GPT build ထဲ မထည့် — C# ဘက်ကနေပဲ block
+    // pgpt/sgpt/gpt/otp/flashinfo ကို table area ဖြစ်လို့ ဘယ် write list ထဲမှာ မထည့်ဘူး — C# ဘက်ကနေပဲ block
     private static bool IsMediaTekUserImage(ScatterEntry e) => e.Selectable && e.ImageExists && e.ImageError == null &&
         e.EffectiveImageSize is > 0 && e.EffectiveImageSize <= e.Size &&
         ((e.RegionRaw == "EMMC_USER" &&
@@ -917,15 +922,16 @@ public partial class Form1
             using var cancel = new CancellationTokenSource(); mediaTekCancel = cancel;
             // Port က dead field — engine က --serialport ဘယ်တော့မှ မထည့် (auto USB detect)
             mediaTekConnection = new("", mtkDaPath, mtkAuthPath, mtkPreloaderPath);
-            SetProgress(0, "Starting");
-            try { await operation(); SetProgress(100, "Completed", "Done"); }
-            catch (OperationCanceledException) { workflowFailed = true; Log("[!] MediaTek operation stopped.", Color.Orange); SetProgress(0, "Stopped", "0 MB/s"); }
-            catch { SetProgress(0, "Failed", "0 MB/s"); throw; }
+            SetProgress(AggregatePercent(0), "Starting");
+            try { await operation(); SetProgress(AggregatePercent(100), "Completed", "Done"); }
+            catch (OperationCanceledException) { workflowFailed = true; Log("[!] MediaTek operation stopped.", Color.Orange); AggregateFail("Stopped"); }
+            catch { AggregateFail("Failed"); throw; }
             finally
             {
                 mediaTekWriteActive = false; mediaTekCancel = null;
-                mtkProgressTotal = 0; mtkProgressDone = 0; mtkProgressBytes = 0;
+                mtkProgressTotal = 0; mtkProgressDone = 0; mtkProgressBytes = 0; mtkProgressFloor = 0;
                 mtkPrepTotal = 0; mtkProgressCurTotal = 0; mtkWriteWatchArmed = false;
+                mtkReadTotal = 0; mtkReadDone = 0; mtkReadLastPp = 0;
                 mtkResetStarted = false;
                 mtkProgressWatch = null;
                 mtkProgressSizes.Clear(); mtkProgressNameQueue.Clear(); mtkProgressOrder.Clear();
@@ -985,7 +991,6 @@ public partial class Form1
         if (args.Length >= 2 && args[0] == "multi")
         {
             string c = args[1];
-            if (c.Contains("wfscatter", StringComparison.Ordinal)) return "MEDIATEK FLASH";
             if (c.Contains("da seccfg unlock", StringComparison.Ordinal)) return "XIAOMI DIRECT BOOTLOADER UNLOCK";
             if (c.Contains("da seccfg lock", StringComparison.Ordinal)) return "XIAOMI BOOTLOADER LOCK";
             if (c.Contains("e nvram")) return "NV ERASE (all NV partitions)";
@@ -1019,7 +1024,6 @@ public partial class Form1
         return args[0] switch
         {
             "printgpt" or "gpt" => "READ PARTITION TABLE",
-            "wfscatter" => "MEDIATEK FLASH",
             "r" => "READ " + (args.Length > 1 ? args[1].ToUpperInvariant() : ""),
             "w" => "WRITE " + (args.Length > 1 ? args[1].ToUpperInvariant() : ""),
             "e" => "ERASE " + (args.Length > 1 ? args[1].ToUpperInvariant() : ""),
@@ -1065,20 +1069,29 @@ public partial class Form1
         if (mtkProgressTotal <= 0 || !raw.StartsWith("Wrote ", StringComparison.Ordinal)) return;
         int i = raw.IndexOf(" to sector ", StringComparison.Ordinal);
         if (i <= 6) return;
-        string token = raw.Substring(6, i - 6);
+        string token = raw.Substring(6, i - 6).Trim().Replace('\\', '/');
         if (mtkWriteWatchArmed) { mtkProgressWatch?.Restart(); mtkWriteWatchArmed = false; }
-        // bytes written: sparse = python progress က HEX2 (flash bytes); raw fallback = sector count × 512
+        // bytes written: the client's own hex pair wins; then the image length we handed it; the sector count is the
+        // PARTITION's size (not the image's), so it is the last resort only.
         Match sc = Regex.Match(raw, @"with sector count (\d+)");
         long sz = mtkProgressCurTotal > 0 ? mtkProgressCurTotal
-            : sc.Success && long.TryParse(sc.Groups[1].Value, out long sec) ? sec * 512
-            : mtkProgressSizes.TryGetValue(token, out long fb) ? fb : 0;
+            : mtkProgressSizes.TryGetValue(token, out long fb) ? fb
+            : sc.Success && long.TryParse(sc.Groups[1].Value, out long sec) ? sec * 512 : 0;
         mtkProgressCurTotal = 0;
         mtkProgressDone++;
         mtkProgressBytes += sz;
         int done = Math.Min(mtkProgressDone, mtkProgressTotal);
         double elapsed = mtkProgressWatch?.Elapsed.TotalSeconds ?? 0;
         if (elapsed > 0.3) UpdateFlashSpeed(mtkProgressBytes / 1048576.0 / elapsed);
-        SetProgress(95 * done / mtkProgressTotal, $"Flashing ({done}/{mtkProgressTotal}) · Total - {MstTotal(mtkProgressBytes)}");
+        SetProgress(FlashPercent((double)done / mtkProgressTotal),
+            $"Flashing ({done}/{mtkProgressTotal}) · Total - {MstTotal(mtkProgressBytes)}");
+    }
+
+    // Writes live above the prep band (0 when every image is raw and its path is one argv word).
+    private int FlashPercent(double fraction)
+    {
+        double span = 95 - mtkProgressFloor;
+        return AggregatePercent((int)Math.Round(mtkProgressFloor + span * Math.Clamp(fraction, 0.0, 1.0)));
     }
 
     private (string text, Color color)? MapMtkMstLine(string t)
@@ -1107,7 +1120,7 @@ public partial class Form1
             t.Contains("FileNotFoundError") || t.Contains("Please disconnect"))
             return (t, Color.OrangeRed);
 
-        // wfscatter ရဲ့ GPT rebuild + mismatch warning → MST style ပဲ တိုက်ရိုက်ပြ
+        // A client that rewrites a GPT announces it in two lines; show them as progress, not as unrecognised output.
         if (t.StartsWith("Updating Primary GPT", StringComparison.Ordinal) ||
             t.StartsWith("Updating Secondary GPT", StringComparison.Ordinal))
             return (" " + t, Color.LightGreen);
@@ -1134,6 +1147,18 @@ public partial class Form1
                 "Erasing" => "Erasing",
                 _ => "Peek"
             };
+            if (kind.Equals("Reading", StringComparison.Ordinal) && mtkReadTotal > 0)
+            {
+                // The python bar starts over for each `r` in a multi script — a restart (percent drops) means one
+                // more partition finished, and the strip keeps walking toward 100 instead of re-running 0..100.
+                if (pp < mtkReadLastPp) mtkReadDone = Math.Min(mtkReadTotal, mtkReadDone + 1);
+                mtkReadLastPp = pp;
+                int ridx = Math.Min(mtkReadDone, mtkReadTotal - 1);
+                string rname = ridx >= 0 && ridx < mtkProgressOrder.Count ? mtkProgressOrder[ridx] : "partition";
+                double rfrac = Math.Min(mtkReadTotal, mtkReadDone + pp / 100.0) / mtkReadTotal;
+                SetProgress(AggregatePercent((int)Math.Min(100, rfrac * 100)), $"{kind} {rname} {(int)pp}%");
+                return null;
+            }
             if (mtkProgressTotal > 0)
             {
                 // flash: ပြီးသား files + လက်ရှိ file % → 0→95% တွေ့ဆက် (mtkclient % က real signal)။
@@ -1147,16 +1172,16 @@ public partial class Form1
                     long.TryParse(hx.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long cur);
                     if (long.TryParse(hx.Groups[2].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long tot))
                         mtkProgressCurTotal = tot;
-                    SetProgress((int)(95.0 * Math.Min(mtkProgressDone, mtkProgressTotal) / mtkProgressTotal),
+                    SetProgress(FlashPercent((double)Math.Min(mtkProgressDone, mtkProgressTotal) / mtkProgressTotal),
                         $"Writing {MstTotal(mtkProgressBytes + Math.Max(cur, 0))}");
                     return null;
                 }
                 int curi = Math.Min(mtkProgressDone, mtkProgressTotal - 1);
                 string name = curi >= 0 && curi < mtkProgressOrder.Count ? mtkProgressOrder[curi] : "image";
                 double frac = Math.Min(mtkProgressDone, mtkProgressTotal) + pp / 100.0;
-                SetProgress((int)(95.0 * frac / mtkProgressTotal), $"{kind} {name} {(int)pp}%");
+                SetProgress(FlashPercent(frac / mtkProgressTotal), $"{kind} {name} {(int)pp}%");
             }
-            else SetProgress((int)pp, $"{kind} {(int)pp}%");   // non-flash: op တစ်ခုချင်း 0→100
+            else SetProgress(AggregatePercent((int)pp), $"{kind} {(int)pp}%");   // non-flash: op တစ်ခုချင်း 0→100
             return null;
         }
 
@@ -1610,7 +1635,7 @@ public partial class Form1
                 "from, so its extents are not trusted. Reading the device GPT instead.", Color.Orange);
         else
             Log(" No cached partition table — reading GPT first (one extra cycle).", Color.Orange);
-        SetProgress(0, "Reading GPT");
+        SetProgress(AggregatePercent(0), "Reading GPT");
         return await ReadMediaTekGptAsync();
     }
     private static string FindMtkInfo(IReadOnlyList<string> lines, string pattern)
@@ -1637,14 +1662,18 @@ public partial class Form1
                 RequireNativeSession();
                 CancellationToken ct = nativeCancel.Token;
                 ct.ThrowIfCancellationRequested();
+                NativeProgress("reading the live GPT", 20);
                 var table = await nativeDa.ReadPartitionTableAsync(ct).ConfigureAwait(false);
+                NativeProgress("reading storage geometry", 35);
                 var storage = await nativeDa.QueryStorageAsync(ct).ConfigureAwait(false);
                 MtkDaExtent target = MtkNativeBench.ServiceEraseTarget(table, storage, userlock);
                 ct.ThrowIfCancellationRequested();
+                NativeProgress("erasing " + target.Name, 60);
                 NativeSay("[*] Native DA: erasing only " + target.Describe + ". All other partitions are kept.");
                 await nativeDa.ErasePartitionAsync(target.Name, ct).ConfigureAwait(false);
                 NativeSay("[OK] Native DA: " + target.Name + " erase acknowledged. Android setup/lock state is not yet verified.");
                 ct.ThrowIfCancellationRequested();
+                NativeProgress("rebooting", 85);
                 await NativeRebootAsync().ConfigureAwait(false);
             });
             return;
@@ -2084,6 +2113,8 @@ public partial class Form1
             var sw = Stopwatch.StartNew();
             Directory.CreateDirectory(dest);
             // ONE plug cycle: the table and every image come off the same session.
+            mtkReadTotal = names.Count; mtkReadDone = 0; mtkReadLastPp = 0;
+            mtkProgressOrder.Clear(); mtkProgressOrder.AddRange(names);
             string script = "printgpt;" + string.Join(";", names.Select(n => $"r {n} {n}.bin"));
             var r = await MediaTekCommandAsync(new[] { "multi", script });
             var (live, _) = ParseGptLines(r.Lines);
@@ -2137,9 +2168,8 @@ public partial class Form1
     /// P1.5 fallback — the scatter the native backup writes, built from the GPT the batched run just read. The
     /// storage word is what the client printed for this unit; a UFS or an unreported storage gets no file, because
     /// the region word of a UFS scatter has never been read off a real package on this bench. Every live extent
-    /// gets a row (the dumped ones as images, the rest reserved) for the same reason the native writer does:
-    /// <c>wfscatter</c> rebuilds the GPT from the rows it parses, so a package holding only the ticked partitions
-    /// would delete the rest of the phone's table.
+    /// gets a row (the dumped ones as images, the rest reserved) for the same reason the native writer does: a
+    /// client that rebuilds a table from these rows would otherwise drop every partition a partial dump did not read.
     /// </summary>
     private void TryWriteClientFirmwareScatter(string dir, IReadOnlyList<MtkPartition> live,
         IEnumerable<string> dumped, IReadOnlyList<string> lines)
@@ -2266,6 +2296,8 @@ public partial class Form1
         var sw = Stopwatch.StartNew();
         string script = "printgpt";
         foreach (string n in NvPartitions) script += $";r {n} {n}.bin";
+        mtkReadTotal = NvPartitions.Length; mtkReadDone = 0; mtkReadLastPp = 0;
+        mtkProgressOrder.Clear(); mtkProgressOrder.AddRange(NvPartitions);
         var r = await MediaTekCommandAsync(new[] { "multi", script });
         // GPT sizes from the same run (no RequireSuccess — a missing NV part is not fatal)
         var (live, sizes) = ParseGptLines(r.Lines);
@@ -2417,105 +2449,204 @@ public partial class Form1
         return step;
     }
 
-    // FLASH → ONE wfscatter multi script → ONE plug cycle: python rebuilds GPT + streams images (sparse-aware)
+    // FLASH → ONE multi script of `w <partition> <file>` writes → ONE plug cycle. The bundled client has no scatter
+    // verb, and `w` resolves names against the device's OWN GPT — the table is never rebuilt. Sparse images are
+    // expanded on this PC first (the client writes the bytes it is given verbatim), and a name the live table does
+    // not have is reported as skipped, never guessed at an offset.
     private async Task RunMtkFlashAsync(MtkFlashStep step)
     {
         await RunMediaTekWorkflowAsync(async () =>
         {
             var sw = Stopwatch.StartNew();
             Log($" Operation : MEDIATEK FLASH ({step.Files.Count} partitions, one plug cycle)", Color.White);
-            // progress arm — python writes 0→95%, workflow end 100% (staging/prep မရှိ — python က sparse streaming)
             mtkProgressTotal = step.Files.Count;
             mtkProgressDone = 0; mtkProgressBytes = 0; mtkProgressCurTotal = 0;
-            mtkPrepTotal = step.Files.Sum(f => f.Size);
+            mtkPrepTotal = 0; mtkProgressFloor = 0;
             mtkProgressSizes.Clear(); mtkProgressNameQueue.Clear(); mtkProgressOrder.Clear();
-            SetProgress(0, "Validating selection");
-            string scatterPath = Path.GetFullPath(mediaTekPackage.ScatterPath);
-            foreach (var f in step.Files)
+            SetProgress(AggregatePercent(0), "Validating selection");
+            string sess = mediaTekEngine.SessionDirectory;
+            var staged = new List<string>();
+            try
             {
-                string full = Path.GetFullPath(f.Path);
-                if (!File.Exists(full)) throw new FileNotFoundException("Image is missing: " + f.Name, full);
-                // partition size = Total-bytes fallback (sparse က python progress HEX ကိုပဲ သုံး)
-                mtkProgressSizes[full] = f.Size;
-                if (!mtkProgressNameQueue.TryGetValue(full, out var nameq))
-                    mtkProgressNameQueue[full] = nameq = new Queue<string>();
-                nameq.Enqueue(f.Name);
-                // EMMC_BOOT1_BOOT2 preloader က boot1+boot2 နှစ်ကြောင်း evidence လာမယ် — MST display အတွက်
-                if (f.Name.Equals("preloader", StringComparison.OrdinalIgnoreCase) &&
-                    mediaTekPackage.Find(f.Name) is { RegionRaw: not null } be &&
-                    be.RegionRaw.Equals("EMMC_BOOT1_BOOT2", StringComparison.OrdinalIgnoreCase))
-                    nameq.Enqueue("preloader_backup");
-                mtkProgressOrder.Add(f.Name);
-            }
-            // readback verify (opt-in) — write ပြီးတာနဲ့ partition ကို ပြန်ဖတ်ပြီး source image ရဲ့
-            // ပထမ N bytes နဲ့ SHA-256 တိုက်မယ် (same plug cycle, multi script ထဲ ထည့်လိုက်တာ)
-            var readbacks = new List<(string Name, string Source, string SessionFile)>();
-            if (mediaTekVerifyReadback?.Checked == true)
-            {
+                // ---- host side: validate every image and know the exact bytes each partition will receive ----
+                var images = new List<(string Name, string Path, long Bytes, bool Sparse)>();
+                bool anyStaging = false;
                 foreach (var f in step.Files)
                 {
-                    if (mediaTekPackage.Find(f.Name) is not { RegionRaw: "EMMC_USER" }) continue;   // boot1/boot2 preloader မပါ
-                    if (ReviewSafety.IsAndroidSparse(f.Path))
+                    string full = Path.GetFullPath(f.Path);
+                    if (!File.Exists(full)) throw new FileNotFoundException("Image is missing: " + f.Name, full);
+                    bool sparse;
+                    long bytes;
+                    try
                     {
-                        Log(" [i] " + f.Name + " — sparse image, readback verify skipped", Color.Gray);
-                        continue;
+                        sparse = ShopServices.IsSparseImage(full);
+                        bytes = ShopServices.ExpandedImageSize(full);
                     }
-                    readbacks.Add((f.Name, Path.GetFullPath(f.Path), "readback-" + SafeReadbackName(f.Name) + ".img"));
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                    {
+                        throw new InvalidDataException("The image for " + f.Name + " could not be read (" + ex.Message +
+                            "). Nothing was written.");
+                    }
+                    if (bytes <= 0)
+                        throw new InvalidDataException("The image for " + f.Name + " is empty. Nothing was written.");
+                    if (bytes > f.Size)
+                        throw new InvalidDataException(f.Name + " holds " + f.Size + " byte(s) and its image is " +
+                            bytes + " byte(s). Writing it here would run into the next partition, so it was refused " +
+                            "before the port was touched. Nothing was written.");
+                    images.Add((f.Name, full, bytes, sparse));
+                    bool stage = sparse || MtkFlashRoute.TokenNeedsStaging(full.Replace('\\', '/'));
+                    anyStaging |= stage;
+                    if (stage) mtkPrepTotal += bytes;
                 }
-                if (readbacks.Count > 0)
-                    Log($" [i] Readback verify: {readbacks.Count} partition(s) read back + hashed in the same session", Color.Cyan);
+                if (anyStaging)
+                {
+                    Directory.CreateDirectory(sess);
+                    long available = long.MaxValue;
+                    try { available = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(sess))!).AvailableFreeSpace; }
+                    catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { }
+                    if (mtkPrepTotal > available)
+                        throw new IOException("Sparse expansion and staging need " + mtkPrepTotal +
+                            " temporary bytes; only " + available + " are available. Nothing was written.");
+                }
+                // Host preparation is 0→15% — it happens before the phone is touched. Writes take 15→95 and the
+                // workflow's final step closes 100.
+                mtkProgressFloor = anyStaging ? 15 : 0;
+                long prepDone = 0;
+                var writes = new List<MtkFlashRoute.WriteTarget>();
+                int index = 0;
+                foreach (var img in images)
+                {
+                    string token;
+                    string stagedName = "pmk-stage-" + index + "-" + SafeReadbackName(img.Name) + ".img";
+                    if (img.Sparse)
+                    {
+                        string raw = Path.Combine(sess, stagedName);
+                        Log(" [*] " + img.Name + " — Android sparse; expanding to " + MstBytes(img.Bytes) +
+                            " on this PC first", Color.Cyan);
+                        long at = prepDone;
+                        ReviewSafety.ExpandSparseImage(img.Path, raw, mediaTekCancel.Token, p => SetProgress(
+                            AggregatePercent((int)(15.0 * (at + img.Bytes * p / 100) / Math.Max(1, mtkPrepTotal))),
+                            "Expanding " + img.Name + " " + p + "%"));
+                        prepDone += img.Bytes;
+                        staged.Add(raw);
+                        token = stagedName;
+                    }
+                    else if (MtkFlashRoute.TokenNeedsStaging(img.Path.Replace('\\', '/')))
+                    {
+                        // multi splits on ';' then ' ', and `w` splits its own list on ',' — a path carrying any of
+                        // them cannot be passed, so the image is staged beside the session log under a bare name.
+                        Log(" [*] " + img.Name + " — the image path holds a separator the client splits on; staging " +
+                            MstBytes(img.Bytes) + " beside the session log", Color.Cyan);
+                        await StageCopyAsync(img.Path, Path.Combine(sess, stagedName), img.Bytes,
+                            prepDone, mtkPrepTotal, img.Name);
+                        prepDone += img.Bytes;
+                        staged.Add(Path.Combine(sess, stagedName));
+                        token = stagedName;
+                    }
+                    else
+                    {
+                        token = img.Path.Replace('\\', '/');
+                    }
+                    writes.Add(new MtkFlashRoute.WriteTarget(img.Name, token));
+                    mtkProgressOrder.Add(img.Name);
+                    mtkProgressSizes[token] = img.Bytes;
+                    if (!mtkProgressNameQueue.TryGetValue(token, out var nameq))
+                        mtkProgressNameQueue[token] = nameq = new Queue<string>();
+                    nameq.Enqueue(img.Name);
+                    index++;
+                }
+                // readback verify (opt-in) — write ပြီးတာနဲ့ partition ကို ပြန်ဖတ်ပြီး source image ရဲ့
+                // ပထမ N bytes နဲ့ SHA-256 တိုက်မယ် (same plug cycle, multi script ထဲ ထည့်လိုက်တာ)
+                var readbacks = new List<(string Name, string Source, string SessionFile)>();
+                if (mediaTekVerifyReadback?.Checked == true)
+                {
+                    foreach (var f in step.Files)
+                    {
+                        if (mediaTekPackage.Find(f.Name) is not { RegionRaw: "EMMC_USER" }) continue;   // boot1/boot2 preloader မပါ
+                        if (ShopServices.IsSparseImage(f.Path))
+                        {
+                            Log(" [i] " + f.Name + " — sparse image, readback verify skipped", Color.Gray);
+                            continue;
+                        }
+                        readbacks.Add((f.Name, Path.GetFullPath(f.Path), "readback-" + SafeReadbackName(f.Name) + ".img"));
+                    }
+                    if (readbacks.Count > 0)
+                        Log($" [i] Readback verify: {readbacks.Count} partition(s) read back + hashed in the same session", Color.Cyan);
+                }
+                string script = MtkFlashRoute.BuildScript(writes, readbacks.Select(r => (r.Name, r.SessionFile)).ToList());
+                mtkProgressWatch = Stopwatch.StartNew();
+                mtkWriteWatchArmed = true;   // first Write line မှာ speed-denominator watch ကို restart
+                var r = await MediaTekCommandAsync(new[] { "multi", script }, writes: true, attempt: "");
+                bool resetOk = r.Lines.Any(l => l.Contains("Reset command was sent", StringComparison.OrdinalIgnoreCase));
+                var (live, _) = ParseGptLines(r.Lines);
+                if (live.Count > 0) SetLiveTable(live, null);
+                var outcome = MtkFlashRoute.Classify(r.Lines, writes, live.Select(p => p.Name));
+                if (outcome.Skipped.Count > 0)
+                {
+                    foreach (string n in outcome.Skipped)
+                        Log(" [!] " + n + " — this phone's partition table has no entry with that name, and `w` can " +
+                            "only aim at names from that table. It was NOT written.", Color.Orange);
+                    mtkProgressTotal = Math.Max(1, writes.Count - outcome.Skipped.Count);
+                    mtkProgressDone = Math.Min(mtkProgressDone, mtkProgressTotal);
+                }
+                if (outcome.Failed.Count > 0)
+                {
+                    foreach (string n in outcome.Failed) Log(" [FAIL] " + n + " — write not confirmed", Color.OrangeRed);
+                    foreach (string l in r.ErrorLines.Take(8)) Log("  ! " + l.Trim(), Color.OrangeRed);
+                    if (r.ExitCode != 0) Log($"  * Exit code ... {r.ExitCode}", Color.OrangeRed);
+                    throw new IOException("Write completion was not confirmed: " + string.Join(", ", outcome.Failed) +
+                        ". It may be partially written.");
+                }
+                if (outcome.Written.Count == 0)
+                    throw new InvalidDataException("None of the selected partitions exists in this phone's partition " +
+                        "table (" + string.Join(", ", outcome.Skipped) + "). Nothing was written.");
+                if (readbacks.Count > 0) VerifyReadbacks(readbacks);
+                Log($" Total - {MstTotal(mtkProgressBytes)}", Color.Gainsboro);
+                if (outcome.Skipped.Count > 0)
+                    Log(" [!] " + outcome.Written.Count + " partition(s) written; " + outcome.Skipped.Count +
+                        " left untouched because this phone's table does not name them. The phone was not " +
+                        "repartitioned.", Color.Orange);
+                Log(resetOk
+                        ? " Finished — device is rebooting. Unplug the USB cable."
+                        : " Reset did not run — reboot the phone to apply.",
+                    resetOk ? Color.LightGreen : Color.Orange);
+                Log($" Elapsed Time... {sw.Elapsed.Minutes} minutes {sw.Elapsed.Seconds} seconds", Color.Gainsboro);
+                Log($" Finished at local time: [{DateTime.Now:dd.MM.yy HH:mm:ss}]", Color.Gainsboro);
+                Log(" [!] First boot after a full flash can take 5-10 minutes (black screen while Android", Color.Gold);
+                Log("     initializes). If it stays dark, charge the phone 15 minutes before retrying.", Color.Gold);
             }
-            // wfscatter <scatter> <name,…>;r <part> <file>;…;reset — python shlex-splits (quoted paths = space-safe)
-            // Partition names feed the multi script raw — reject anything that could inject extra commands.
-            var invalidNames = step.Files.Where(f => !Regex.IsMatch(f.Name, @"^[A-Za-z0-9_-]+$")).Select(f => f.Name).ToList();
-            if (invalidNames.Count > 0)
-                throw new InvalidDataException("Unsafe partition name(s) in selection: " + string.Join(", ", invalidNames) + ".");
-            string script = "wfscatter " + QuoteCmdArg(scatterPath) + " " +
-                string.Join(",", step.Files.Select(f => f.Name));
-            if (readbacks.Count > 0)
-                script += ";" + string.Join(";", readbacks.Select(r => "r " + r.Name + " " + r.SessionFile));
-            script += ";reset";
-            mtkProgressWatch = Stopwatch.StartNew();
-            mtkWriteWatchArmed = true;   // first Write line မှာ speed-denominator watch ကို restart
-            var r = await MediaTekCommandAsync(new[] { "multi", script }, writes: true, attempt: "");
-            bool resetOk = r.Lines.Any(l => l.Contains("Reset command was sent", StringComparison.OrdinalIgnoreCase));
-            // per-file evidence — tee1/tee2 စတာတွေ token တူလို့ တစ်ခုချင်း consume (count-based)
-            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (string l in r.Lines)
+            finally
             {
-                string t = l.TrimStart();
-                if (!t.StartsWith("Wrote ", StringComparison.Ordinal)) continue;
-                int c = t.IndexOf(" to sector ", StringComparison.Ordinal);
-                if (c <= 6) continue;
-                string tok = t.Substring(6, c - 6);
-                counts[tok] = counts.GetValueOrDefault(tok) + 1;
+                foreach (string path in staged)
+                {
+                    try { File.Delete(path); } catch { }
+                }
             }
-            var failed = new List<string>();
-            foreach (var f in step.Files)
-            {
-                string tok = Path.GetFullPath(f.Path);
-                if (counts.TryGetValue(tok, out int n) && n > 0) counts[tok] = n - 1;
-                else failed.Add(f.Name);
-            }
-            if (failed.Count > 0)
-            {
-                foreach (var f in step.Files)
-                    if (failed.Contains(f.Name)) Log(" [FAIL] " + f.Name + " — write not confirmed", Color.OrangeRed);
-                foreach (string l in r.ErrorLines.Take(8)) Log("  ! " + l.Trim(), Color.OrangeRed);
-                if (r.ExitCode != 0) Log($"  * Exit code ... {r.ExitCode}", Color.OrangeRed);
-                throw new IOException("Write completion was not confirmed: " + string.Join(", ", failed) + ". It may be partially written.");
-            }
-            if (readbacks.Count > 0) VerifyReadbacks(readbacks);
-            Log($" Total - {MstTotal(mtkProgressBytes)}", Color.Gainsboro);
-            Log(resetOk
-                    ? " Finished — device is rebooting. Unplug the USB cable."
-                    : " Reset did not run — reboot the phone to apply.",
-                resetOk ? Color.LightGreen : Color.Orange);
-            Log($" Elapsed Time... {sw.Elapsed.Minutes} minutes {sw.Elapsed.Seconds} seconds", Color.Gainsboro);
-            Log($" Finished at local time: [{DateTime.Now:dd.MM.yy HH:mm:ss}]", Color.Gainsboro);
-            Log(" [!] First boot after a full flash can take 5-10 minutes (black screen while Android", Color.Gold);
-            Log("     initializes). If it stays dark, charge the phone 15 minutes before retrying.", Color.Gold);
         });
+    }
+
+    // Staging copy for an image path the client cannot carry. Raw File.Copy would leave the bar frozen for the
+    // whole of a multi-GB file, so the copy walks the same prep band the sparse expansion uses.
+    private async Task StageCopyAsync(string source, string dest, long bytes, long prepBefore, long prepTotal, string name)
+    {
+        using var inp = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: true);
+        using var outp = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
+        byte[] buffer = new byte[1 << 20];
+        long copied = 0;
+        int last = -1;
+        while (copied < bytes)
+        {
+            mediaTekCancel.Token.ThrowIfCancellationRequested();
+            int n = await inp.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, bytes - copied)), mediaTekCancel.Token);
+            if (n <= 0) throw new InvalidDataException("The image changed while it was being staged: " + source);
+            await outp.WriteAsync(buffer.AsMemory(0, n), mediaTekCancel.Token);
+            copied += n;
+            int percent = (int)(100 * copied / bytes);
+            if (percent == last) continue;
+            last = percent;
+            SetProgress(AggregatePercent((int)(15.0 * (prepBefore + copied) / Math.Max(1, prepTotal))),
+                "Staging " + name + " " + percent + "%");
+        }
     }
 
     // Readback ဖိုင်တွေကို source image ရဲ့ size အထိ SHA-256 တိုက်ပြီး session ထဲက readback ဖိုင်ကို ဖျက်တယ်
@@ -2594,9 +2725,6 @@ public partial class Form1
         return Convert.ToHexString(sha.Hash ?? Array.Empty<byte>());
     }
 
-    // multi script က shlex-split လုပ်တယ် — quote only when the path contains a space
-    private static string QuoteCmdArg(string p) => p.IndexOf(' ') >= 0 ? "\"" + p + "\"" : p;
-
     private async Task FlashMediaTekAsync()
     {
         // A live session owns the port; sparse expansion stays on the host and never starts a second client.
@@ -2614,7 +2742,12 @@ public partial class Form1
             return;
         }
         var step = BuildFlashStep();
-        if (MessageBox.Show(this, "Write these partitions?\n\n" + string.Join(", ", step.Files.Select(f => f.Name)) + "\n\nThe GPT partition table will be rebuilt from the scatter file, then the selected partitions will be written (sparse-aware, one plug cycle).", "Confirm flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (MessageBox.Show(this, "Write these partitions?\n\n" + string.Join(", ", step.Files.Select(f => f.Name)) +
+                "\n\nEach partition is written by name into the phone's existing partition table — the GPT is not " +
+                "rebuilt and no partition is added or removed. Sparse images are expanded and size-checked on this " +
+                "PC before the phone is touched, and the whole set runs in one BROM session. A name this phone's " +
+                "table does not have cannot be written by this route and will be reported instead of guessed at.",
+                "Confirm flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         await RunMtkFlashAsync(step);
     }
     private async Task RestoreMediaTekImageAsync()
@@ -2641,32 +2774,51 @@ public partial class Form1
             bool verify = op == "w" && mediaTekVerifyReadback?.Checked == true;
             string full = Path.GetFullPath(file);
             string rbFile = "readback-" + SafeReadbackName(partition) + ".img";
-            // verify ON ဆို write + readback ကို multi script တစ်ခုတည်းထဲ ထည့် — plug cycle မတိုးဘူး
-            var args = verify
-                ? new[] { "multi", "w " + partition + " " + QuoteCmdArg(full) + ";r " + partition + " " + rbFile }
-                : new[] { op, partition, file };
-            var result = await MediaTekCommandAsync(args, writes: op == "w");
-            if (op == "w")
+            // multi splits its script on ';' then ' ' — a path carrying a separator cannot ride in it, so the image
+            // is staged beside the session log and passed by its bare name (the only case that needs a copy).
+            string token = full;
+            string staged = null;
+            if (verify && MtkFlashRoute.TokenNeedsStaging(full))
             {
-                if (verify)
+                string stageDir = mediaTekEngine.SessionDirectory;
+                Directory.CreateDirectory(stageDir);
+                staged = Path.Combine(stageDir, "pmk-restore-" + SafeReadbackName(partition) + ".img");
+                File.Copy(full, staged, true);
+                token = Path.GetFileName(staged);
+            }
+            try
+            {
+                // verify ON ဆို write + readback ကို multi script တစ်ခုတည်းထဲ ထည့် — plug cycle မတိုးဘူး
+                var args = verify
+                    ? new[] { "multi", "w " + partition + " " + token + ";r " + partition + " " + rbFile }
+                    : new[] { op, partition, file };
+                var result = await MediaTekCommandAsync(args, writes: op == "w");
+                if (op == "w")
                 {
-                    MtkClientEngine.RequireWriteEvidence(result, partition, full);
-                    VerifyReadbacks(new List<(string, string, string)> { (partition, full, rbFile) });
-                    Log("[OK] " + partition + " · write + readback verified", Color.LightGreen);
+                    if (verify)
+                    {
+                        MtkClientEngine.RequireWriteEvidence(result, partition, token);
+                        VerifyReadbacks(new List<(string, string, string)> { (partition, full, rbFile) });
+                        Log("[OK] " + partition + " · write + readback verified", Color.LightGreen);
+                    }
+                    else
+                    {
+                        MtkClientEngine.RequireWriteEvidence(result, partition, file);
+                        Log("[OK] " + partition + " · write reported; readback not performed", Color.LightGreen);
+                    }
                 }
                 else
                 {
-                    MtkClientEngine.RequireWriteEvidence(result, partition, file);
-                    Log("[OK] " + partition + " · write reported; readback not performed", Color.LightGreen);
+                    result.RequireSuccess();
+                    if (!File.Exists(file) || new FileInfo(file).Length != part.Length) throw new IOException("Partition read is incomplete.");
+                    Log("[OK] " + partition + " · backup size checked", Color.LightGreen);
                 }
+                completed = true;
             }
-            else
+            finally
             {
-                result.RequireSuccess();
-                if (!File.Exists(file) || new FileInfo(file).Length != part.Length) throw new IOException("Partition read is incomplete.");
-                Log("[OK] " + partition + " · backup size checked", Color.LightGreen);
+                if (staged != null) { try { File.Delete(staged); } catch { } }
             }
-            completed = true;
         });
         return completed;
     }

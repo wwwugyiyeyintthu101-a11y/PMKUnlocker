@@ -1251,11 +1251,11 @@ internal static class MtkNativeBench
     /// program still gets dumped but is marked <c>is_download: false</c>, because a package that offers to rewrite
     /// the chip identity is a package that bricks the phone it came from.
     ///
-    /// Every extent of the live table gets a row, not only the dumped ones. <c>wfscatter</c> rebuilds the GPT from
-    /// the rows it parses and prints "device partitions not in scatter will be removed" for the rest, so a package
-    /// holding just the three partitions somebody ticked would rewrite the phone's table down to those three. The
-    /// undumped extents travel as RESERVED rows (no image, extent from the scatter, re-read from the live table by
-    /// the client), which keeps the rebuilt table identical to the one the dump was taken from.
+    /// Every extent of the live table gets a row, not only the dumped ones. A client that rebuilds a table from the
+    /// rows it parses removes "device partitions not in scatter", so a package holding just the three partitions
+    /// somebody ticked would rewrite the phone's table down to those three. The undumped extents travel as RESERVED
+    /// rows (no image, extent from the scatter, re-read from the live table by the client), which keeps the rebuilt
+    /// table identical to the one the dump was taken from.
     ///
     /// UFS is refused rather than guessed: the region word of a UFS scatter has never been read off a real one on
     /// this bench, and an invented region string is exactly the kind of unmeasured byte this project does not send.

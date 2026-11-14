@@ -564,6 +564,7 @@ namespace PMKUnlocker
             Log("   HUAWEI / HONOR - KIRIN BOOTLOADER UNLOCK", Color.White);
             Log("   " + bl.Name + "   |   Port: " + port, Color.White);
             Log("========================================================", Color.FromArgb(0, 180, 255));
+            SetProgress(0, "Starting Kirin unlock");
             SetProgress(5, "Verifying images");
 
             bool ok = await Task.Run(() =>

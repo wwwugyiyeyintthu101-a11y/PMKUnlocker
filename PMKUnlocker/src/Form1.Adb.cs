@@ -171,11 +171,13 @@ namespace PMKUnlocker
         private async void BtnAdbInfo_Click(object sender, EventArgs e)
         {
             Log("📱 Reading Device Details...", Color.FromArgb(0, 230, 255));
+            BeginAggregateProgress(4, "Reading device");
             string devices = await ExecuteCommandQuickAsync("adb.exe", "devices");
 
             if (devices.Contains("\tdevice"))
             {
                 await LoadDevicePropsAsync();
+                AggregateStep(1, "Reading properties");
                 string brand = Prop(PropBrandKeys);
                 string model = Prop(PropModelKeys);
                 string marketName = Prop("ro.product.marketname", "ro.product.odm.marketname", "ro.product.vendor.marketname",
@@ -205,10 +207,12 @@ namespace PMKUnlocker
                 string debuggable = Prop("ro.debuggable");
                 string deviceName = (await ExecuteCommandQuickAsync("adb.exe", "shell settings get global device_name")).Trim();
 
+                AggregateStep(2, "Reading display and storage");
                 string displaySize = (await ExecuteCommandQuickAsync("adb.exe", "shell wm size")).Replace("Physical size:", "").Trim();
                 string density = (await ExecuteCommandQuickAsync("adb.exe", "shell wm density")).Replace("Physical density:", "").Trim();
                 string dfOut = await ExecuteCommandQuickAsync("adb.exe", "shell df -h /data");
                 string memOut = await ExecuteCommandQuickAsync("adb.exe", "shell cat /proc/meminfo");
+                AggregateStep(3, "Reading security state");
                 string suOut = (await ExecuteCommandQuickAsync("adb.exe", "shell which su")).Trim();
                 if (string.IsNullOrWhiteSpace(suOut))
                 {
@@ -283,10 +287,12 @@ namespace PMKUnlocker
                 LogPair("SELinux          : ", selinuxFull, lbl, selinuxText == "?" ? Color.Gray : (selinuxText.Contains("Permissive") ? badCol : okCol));
                 LogPair("Root             : ", rootText, lbl, string.IsNullOrWhiteSpace(suOut) ? warnCol : okCol);
                 Log("");   // နောက်လာမယ့် output နဲ့ ခြားရန်
+                EndAggregateProgress(true, "Completed");
             }
             else
             {
                 Log("Device not found or unauthorized!", Color.Red);
+                EndAggregateProgress(false, "Failed");
             }
         }
 
@@ -396,6 +402,7 @@ namespace PMKUnlocker
         // ROOT partition list + RW remount — root ရှိရင် by-name list ပြ၊ ရွေးတဲ့ partition ကို mount -o remount,rw
         private async void BtnAdbPartitions_Click(object sender, EventArgs e)
         {
+            BeginAggregateProgress(3, "Checking device");
             string dv = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (string.IsNullOrWhiteSpace(dv) || !dv.Contains("\tdevice"))
             {
@@ -403,6 +410,7 @@ namespace PMKUnlocker
                                 + "- USB debugging ဖွင့်ပြီး cable ချိတ်ပါ" + Environment.NewLine
                                 + "- RSA prompt ကို Allow ပါ",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                EndAggregateProgress(false, "Failed");
                 return;
             }
 
@@ -414,8 +422,10 @@ namespace PMKUnlocker
                                 + "• ဖုန်း screen က su prompt Allow မလုပ်ရသေးရင် လုပ်ပါ",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 Log("[!] Partitions: su not available (" + (string.IsNullOrWhiteSpace(id) ? "no output" : id) + ")", Color.OrangeRed);
+                EndAggregateProgress(false, "Failed");
                 return;
             }
+            AggregateStep(1, "Reading partition list");
 
             Log("========================================================", Color.FromArgb(0, 180, 255));
             Log("   ROOT PARTITIONS (by-name)", Color.White);
@@ -461,6 +471,7 @@ namespace PMKUnlocker
             string tmpSh = Path.Combine(Path.GetTempPath(), "pmk_sizes.sh");
             File.WriteAllText(tmpSh, sizeSh.Replace("\r\n", "\n"));
             await ExecuteCommandQuickAsync("adb.exe", "push \"" + tmpSh + "\" /data/local/tmp/pmk_sizes.sh");
+            AggregateStep(2, "Reading partition sizes");
             // script = ~16s (blockdev 150+ partition) — default 15s timeout ထိ → blob ကွက်
             string blob = (await ExecuteCommandQuickAsync("adb.exe",
                 "shell su -c \"sh /data/local/tmp/pmk_sizes.sh\"", 60000)).Trim();
@@ -554,6 +565,7 @@ namespace PMKUnlocker
                 Log("[!] /dev/block/by-name not found — device may not expose by-name symlinks.", Color.Orange);
                 ConfirmDialog.Show("/dev/block/by-name မရှိပါ (by-name symlink မပေးတဲ့ device)။",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                EndAggregateProgress(false, "Failed");
                 return;
             }
             var byNameSet = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
@@ -624,6 +636,7 @@ namespace PMKUnlocker
             SyncPartitionPanel(false);   // ADB ROOT grid ပြည့်ပြီ — partition row အလိုအလျောက် ချိန်
             Log("[OK] " + dgvPartitions.RowCount + " partition(s) in grid — right-click → Mount RW", Color.LightGreen);
             Log("[i] Right-click mounted rows (system/vendor…) → 🔓 Mount RW", Color.Gray);
+            EndAggregateProgress(true, "Completed");
         }
 
         // Factory Reset — ADB ကန် recovery wipe / MASTER_CLEAR ကြိုးစား။ မရရင် recovery ပို့ပြီး လက်နှိပ်ရန် ညွှန်။
@@ -658,6 +671,7 @@ namespace PMKUnlocker
         // ADB device ချိတ်ထားပြီးသားလို့ ယူဆပြီး wipe လုပ် — MTP Factory Reset ကနေလည်း ပြန်ခေါ်သည်
         private async Task RunAdbFactoryResetCoreAsync()
         {
+            BeginAggregateProgress(3, "Wiping data");
             // 1) root → wipe data via recovery command / rm (စမ်း)
             string id = (await ProbeSuAsync()).Trim();
             if (id.Contains("uid=0"))
@@ -667,6 +681,8 @@ namespace PMKUnlocker
                 await ExecuteCommandQuickAsync("adb.exe", "shell su -c \"recovery --wipe_data\"");
                 await ExecuteCommandQuickAsync("adb.exe", "shell su -c \"am broadcast -a android.intent.action.MASTER_CLEAR\"");
             }
+            AggregateStep(1, "Trying recovery wipe");
+            SetProgress(AggregatePercent(50), "Wipe request sent");
 
             // 2) non-root — recovery --wipe_data / masterclear (device-dependent)
             Log("[*] Trying recovery --wipe_data ...", Color.Cyan);
@@ -676,8 +692,10 @@ namespace PMKUnlocker
                  wipe.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0))
             {
                 Log("[OK] recovery --wipe_data accepted — phone should wipe and reboot.", Color.LightGreen);
+                EndAggregateProgress(true, "Completed");
                 return;
             }
+            AggregateStep(2, "Broadcasting MASTER_CLEAR");
 
             Log("[*] Trying MASTER_CLEAR broadcast ...", Color.Cyan);
             await ExecuteCommandQuickAsync("adb.exe",
@@ -695,6 +713,7 @@ namespace PMKUnlocker
                 "Menu မပေါ်ရင်: Vol+ / Vol- နဲ့ ရွေး၊ Power နဲ့ အတည်ပြုပါ။",
                 "Factory Reset — Recovery", MessageBoxButtons.OK, MessageBoxIcon.Information);
             Log("[i] Manual recovery steps shown in dialog.", Color.Cyan);
+            EndAggregateProgress(true, "Manual recovery step");
         }
 
         private async void BtnAdbScreenshot_Click(object sender, EventArgs e)

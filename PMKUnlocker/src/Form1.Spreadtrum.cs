@@ -266,13 +266,17 @@ namespace PMKUnlocker
 
         private async Task BtnSpdDirectFlashAsync()
         {
-            if (!await EnsurePacExtractedAsync()) return;
+            // spd_dump reports no per-file percent, so the flow itself is the progress: extracting and validating
+            // the PAC package is the first half, the one flash session is the second — 0 → 50 → 100, honestly.
+            BeginAggregateProgress(2, "Preparing PAC images");
+            if (!await EnsurePacExtractedAsync()) { EndAggregateProgress(false, "PAC extract failed"); return; }
 
             string spd = FindSpdDump();
             List<string> parts;
             List<string> files = SpdImageFiles(out parts);
             if (files.Count == 0)
             {
+                EndAggregateProgress(false, "No images in the extracted folder");
                 ConfirmDialog.Show("ဖြည်ထားတဲ့ folder ထဲမှာ partition image (.bin/.img) မတွေ့ပါ။", "SPD",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -287,14 +291,19 @@ namespace PMKUnlocker
                                 "• ဖုန်းကို Download/FDL mode မှာ ထားပါ\n" +
                                 "• ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ\n\nဆက်လုပ်မလား?",
                     "Confirm PAC Flash", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                EndAggregateProgress(false, "Cancelled");
                 return;
+            }
 
             string args = BuildSpdFdlPrefix();
             for (int i = 0; i < files.Count; i++)
                 args += " w " + parts[i] + " \"" + files[i] + "\"";
             args += " reset";
 
-            await ExecuteCommandCleanAsync(spd, args, "Spreadtrum PAC Flash (spd_dump)", false, true);
+            AggregateStep(1, "Flashing " + files.Count + " image(s)");
+            bool ok = await ExecuteCommandCleanAsync(spd, args, "Spreadtrum PAC Flash (spd_dump)", false, true);
+            EndAggregateProgress(ok, ok ? "Completed" : "Failed");
         }
 
         private async void BtnSpdReadGpt_Click(object sender, EventArgs e)

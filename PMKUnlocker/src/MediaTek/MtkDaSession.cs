@@ -1121,6 +1121,9 @@ internal sealed partial class MtkDaSession : IDisposable
     // spent in our own sleep, so the fix targets whichever is real instead of a guess.
     private long _probeAttempts, _probeEmptyWaits, _probeTransportMs, _probeDelayMs;
 
+    /// <summary>The last percent handed to the UI, so a duplicate never becomes another marshal (see <see cref="Report"/>).</summary>
+    private int _reportedPercent = -1;
+
     internal void ResetReadProbe()
     {
         _probeAttempts = 0;
@@ -1145,6 +1148,13 @@ internal sealed partial class MtkDaSession : IDisposable
         var buffer = new byte[count];
         int got = 0;
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        // A saturated DA answers every poll, so the loop below can run for a whole partition without ever reaching
+        // the Task.Delay that would give the caller's thread back — on the UI thread that means no paint and no
+        // clicks for the length of the read. The probe line shows it directly: "0 empty wait(s)" on a 13 GiB read
+        // that took 53 s. Where a message loop is pumping, hand it a slice at a fixed cadence so the progress strip,
+        // the clock and the Stop button stay alive; a thread-pool caller sees a null context and pays nothing.
+        SynchronizationContext pump = SynchronizationContext.Current;
+        var pumpClock = System.Diagnostics.Stopwatch.StartNew();
         while (got < count)
         {
             ct.ThrowIfCancellationRequested();
@@ -1159,7 +1169,12 @@ internal sealed partial class MtkDaSession : IDisposable
             // The old loop slept after every pass, progress included: a 64 KiB frame that the DA delivers in
             // several bulk transfers paid a ~15 ms sleep between each one, and a frame is 64 KiB by the DA's own
             // advertised transfer size. Sleeping now only hides the case where the port actually had nothing.
-            if (read > 0) continue;
+            if (read > 0)
+            {
+                if (pump != null && SynchronizationContext.Current == pump &&
+                    pumpClock.ElapsedMilliseconds >= 15) { pumpClock.Restart(); await Task.Yield(); }
+                continue;
+            }
             _probeEmptyWaits++;
             var delayClock = System.Diagnostics.Stopwatch.StartNew();
             await Task.Delay(10, ct).ConfigureAwait(false);

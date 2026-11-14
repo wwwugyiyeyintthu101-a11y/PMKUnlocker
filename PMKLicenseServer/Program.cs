@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -140,6 +141,23 @@ else
 string dataFile = Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json");
 Directory.CreateDirectory(Path.GetDirectoryName(dataFile)!);
 TightenAcl(dataFile, directory: false);
+
+// Optional password-reset mailer — smtp.json sits next to licenses.json. Without it the server still
+// mints reset links through the admin API, but it cannot email them to the customer.
+SmtpConfig? smtp = null;
+string smtpFile = Path.Combine(Path.GetDirectoryName(dataFile)!, "smtp.json");
+try
+{
+    if (File.Exists(smtpFile))
+    {
+        smtp = JsonSerializer.Deserialize<SmtpConfig>(File.ReadAllText(smtpFile),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (string.IsNullOrWhiteSpace(smtp?.Host)) smtp = null;
+        TightenAcl(smtpFile, directory: false);
+    }
+}
+catch (Exception ex) { Console.WriteLine("smtp.json ignored: " + ex.Message); smtp = null; }
+const int ResetTokenMinutes = 30;
 // Exactly one server process may own this JSON store. A second instance fails
 // startup rather than racing a separate in-memory lock against the same file.
 using var databaseLease = new FileStream(dataFile + ".lock", FileMode.OpenOrCreate,
@@ -286,6 +304,56 @@ bool IsAdmin(HttpContext ctx)
 
 IResult J(object o) => Results.Json(o, apiJsonOpts);
 
+string ResetUrlBase(HttpContext ctx)
+{
+    string configured = smtp?.PublicUrl ?? "";
+    return string.IsNullOrWhiteSpace(configured)
+        ? ctx.Request.Scheme + "://" + ctx.Request.Host
+        : configured.TrimEnd('/');
+}
+
+// token ကို hash ပဲ သိမ်းတယ် — link ကို ပြန်ဖတ်လို့ မရ (email/admin API က ချက်ချင်းပေးတယ်)
+string MintResetLink(Account acc, LicenseDb db, string baseUrl)
+{
+    string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    acc.ResetToken = Sha256Hex(token);
+    acc.ResetTokenAt = DateTime.UtcNow.ToString("o");
+    SaveDb(db);
+    return baseUrl + "/reset?token=" + token;
+}
+
+async Task<bool> TrySendResetMailAsync(string to, string link)
+{
+    if (smtp == null) return false;
+    try
+    {
+        string from = string.IsNullOrWhiteSpace(smtp.From) ? smtp.User : smtp.From;
+        using var mail = new MailMessage(from, to)
+        {
+            Subject = "PMK Mobile Tool — Password reset",
+            Body = "PMK Mobile Tool password reset\r\n\r\n" +
+                   "Open this link within " + ResetTokenMinutes + " minutes to set a new password:\r\n" +
+                   link + "\r\n\r\n" +
+                   "If you did not request this, ignore this email — your password stays unchanged.\r\n"
+        };
+        using var client = new SmtpClient(smtp.Host, smtp.Port)
+        {
+            EnableSsl = smtp.UseStartTls,
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+            Timeout = 15000
+        };
+        if (!string.IsNullOrWhiteSpace(smtp.User))
+            client.Credentials = new NetworkCredential(smtp.User, smtp.Password);
+        await client.SendMailAsync(mail);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("Reset email to " + to + " failed: " + ex.Message);
+        return false;
+    }
+}
+
 app.MapGet("/", () => Results.Text("PMK License Server OK", "text/plain"));
 
 // ---- self-register (pending until admin approves) ----
@@ -401,6 +469,69 @@ app.MapPost("/api/login", (LoginReq req) =>
         DaysLeft = daysLeft,
         AutoToken = newToken
     });
+}).RequireRateLimiting("api");
+
+// ---- forgot password: email a one-time reset link (၃၀ မိနစ်) ----
+app.MapPost("/api/forgot", async (HttpContext ctx, ForgotReq req) =>
+{
+    string email = (req.Email ?? "").Trim();
+    bool mailer = smtp != null;
+    string reply = mailer
+        ? "Reset link ကို email သို့ ပို့ထားသည် — ၃၀ မိနစ်အတွင်း ဖွင့်ပါ"
+        : "Email ပို့စနစ် မရှိပါ — admin ထံမှ reset link ယူပါ";
+
+    // account ရှိ/မရှိ မခွဲခြားဘဲ တူညီတဲ့ အဖြေ ပြန်တယ် (email enumeration မဖြစ်ရ)
+    if (!IsValidEmail(email)) return J(new { ok = true, sent = false, message = "Email မှားနေသည်" });
+
+    var db = LoadDb();
+    var acc = db.Accounts.FirstOrDefault(a =>
+        string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+    if (acc != null && !acc.Pending && !acc.Blocked)
+    {
+        bool recent = DateTimeOffset.TryParse(acc.ResetTokenAt, out var mintedAt) &&
+                      mintedAt.AddSeconds(60) > DateTimeOffset.UtcNow;
+        if (!recent)
+        {
+            string link = MintResetLink(acc, db, ResetUrlBase(ctx));
+            if (mailer) await TrySendResetMailAsync(acc.Email, link);
+        }
+    }
+    return J(new { ok = true, sent = mailer, message = reply });
+}).RequireRateLimiting("api");
+
+// ---- reset page + submit (link ကို browser မှာ ဖွင့်) ----
+app.MapGet("/reset", (HttpContext ctx) =>
+    Results.Text(ResetHtml.Page(ctx.Request.Query["token"].ToString()), "text/html; charset=utf-8"));
+
+app.MapPost("/api/reset", (ResetReq req) =>
+{
+    string token = (req.Token ?? "").Trim();
+    string password = req.Password ?? "";
+    if (token.Length != 64 || !token.All(Uri.IsHexDigit))
+        return J(new { ok = false, message = "Reset link မမှန်ပါ" });
+    if (password.Length < 8 || password.Length > 256)
+        return J(new { ok = false, message = "Password 8–256 လုံး ထည့်ပါ" });
+
+    var db = LoadDb();
+    string tokenHash = Sha256Hex(token);
+    var acc = db.Accounts.FirstOrDefault(a =>
+        a.ResetToken.Length > 0 && FixedHexEq(a.ResetToken, tokenHash));
+    if (acc == null)
+        return J(new { ok = false, message = "Reset link မမှန် / အသုံးပြုပြီး / သက်တမ်းကုန်ပြီ" });
+    if (!DateTimeOffset.TryParse(acc.ResetTokenAt, out var mintedAt) ||
+        mintedAt.AddMinutes(ResetTokenMinutes) <= DateTimeOffset.UtcNow)
+    {
+        acc.ResetToken = ""; acc.ResetTokenAt = "";
+        SaveDb(db);
+        return J(new { ok = false, message = "Reset link သက်တမ်းကုန်ပြီ — link အသစ် တောင်းပါ" });
+    }
+
+    acc.Salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+    acc.PassHash = HashPassword(password, acc.Salt);
+    acc.ResetToken = ""; acc.ResetTokenAt = "";
+    acc.AutoToken = ""; acc.AutoTokenAt = "";   // password အသစ် → remember-me session အားလုံး ဖျက်
+    SaveDb(db);
+    return J(new { ok = true, message = "Password ပြောင်းပြီး — app မှာ ပြန် sign in လုပ်ပါ" });
 }).RequireRateLimiting("api");
 
 // ---- admin: list ----
@@ -565,6 +696,27 @@ app.MapPost("/api/admin/delete", (HttpContext ctx, BlockReq req) =>
     if (n == 0) return J(new { ok = false, message = "Email မတွေ့ပါ" });
     SaveDb(db);
     return J(new { ok = true, message = $"Deleted {email}" });
+}).RequireRateLimiting("api");
+
+// ---- admin: mint a reset link (SMTP မရှိလည်း link ကို ကိုယ်တိုင်ပို့နိုင်) ----
+app.MapPost("/api/admin/reset-link", (HttpContext ctx, ResetLinkReq req) =>
+{
+    if (!IsAdmin(ctx)) return Results.Unauthorized();
+    string email = (req.Email ?? "").Trim();
+    var db = LoadDb();
+    var acc = db.Accounts.FirstOrDefault(a =>
+        string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+    if (acc == null) return J(new { ok = false, message = "Email မတွေ့ပါ" });
+    if (acc.Blocked) return J(new { ok = false, message = "Account ပိတ်ထားသည် (blocked)" });
+
+    string url = MintResetLink(acc, db, ResetUrlBase(ctx));
+    return J(new
+    {
+        ok = true,
+        message = "Reset link — " + ResetTokenMinutes + " မိနစ်အတွင်း သုံးပါ",
+        url,
+        expiresAt = acc.ResetTokenAt
+    });
 }).RequireRateLimiting("api");
 
 // ---- admin UI ----

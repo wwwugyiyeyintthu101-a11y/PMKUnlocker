@@ -29,9 +29,19 @@ internal sealed record MtkBromLock(string Flags, string Reason)
 {
     private static readonly string[] ConfigFlags = { "SBC", "SLA", "DAA" };
 
+    // A DA that ran proves the BROM's authorisation was not what stopped this run. On 2026-11-12 a flash died on
+    // our own argv (mtk.exe exited 2 on an unknown verb) after "Booting device into custom payload...Ok", and the
+    // notice told the operator to go find a DAA file the unit had never asked for. The client rejecting its own
+    // command line is the same class of false positive.
+    private static readonly string[] DaBooted = { "Extensions were accepted", "Booting device into custom payload" };
+    private static readonly string[] OwnArgv = { "invalid choice", "unrecognized arguments" };
+
     internal static MtkBromLock? Detect(MtkCommandResult result)
     {
         if (result?.Lines == null || result.Lines.Count == 0) return null;
+        if (result.Lines.Any(l => DaBooted.Any(t => Plain(l).Contains(t, StringComparison.OrdinalIgnoreCase))) ||
+            result.Lines.Any(l => OwnArgv.Any(t => Plain(l).Contains(t, StringComparison.OrdinalIgnoreCase))))
+            return null;
         bool authMissing = Has(result, "Auth file is required");
         bool slaAsked = Has(result, "SLA required");
         bool slaRefused = Has(result, "Bad sla challenge") || Has(result, "Send auth error") ||

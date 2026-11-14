@@ -51,6 +51,65 @@ namespace PMKUnlocker
         }
 
         // ================= PROGRESS BAR CONTROLLER =================
+
+        // ---- aggregate scope --------------------------------------------------------------------------
+        // A click that runs several commands (one per partition or per file) cannot let each command own the
+        // strip: every command starts it and ends it at 100, so the bar hits 100 N-1 times and restarts. A flow
+        // declares its step count once; from then on an inner command's 0..100 is scaled into its own slice, and
+        // only the outermost close may put the bar on 100 — after the last step really finished.
+        // It is a stack because flows nest (MTP FRP → ADB FRP, flash → per-partition commands).
+        private readonly List<(int Steps, int Done)> aggScopes = new();
+
+        private bool HasAggregate => aggScopes.Count > 0;
+
+        private void BeginAggregateProgress(int steps, string status)
+        {
+            aggScopes.Add((Math.Max(1, steps), 0));
+            SetProgress(AggregatePercent(0), status);
+        }
+
+        /// <summary>Marks <paramref name="doneSteps"/> steps of the innermost flow complete.</summary>
+        private void AggregateStep(int doneSteps, string status)
+        {
+            if (aggScopes.Count == 0) return;
+            var top = aggScopes[aggScopes.Count - 1];
+            aggScopes[aggScopes.Count - 1] = (top.Steps, Math.Min(top.Steps, Math.Max(0, doneSteps)));
+            SetProgress(AggregatePercent(0), status);
+        }
+
+        /// <summary>An inner command's own 0..100 turned into its slice of every enclosing flow.</summary>
+        private int AggregatePercent(int innerPercent)
+        {
+            int pct = Math.Min(100, Math.Max(0, innerPercent));
+            for (int i = aggScopes.Count - 1; i >= 0; i--)
+                pct = (int)Math.Round((aggScopes[i].Done * 100.0 + pct) / aggScopes[i].Steps);
+            return pct;
+        }
+
+        /// <summary>Closes the innermost flow; a completed nested flow counts as one step of its parent.</summary>
+        private void EndAggregateProgress(bool ok, string status)
+        {
+            if (aggScopes.Count > 0)
+            {
+                aggScopes.RemoveAt(aggScopes.Count - 1);
+                if (ok && aggScopes.Count > 0)
+                {
+                    var parent = aggScopes[aggScopes.Count - 1];
+                    aggScopes[aggScopes.Count - 1] = (parent.Steps,
+                        Math.Min(parent.Steps, parent.Done + 1));
+                }
+            }
+            // A failed flow must not claim 100%, but it must not erase the distance it actually covered
+            // either: parking at 0 after the bar reached 16% reads as "nothing happened".
+            SetProgress(ok ? AggregatePercent(100) : progressPercent, status, ok ? "Done" : "0 MB/s");
+        }
+
+        /// <summary>An inner command failed: report it without resetting a multi-step flow back to 0.</summary>
+        private void AggregateFail(string status)
+        {
+            SetProgress(AggregatePercent(0), status, "0 MB/s");
+        }
+
         private void SetProgress(int percent, string status, string speed = "")
         {
             // output thread က app ပိတ်ပြီးဆုံးချိန် call ရင် crash မဖြစ်အောင်
@@ -208,7 +267,7 @@ namespace PMKUnlocker
             if (string.IsNullOrWhiteSpace(rawLine)) return true;
             Match pct = Regex.Match(rawLine, @"(\d+(?:\.\d+)?)\s*%");
             if (pct.Success && double.TryParse(pct.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
-                SetProgress((int)value, "Transferring");
+                SetProgress(AggregatePercent((int)value), "Transferring");
             Match match = Regex.Match(rawLine.Trim(), @"^([a-zA-Z0-9_\-]+):\s+Offset\s+(0x[0-9a-fA-F]+),\s+Length\s+(0x[0-9a-fA-F]+)");
             if (match.Success) { AddPartitionRow(match.Groups[1].Value, match.Groups[2].Value, match.Groups[3].Value); return true; }
             Match qc = Regex.Match(rawLine, @"^([a-zA-Z0-9_\-]+)[ \t]*\t([0-9A-Fa-f]{1,16})\t([0-9A-Fa-f]{1,16})\t");

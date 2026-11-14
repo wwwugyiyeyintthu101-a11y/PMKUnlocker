@@ -92,11 +92,8 @@ namespace PMKUnlocker
         // fastboot getvar output ထဲက "လိုအပ်တဲ့" variable တွေပဲ ပြတယ် (အားလုံး 100+ လိုင်း မပြ)။
         // 'getvar all' ကို မထောက်ပံ့တဲ့ fastboot variant (ဥပမာ fastbootd) ဆိုရင် key တစ်ခုချင်း မေးတဲ့ လမ်းကို သုံးတယ်။
         // အပြည့်အစုံကို %TEMP%\pmk_fastboot_vars.txt မှာ သိမ်းထားတယ်။
-        private async Task ShowFastbootVarsAsync(string args, string title)
+        private async Task<bool> ShowFastbootVarsAsync(string args, string title)
         {
-            string outp = await ExecuteCommandQuickAsync("fastboot.exe", args);
-            Dictionary<string, string> vars = ParseFastbootVars(outp);
-
             // ပြမယ့် key တွေ (အစဉ်လိုက်)
             string[][] show = new string[][] {
                 new[] { "product",        "Product" },
@@ -119,6 +116,13 @@ namespace PMKUnlocker
                 new[] { "cpuid",          "CPU ID" },
             };
 
+            // One unit per key shown, plus the initial query and the final terminal — the strip must walk
+            // 0 → 100 instead of sitting on the previous job's number while getvar runs.
+            BeginAggregateProgress(show.Length + 2, "Reading fastboot variables");
+            string outp = await ExecuteCommandQuickAsync("fastboot.exe", args);
+            AggregateStep(1, "Device variables read");
+            Dictionary<string, string> vars = ParseFastbootVars(outp);
+
             // 'getvar all' မရရင် (FAILED / unknown command) → key တစ်ခုချင်း ပြန်မေး
             bool allFailed = vars.Count == 0 || outp.IndexOf("FAILED", StringComparison.OrdinalIgnoreCase) >= 0;
             string rawAll = outp;
@@ -129,6 +133,7 @@ namespace PMKUnlocker
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
                 foreach (string[] row in show)
                 {
+                    AggregateStep(1, "Reading " + row[0]);
                     string r = await ExecuteCommandQuickAsync("fastboot.exe", "getvar " + row[0]);
                     sb.Append(r).Append("\n");
                     Dictionary<string, string> one = ParseFastbootVars(r);
@@ -145,14 +150,57 @@ namespace PMKUnlocker
             Log(title.ToUpperInvariant(), Color.White);
             Log("======================================", Color.FromArgb(0, 180, 255));
 
+            Color lbl = Color.FromArgb(130, 145, 170);
+            Color idCol = Color.FromArgb(95, 255, 175);
+            Color sysCol = Color.FromArgb(85, 205, 255);
+            Color hwCol = Color.FromArgb(255, 205, 90);
+            Color uniCol = Color.FromArgb(215, 155, 255);
+            Color okCol = Color.FromArgb(95, 255, 175);
+            Color warnCol = Color.FromArgb(255, 180, 70);
+
+            Color ValueColor(string key, string v)
+            {
+                switch (key)
+                {
+                    case "product":
+                    case "device":
+                    case "board":
+                        return idCol;
+                    case "secure":
+                        return v.Equals("yes", StringComparison.OrdinalIgnoreCase) ? okCol : warnCol;
+                    case "unlocked":
+                        return v.Equals("yes", StringComparison.OrdinalIgnoreCase) ? warnCol : okCol;
+                    case "current-slot":
+                    case "slot-count":
+                    case "serialno":
+                    case "cpuid":
+                        return uniCol;
+                    case "anti":
+                        return v == "0" ? okCol : warnCol;
+                    case "battery-voltage":
+                        return hwCol;
+                    case "max-download-size":
+                        return hwCol;
+                    default:
+                        return sysCol;
+                }
+            }
+
+            Log("", Color.FromArgb(0, 110, 170));   // header နဲ့ အောက်စာကြောင်းတွေ ခြားရန်
+
             int shown = 0;
+            int rowIndex = 0;
             foreach (string[] row in show)
             {
+                rowIndex++;
+                AggregateStep(1 + rowIndex, "Showing " + row[1]);
+                await Task.Delay(20);   // တစ်လိုင်းချင်း ဖြစ်လာတာကို မြင်ရအောင် — burst တစ်ခုတည်းမှာ 100% ခုန်မသွားရ
                 string v;
                 if (!vars.TryGetValue(row[0], out v) || string.IsNullOrWhiteSpace(v)) continue;
-                Log(row[1].PadRight(22) + ": " + v, Color.White);
+                LogPair(row[1].PadRight(22) + ": ", v, lbl, ValueColor(row[0], v));
                 shown++;
             }
+            Log("", Color.FromArgb(0, 110, 170));
             if (shown == 0)
                 Log("(no key variables found - check that the phone is in fastboot mode)", Color.Orange);
 
@@ -173,6 +221,9 @@ namespace PMKUnlocker
             {
                 Log("[!] Fastboot dump write failed: " + ex.Message, Color.Orange);
             }
+
+            EndAggregateProgress(shown > 0, shown > 0 ? "Completed" : "No fastboot variables read");
+            return shown > 0;
         }
 
         // Current slot ဖတ်ပြီး A↔B toggle — ဖုန်းက A ဆို B, B ဆို A ချိန်းပေးတယ်
@@ -501,6 +552,8 @@ namespace PMKUnlocker
             if (stopRequested) return;
             int failCount = 0, done = 0, total = selected.Count;
 
+            // Every op (pre-erase + bat rows) is one step so the bar walks 0→100 exactly once.
+            List<string> eraseFirst = new List<string>();
             if (chkMiEraseFirst.Checked)
             {
                 // bat ထဲမှာ ပြီးတော့ erase လုပ်မယ့် partition တွေကို မထပ်ဖျက်နဲ့ —
@@ -508,23 +561,27 @@ namespace PMKUnlocker
                 var batErase = new HashSet<string>(
                     selected.Where(o => o.Kind == "erase").Select(o => o.Partition),
                     StringComparer.OrdinalIgnoreCase);
-                foreach (string p in MiFlash.EraseFirstFor(selected, batErase, guardSkipped))
-                {
-                    if (stopRequested) break;
-                    bool okE = await ExecuteCommandCleanAsync("fastboot.exe", "erase " + p, "Erase [" + p + "]", quiet: true, quietFail: true);
-                    Log(" Erasing [ erase ] -> [ " + p + " ]... " + (okE ? "Ok" : "Failed"), okE ? Color.LightGreen : Color.OrangeRed);
-                    if (!okE) { workflowFailed = true; return; }
-                }
+                eraseFirst = MiFlash.EraseFirstFor(selected, batErase, guardSkipped).ToList();
+            }
+            BeginAggregateProgress(eraseFirst.Count + total, "Mi Flash");
+            int step = 0;
+            foreach (string p in eraseFirst)
+            {
+                if (stopRequested) break;
+                AggregateStep(step++, "Erase [" + p + "]");
+                bool okE = await ExecuteCommandCleanAsync("fastboot.exe", "erase " + p, "Erase [" + p + "]", quiet: true, quietFail: true);
+                Log(" Erasing [ erase ] -> [ " + p + " ]... " + (okE ? "Ok" : "Failed"), okE ? Color.LightGreen : Color.OrangeRed);
+                if (!okE) { workflowFailed = true; EndAggregateProgress(false, "Failed"); return; }
             }
 
             foreach (MiFlashOp op in selected)
             {
                 if (stopRequested) { Log("[!] Stopped by user.", Color.Orange); break; }
                 done++;
+                AggregateStep(step++, "Mi Flash (" + done + "/" + total + ")");
                 if (op.Kind == "reboot")
                 {
                     // Auto Reboot က အဆုံးမှာ တစ်ခါထဲ — reboot row ကို ဒီမှာ ကျော်
-                    SetProgress(done * 100 / Math.Max(1, total), "Mi Flash (" + done + "/" + total + ")");
                     continue;
                 }
 
@@ -563,7 +620,6 @@ namespace PMKUnlocker
                 if (failCount > 0) { workflowFailed = true; break; }
                 if (swMi.Elapsed.TotalSeconds >= 0.5 && bytesDone > 0)
                     UpdateFlashSpeed(bytesDone / 1048576.0 / swMi.Elapsed.TotalSeconds);
-                SetProgress(done * 100 / Math.Max(1, total), "Mi Flash (" + done + "/" + total + ")");
             }
 
             // Auto Reboot — MST style တစ်ခါထဲ (flash fail ရင် မ reboot — half state ကနေ မစ)
@@ -585,12 +641,17 @@ namespace PMKUnlocker
             Log(" Elapsed Time... " + elapsed, Color.Yellow);
             Log(" Finished at local time: [" + DateTime.Now.ToString("dd.MM.yy HH:mm:ss") + "]", Color.Yellow);
             if (failCount > 0) Log("[!] " + failCount + " op(s) FAILED — check the log", Color.OrangeRed);
-            ResetProgress();
+            EndAggregateProgress(failCount == 0 && !stopRequested,
+                failCount > 0 ? "Failed" : stopRequested ? "Stopped" : "Completed");
         }
 
         private async void BtnFbInfo_Click(object sender, EventArgs e)
         {
-            if (!await FastbootReadyAsync("Fastboot Full Info")) return;
+            if (!await FastbootReadyAsync("Fastboot Full Info"))
+            {
+                SetProgress(0, "No fastboot device", "0 MB/s");
+                return;
+            }
             await ShowFastbootVarsAsync("getvar all", "Fastboot Info (key variables)");
         }
 

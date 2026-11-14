@@ -6,45 +6,47 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkClientProtocol.cs" Link="MediaTek/MtkClientProtocol.cs" />
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCatalog.cs" Link="MediaTek/MtkDaCatalog.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkClientProtocol.cs" Link="MediaTek/MtkClientProtocol.cs" />
+    <!-- The FLASH route: the multi script a scatter package becomes, and what the client's own "Wrote" lines prove. -->
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkFlashRoute.cs" Link="MediaTek/MtkFlashRoute.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkDaCatalog.cs" Link="MediaTek/MtkDaCatalog.cs" />
     <!-- Native MTK DA session (Phase 1.75 Path B). The wire codecs, recipe loader, boot machine and the B3
          read/write/erase command layer are hardware-free assertable; MtkDaTransport.cs is NOT linked here
          because it drags System.IO.Ports and System.Management into a net8.0 console test. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkWire.cs" Link="MediaTek/MtkWire.cs" />
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkBootProfile.cs" Link="MediaTek/MtkBootProfile.cs" />
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaSession.cs" Link="MediaTek/MtkDaSession.cs" />
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkDaCommands.cs" Link="MediaTek/MtkDaCommands.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkWire.cs" Link="MediaTek/MtkWire.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkBootProfile.cs" Link="MediaTek/MtkBootProfile.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkDaSession.cs" Link="MediaTek/MtkDaSession.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkDaCommands.cs" Link="MediaTek/MtkDaCommands.cs" />
     <!-- B5: the seccfg config-block decoder the state query runs on — measured bytes, no hardware needed. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkSeccfg.cs" Link="MediaTek/MtkSeccfg.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkSeccfg.cs" Link="MediaTek/MtkSeccfg.cs" />
     <!-- P1.1: the GPT snapshot writer — folder shape, UEFI geometry and CRCs, all assertable from bytes. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkGptBackup.cs" Link="MediaTek/MtkGptBackup.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkGptBackup.cs" Link="MediaTek/MtkGptBackup.cs" />
     <!-- The NATIVE tab's hardware-free gates (dump path, boot blocker, never-program, confirm text). -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkNativeBench.cs" Link="MediaTek/MtkNativeBench.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkNativeBench.cs" Link="MediaTek/MtkNativeBench.cs" />
     <!-- P1.6: the startup prune — GUID-only candidates, keep-newest, pure IO. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkSessionPrune.cs" Link="MediaTek/MtkSessionPrune.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkSessionPrune.cs" Link="MediaTek/MtkSessionPrune.cs" />
     <!-- P1.8: the ADB post-flash check — getprop parsing, the boot verdict, the masked IMEI and the poll loop.
          The ADB call is a delegate, so the whole wait is assertable without a phone. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkPostFlashCheck.cs" Link="MediaTek/MtkPostFlashCheck.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkPostFlashCheck.cs" Link="MediaTek/MtkPostFlashCheck.cs" />
     <!-- P2.0: chipset coverage — recipe listing, the offline audit and the unknown-HW-code sentence. No phone. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkRecipeAudit.cs" Link="MediaTek/MtkRecipeAudit.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkRecipeAudit.cs" Link="MediaTek/MtkRecipeAudit.cs" />
     <!-- P2.1: what the next CPU still needs — loader packs joined against installed recipes. No phone, no blobs. -->
-    <Compile Include="../../PMKUnlocker/MediaTek/MtkRecipeWorkshop.cs" Link="MediaTek/MtkRecipeWorkshop.cs" />
-    <Compile Include="../../PMKUnlocker/ReviewSafety.cs" Link="ReviewSafety.cs" />
-    <Compile Include="../../PMKUnlocker/ShopServices.cs" Link="ShopServices.cs" />
-    <Compile Include="../../PMKUnlocker/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
-    <Compile Include="../../PMKUnlocker/KernelExploit.cs" Link="KernelExploit.cs" />
-    <Compile Include="../../PMKUnlocker/ToolIntegrity.cs" Link="ToolIntegrity.cs" />
-    <Compile Include="../../PMKUnlocker/MiFlash.cs" Link="MiFlash.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterModels.cs" Link="MtkFirmware/ScatterModels.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterParser.cs" Link="MtkFirmware/ScatterParser.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/ScatterWriter.cs" Link="MtkFirmware/ScatterWriter.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/FirmwarePreflight.cs" Link="MtkFirmware/FirmwarePreflight.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
-    <Compile Include="../../PMKUnlocker/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
-    <Compile Include="../../PMKUnlocker/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
-    <Compile Include="../../PMKUnlocker/Qualcomm/FirehoseIO.cs" Link="Qualcomm/FirehoseIO.cs" />
+    <Compile Include="../../PMKUnlocker/src/MediaTek/MtkRecipeWorkshop.cs" Link="MediaTek/MtkRecipeWorkshop.cs" />
+    <Compile Include="../../PMKUnlocker/src/ReviewSafety.cs" Link="ReviewSafety.cs" />
+    <Compile Include="../../PMKUnlocker/src/ShopServices.cs" Link="ShopServices.cs" />
+    <Compile Include="../../PMKUnlocker/src/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
+    <Compile Include="../../PMKUnlocker/src/KernelExploit.cs" Link="KernelExploit.cs" />
+    <Compile Include="../../PMKUnlocker/src/ToolIntegrity.cs" Link="ToolIntegrity.cs" />
+    <Compile Include="../../PMKUnlocker/src/MiFlash.cs" Link="MiFlash.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/ScatterModels.cs" Link="MtkFirmware/ScatterModels.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/ScatterParser.cs" Link="MtkFirmware/ScatterParser.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/ScatterWriter.cs" Link="MtkFirmware/ScatterWriter.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/FirmwarePreflight.cs" Link="MtkFirmware/FirmwarePreflight.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/FlashBackend.cs" Link="MtkFirmware/FlashBackend.cs" />
+    <Compile Include="../../PMKUnlocker/src/MtkFirmware/LogRedactor.cs" Link="MtkFirmware/LogRedactor.cs" />
+    <Compile Include="../../PMKUnlocker/src/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
+    <Compile Include="../../PMKUnlocker/src/Qualcomm/FirehoseIO.cs" Link="Qualcomm/FirehoseIO.cs" />
     <!-- SPD FDL pairing — one folder must supply both halves, so an incomplete loader folder is assertable. -->
-    <Compile Include="../../PMKUnlocker/Spreadtrum/SpdLoaderPair.cs" Link="Spreadtrum/SpdLoaderPair.cs" />
+    <Compile Include="../../PMKUnlocker/src/Spreadtrum/SpdLoaderPair.cs" Link="Spreadtrum/SpdLoaderPair.cs" />
   </ItemGroup>
 </Project>

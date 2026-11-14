@@ -386,6 +386,20 @@ namespace PMKUnlocker
                 foreach (var input in inputs) if (!input.IsDisposed) input.Enabled = true;
                 flashWorkflowContext.Value = false;
                 flashWorkflowRunning = false;
+                // Every click funnels through here, so this is the one place that can guarantee the strip tells
+                // the truth: close a flow-level aggregate a step left open, and never leave "100%" behind after
+                // a failure (the old bug: a failed native command painted 100 "FAIL").
+                if (HasAggregate)
+                {
+                    // A flow that threw (or returned early) may leave more than one scope open; close them all.
+                    while (HasAggregate)
+                        EndAggregateProgress(!workflowFailed && !stopRequested,
+                            stopRequested ? "Stopped" : workflowFailed ? "Failed" : "Completed");
+                }
+                else if (workflowDidOp && !workflowFailed && !stopRequested)
+                    SetProgress(100, "Completed", "Done");
+                else if (!workflowDidOp)
+                    ResetProgress();          // declined / nothing ran — no stale percentage from the last job
                 workflowDidOp = false;
             }
         }

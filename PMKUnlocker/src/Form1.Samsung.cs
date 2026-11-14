@@ -38,11 +38,13 @@ namespace PMKUnlocker
 
                 await RunFlashWorkflowAsync(async () =>
                 {
-                    int ok = 0;
+                    int ok = 0, step = 0;
                     var missing = new List<string>();
+                    BeginAggregateProgress(SamsungEfsPartitions.Length, "EFS backup");
                     foreach (string part in SamsungEfsPartitions)
                     {
                         if (stopRequested) break;
+                        AggregateStep(step++, "EFS backup (" + part + ")");
                         if (await RunAdbRootPartitionOpAsync("r", part, Path.Combine(dir, part + ".bin"),
                                 "Samsung EFS backup (" + part + ")"))
                             ok++;
@@ -113,9 +115,11 @@ namespace PMKUnlocker
                 await RunFlashWorkflowAsync(async () =>
                 {
                     int done = 0;
+                    BeginAggregateProgress(plan.Count, "Restoring " + plan.Count + " partition(s)");
                     foreach (var f in plan)
                     {
                         if (stopRequested) break;
+                        AggregateStep(done, "EFS restore " + f.Name);
                         if (!await RunAdbRootPartitionOpAsync("w", f.Name, f.Path, "Samsung EFS restore (" + f.Name + ")"))
                             throw new IOException("Restore stopped at " + f.Name + " — remaining partitions were NOT written.");
                         done++;
@@ -491,14 +495,19 @@ namespace PMKUnlocker
                     "Confirm Flash (heimdall)", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
 
+            // One partition per step: heimdall runs once per partition, so without an aggregate the bar would
+            // restart at 0 and hit 100 for every one of them.
+            BeginAggregateProgress(parts.Count, "Flashing " + parts.Count + " partition(s)");
             int done = await ReviewSafety.RunSequenceAsync(parts.Count, () => stopRequested, async i =>
             {
+                AggregateStep(i, "Flashing " + parts[i]);
                 string args = "flash --" + parts[i] + " \"" + images[i] + "\"";
                 if (i < parts.Count - 1 || !chkSamAutoReboot.Checked) args += " --no-reboot";
                 return await ExecuteCommandCleanAsync(heimdall, args, "Samsung Flash [" + parts[i] + "]");
             });
 
             bool completed = done == parts.Count && !stopRequested;
+            EndAggregateProgress(completed, completed ? "Completed" : stopRequested ? "Stopped" : "Failed");
             Log((completed ? "[OK]" : stopRequested ? "[STOPPED]" : "[FAIL]") +
                 " Samsung flash: " + done + " / " + parts.Count + " partition(s).",
                 completed ? Color.LightGreen : Color.OrangeRed);
@@ -1218,6 +1227,9 @@ namespace PMKUnlocker
             Log("   SAMSUNG - MTP FRP (read info → enable ADB → remove)", Color.White);
             Log("========================================================", Color.FromArgb(0, 180, 255));
 
+            // Stage 1 = reach ADB (detect → info → AT enable → RSA wait), stage 2 = the ADB FRP reset itself.
+            BeginAggregateProgress(2, "Detecting device");
+
             var allDevs = await FindSamsungUsbDevicesAsync();
             var mtpDevs = allDevs
                 .Where(d => d.IsMtpLike || d.Role == "MTP" || d.Role == "Connectivity").ToList();
@@ -1225,8 +1237,10 @@ namespace PMKUnlocker
             {
                 Log("[!] Samsung MTP device not found — connect USB and select File Transfer mode.", Color.OrangeRed);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                EndAggregateProgress(false, "Failed");
                 return;
             }
+            AggregateStep(0, "MTP device found");
             Log("[OK] MTP device: " + (mtpDevs[0].FriendlyName.Length > 0 ? mtpDevs[0].FriendlyName : mtpDevs[0].InstanceId), Color.LightGreen);
 
             // modem COM ports (AT enable / quick info)
@@ -1244,7 +1258,9 @@ namespace PMKUnlocker
             if (adbNow.Contains("\tdevice"))
             {
                 Log("[i] ADB device present — continuing straight to ADB FRP.", Color.Orange);
+                AggregateStep(1, "ADB already online — removing FRP");
                 await RunAdbFrpResetAsync("Samsung (via MTP)", true);
+                EndAggregateProgress(true, "Completed");
                 return;
             }
 
@@ -1252,6 +1268,7 @@ namespace PMKUnlocker
             Log("[*] Scanning for device...", Color.Orange);
             if (ports.Count > 0)
             {
+                SetProgress(AggregatePercent(15), "Reading device info");
                 Log("[*] Reading Info...", Color.Orange);
                 await TrySamsungAtReadInfoQuickAsync(ports);
             }
@@ -1266,10 +1283,12 @@ namespace PMKUnlocker
             {
                 Log("[i] Cancelled — ADB enable skipped.", Color.Orange);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                EndAggregateProgress(false, "Cancelled");
                 return;
             }
 
             // Enabling ADB via modem COM AT (riskeco sequence + USBDEBUG alts)
+            SetProgress(AggregatePercent(25), "Enabling ADB");
             Log("[*] Enabling ADB...", Color.Orange);
             bool atEnabled = false;
             if (ports.Count > 0)
@@ -1297,6 +1316,7 @@ namespace PMKUnlocker
             for (int i = 0; i < 30; i++)  // 90s — RSA dialog စောင့်ချိန်
             {
                 await Task.Delay(3000);
+                SetProgress(AggregatePercent(30 + i * 60 / 30), "Waiting for ADB (" + ((i + 1) * 3) + "s)");
 
                 string res = await ExecuteCommandQuickAsync("adb.exe", "devices");
                 if (res.Contains("\tunauthorized"))
@@ -1307,7 +1327,9 @@ namespace PMKUnlocker
                 if (res.Contains("\tdevice"))
                 {
                     Log("[OK] ADB device online — Removing FRP...", Color.LightGreen);
+                    AggregateStep(1, "ADB online — removing FRP");
                     await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
+                    EndAggregateProgress(true, "Completed");
                     Log("========================================================", Color.FromArgb(0, 180, 255));
                     return;
                 }
@@ -1334,7 +1356,9 @@ namespace PMKUnlocker
                     if (res.Contains("\tdevice"))
                     {
                         Log("[OK] ADB online (after USB change) — Removing FRP...", Color.LightGreen);
+                        AggregateStep(1, "ADB online — removing FRP");
                         await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
+                        EndAggregateProgress(true, "Completed");
                         Log("========================================================", Color.FromArgb(0, 180, 255));
                         return;
                     }
@@ -1380,11 +1404,14 @@ namespace PMKUnlocker
             if (adbFinal.Contains("\tdevice"))
             {
                 Log("[OK] ADB online — Removing FRP...", Color.LightGreen);
+                AggregateStep(1, "ADB online — removing FRP");
                 await RunAdbFrpResetAsync("Samsung (via MTP / test mode)", true);
+                EndAggregateProgress(true, "Completed");
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 return;
             }
 
+            EndAggregateProgress(false, "Failed");
             Log("[FAIL] ADB wait timed out (90s) — test mode not entered / AT enable blocked / wrong USB mode / high patch level possible.", Color.Red);
             Log("[i] adb devices: " + FirstLine(adbFinal), Color.Gray);
             if (usbEnd.Count > 0)
@@ -1643,37 +1670,50 @@ namespace PMKUnlocker
 
             var mtpDevs = (await FindSamsungUsbDevicesAsync())
                 .Where(d => d.IsMtpLike || d.Role == "MTP" || d.Role == "Connectivity").ToList();
+            // Four stages: find the MTP face, find a wipe route (ADB / modem AT), run it, close out. The inner
+            // factory-reset flow opens a scope of its own, so its per-command steps stay inside stage 3.
+            BeginAggregateProgress(4, "Detecting Samsung device");
             if (mtpDevs.Count == 0)
             {
                 Log("[!] Samsung MTP device not found — connect USB and select File Transfer mode.", Color.OrangeRed);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                EndAggregateProgress(false, "Samsung device not found");
                 return;
             }
             Log("[OK] MTP device: " + (mtpDevs[0].FriendlyName.Length > 0 ? mtpDevs[0].FriendlyName : mtpDevs[0].InstanceId), Color.LightGreen);
+            AggregateStep(1, "MTP device found");
 
             // 1) ADB ရှိပြီးသားဆို — ချက်ချင်း wipe (စောင့်စရာမလို)
             string adbNow = await ExecuteCommandQuickAsync("adb.exe", "devices");
             if (adbNow.Contains("\tdevice"))
             {
                 Log("[i] ADB device present — starting Factory reset immediately.", Color.Orange);
+                AggregateStep(2, "ADB device present");
                 await RunAdbFactoryResetCoreAsync();
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                AggregateStep(3, "Factory reset sent");
+                EndAggregateProgress(true, "Factory reset requested");
                 return;
             }
 
             // 2) Samsung modem COM port (AT) — MTP နဲ့ ပေါ်တဲ့ Samsung Mobile USB Modem
             //    *2767*3855# master reset code ကို AT dial ကြိုးစား (အချို့ model မှာ အလုပ်လုပ်)
+            AggregateStep(2, "Trying Samsung modem AT");
             bool atTried = await TrySamsungAtFactoryResetAsync();
             if (atTried)
             {
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                AggregateStep(3, "AT reset sent");
+                EndAggregateProgress(true, "AT reset sent");
                 return;
             }
 
             // 3) ADB မရှိ / AT မရ — Recovery mode guide (ADB လုံးဝမလို)
             Log("[i] No ADB / modem AT — will wipe via Recovery mode button (no ADB needed).", Color.Orange);
+            AggregateStep(3, "Recovery-mode guide");
             ShowSamsungRecoveryFactoryResetGuide();
             Log("========================================================", Color.FromArgb(0, 180, 255));
+            EndAggregateProgress(true, "Manual recovery step");
         }
 
         // Samsung Mobile USB Modem COM port ကနေ AT+CFUN / master reset code ကြိုးစား
@@ -2203,6 +2243,7 @@ namespace PMKUnlocker
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("   SAMSUNG - SOFTBRICK FIX (Odin flash-count reset)", Color.White);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
+                SetProgress(0, "Starting SoftBrick fix");
                 SetProgress(5, "Detecting Download mode");
 
                 // Optional: heimdall detect for clearer status (non-blocking fail).
@@ -2234,10 +2275,23 @@ namespace PMKUnlocker
                 Log("[*] Odin protocol: ODIN/LOKE → BeginSession → ResetFlashCount → End → Reboot", Color.Cyan);
 
                 string err = "";
+                // The Odin exchange has real stages; show them instead of sitting on 20% until the end.
+                void Advance(string m)
+                {
+                    if (m.Contains("Handshake ODIN")) SetProgress(30, "Odin handshake");
+                    else if (m.Contains("LOKE")) SetProgress(40, "LOKE accepted");
+                    else if (m.Contains("Begin session")) SetProgress(50, "Begin session");
+                    else if (m.Contains("Set file part size")) SetProgress(60, "Protocol setup");
+                    else if (m.Contains("Reset flash count")) SetProgress(72, "Resetting flash count");
+                    else if (m.Contains("Flash count reset")) SetProgress(85, "Flash count reset");
+                    else if (m.Contains("End session")) SetProgress(90, "End session");
+                    else if (m.Contains("Reboot to Odin")) SetProgress(95, "Rebooting to Download mode");
+                }
                 bool ok = await Task.Run(() =>
                     SamsungSoftBrick.ResetFlashCount(
                         msg =>
                         {
+                            Advance(msg);
                             Color c = msg.StartsWith("[OK]", StringComparison.Ordinal) ? Color.LightGreen
                                     : msg.StartsWith("[!]", StringComparison.Ordinal) ? Color.Orange
                                     : Color.White;

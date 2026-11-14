@@ -264,6 +264,15 @@ namespace PMKUnlocker
             flashCurrentFileSize = 0;
             flashSpeedWatch = null;
 
+            // The whole click owns the strip: Sahara, auth, optional EFS backup, image prep, the flash itself and
+            // the optional FRP/config erases are one 0..100 run, not five separate 0..100 runs.
+            bool backupEfs = chkQcBackupEfsFirst.Checked;
+            bool resetFrp = chkQcResetFrpAfter.Checked;
+            int totalSteps = 1 /*sahara*/ + 1 /*auth*/ + (backupEfs ? 1 : 0) + 1 /*prepare*/ + 1 /*flash*/ +
+                             (resetFrp ? 2 : 0);
+            BeginAggregateProgress(totalSteps, "Starting");
+            int step = 0;
+
             Log("Operation : QUALCOMM FLASH PARTITION\r\n", Color.FromArgb(0, 200, 255));
             Log($" Waiting Qualcomm 9008 Port... {port}", Color.White);
             Log(" Connecting to SAHARA Protocol... Ok", Color.White);
@@ -273,6 +282,7 @@ namespace PMKUnlocker
             string loaderFile = !string.IsNullOrEmpty(edlLoaderPath) ? edlLoaderPath : Path.Combine(qcFirmwareFolder, "prog_firehose_lite.elf");
             Log(" Sending Firehose Programmer Loader... Ok", Color.White);
 
+            AggregateStep(step++, "Sahara handshake");
             bool saharaOk = await ExecuteCommandCleanAsync("QSaharaServer.exe", $"-p \\\\.\\{port} -s 13:\"{loaderFile}\"", "Sahara", false, false);
             if (!saharaOk)
             {
@@ -288,7 +298,7 @@ namespace PMKUnlocker
             // Sahara loader တင်ပြီးမို့ loaderPath ပြန်မတင် — firehose session ပေါ်မှာ sig သာ
             {
                 Log(" Bypassing EDL authentication (sig)...", Color.Orange);
-                SetProgress(35, "Auth Bypass");
+                AggregateStep(step++, "Auth bypass");
                 var authRes = await EdlAuth.BypassAsync(port, null, msg =>
                 {
                     if (msg.StartsWith("[+]")) Log(" " + msg, Color.LightGreen);
@@ -319,6 +329,7 @@ namespace PMKUnlocker
                 try { Directory.CreateDirectory(efsDir); }
                 catch (Exception ex) { Log("[!] EFS backup dir create failed: " + ex.Message, Color.Red); }
                 Log($"[*] [Option] Backing up EFS (persist/modemst) to {Path.GetFileName(efsDir)}...", Color.Orange);
+                AggregateStep(step++, "EFS backup");
 
                 // fh_loader ဖြင့် persist, modemst1, modemst2 များကို ဖတ်ယူ Backup ပြုလုပ်ခြင်း
                 var backupFiles = ReviewSafety.PrepareEfsBackup(xmlFile, efsDir);
@@ -355,6 +366,7 @@ namespace PMKUnlocker
             Log(" Loading Partition Table... Ok", Color.White);
 
             // Expand complete sparse containers first, then split the resulting raw ranges.
+            AggregateStep(step++, "Preparing images");
             string flashXmlFile = Path.Combine(qcFirmwareFolder,
                 Path.GetFileNameWithoutExtension(finalXmlFile) + "_expanded_pmk.xml");
             try
@@ -385,16 +397,19 @@ namespace PMKUnlocker
             // Flash ပြီးမှ FRP Reset/Reboot လုပ်မည်ဖြစ်၍ reset flag ကို နောက်ဆုံးမှ သီးသန့်ပို့ပါမည်
             string fhArgs = $"--port=\\\\.\\{port} --sendxml=\"{sendXmlParam}\" --search_path=\"{qcFirmwareFolder}\" --noprompt --showpercentagecomplete --zlpawarehost=1 --memoryname={memoryType}";
 
+            AggregateStep(step++, "Flashing partitions");
             bool flashOk = await ExecuteCommandCleanAsync("fh_loader.exe", fhArgs, "Firehose Flash", false, false);
             // flash fail → workflowFailed ချိုး → auto-reboot မလုပ်ဘဲ device က EDL မှာပဲ ကျန်ခဲ့ပြီး ချက်ချင်း retry လုပ်လို့ရ
             if (!flashOk) workflowFailed = true;
 
             // ၅။ [FEATURE 3] Reset FRP after Flash - Flash ပြီးချိန်တွင် FRP Erase ပြုလုပ်ခြင်း
-            if (flashOk && chkQcResetFrpAfter.Checked)
+            if (flashOk && resetFrp)
             {
                 Log(" Resetting Factory Reset Protection Lock (FRP)...", Color.Orange);
                 // Firehose ဖြင့် frp နှင့် config partition ကို Erase သို့မဟုတ် format လုပ်ခြင်း
+                AggregateStep(step++, "Erasing FRP");
                 if (!await ExecuteCommandCleanAsync("fh_loader.exe", $"--port=\\\\.\\{port} --erase=frp --memoryname={memoryType} --noprompt", "Erase FRP", false, false)) return;
+                AggregateStep(step++, "Erasing config");
                 if (!await ExecuteCommandCleanAsync("fh_loader.exe", $"--port=\\\\.\\{port} --erase=config --memoryname={memoryType} --noprompt", "Erase Config", false, false)) return;
                 Log(" Resetting Factory Reset Protection Lock... Ok", Color.LightGreen);
             }
@@ -695,7 +710,7 @@ namespace PMKUnlocker
                 Log("           PMK TOOL - " + title.ToUpper() + "             ", Color.White);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
                 Log("[*] Initializing Task...", Color.Orange);
-                SetProgress(10, "Initializing");
+                SetProgress(AggregatePercent(0), "Initializing");
 
                 var args = SplitArgs(command);
                 if (args.Count == 0)
@@ -742,19 +757,19 @@ namespace PMKUnlocker
                 }
 
                 Log("[OK] " + title + " completed.", Color.LightGreen);
-                SetProgress(100, "Done");
+                SetProgress(AggregatePercent(100), "Done");
                 return true;
             }
             catch (OperationCanceledException)
             {
                 Log(stopRequested ? "[!] Stopped by user." : "[!] Cancelled.", Color.OrangeRed);
-                SetProgress(0, "Stopped");
+                AggregateFail("Stopped");
                 return false;
             }
             catch (Exception ex)
             {
                 Log("[FAIL] " + title + ": " + ex.Message, Color.Red);
-                SetProgress(100, "FAIL");
+                AggregateFail("Failed");
                 return false;
             }
             finally
@@ -775,7 +790,7 @@ namespace PMKUnlocker
         private async Task NativeReadGptAsync(FirehoseSession session, CancellationToken ct)
         {
             Log("[*] Reading GPT (partition table)...", Color.Orange);
-            SetProgress(20, "Reading GPT");
+            SetProgress(AggregatePercent(20), "Reading GPT");
             var parts = await session.ReadGptAsync(ct);
             foreach (var p in parts)
             {
@@ -792,7 +807,7 @@ namespace PMKUnlocker
             if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
                 throw new IOException("Select a valid folder for GPT + XML output.");
             Log("[*] Reading GPT for XML export...", Color.Orange);
-            SetProgress(20, "Reading GPT");
+            SetProgress(AggregatePercent(20), "Reading GPT");
             var parts = await session.ReadGptAsync(ct);
             string xml = GptParser.BuildRawProgramXml(parts, session.SectorSize);
             string path = Path.Combine(folder, "rawprogram0.xml");
@@ -807,9 +822,9 @@ namespace PMKUnlocker
             var p = await session.FindPartitionAsync(name, ct);
             if (p == null) throw new IOException("Partition not found in GPT: " + name);
             Log("[*] Reading " + name + " (" + FormatBytesLong(p.ByteLength(session.SectorSize)) + ")...", Color.Orange);
-            SetProgress(0, "Reading " + name);
+            SetProgress(AggregatePercent(0), "Reading " + name);
             await session.ReadToFileAsync(p.FirstLba, p.SectorCount, dest,
-                pct => SetProgress(pct, "Reading " + name), ct, () => stopRequested);
+                pct => SetProgress(AggregatePercent(pct), "Reading " + name), ct, () => stopRequested);
             Log("[OK] " + name + " -> " + dest, Color.LightGreen);
         }
 
@@ -825,9 +840,9 @@ namespace PMKUnlocker
             if (fileLen > partLen)
                 throw new IOException($"{name}: image {fileLen} B larger than partition {partLen} B — refusing to overwrite neighbors.");
             Log("[*] Writing " + name + " (" + FormatBytesLong(fileLen) + ")...", Color.Orange);
-            SetProgress(0, "Writing " + name);
+            SetProgress(AggregatePercent(0), "Writing " + name);
             await session.ProgramAsync(p.FirstLba, src,
-                pct => SetProgress(pct, "Writing " + name), ct, () => stopRequested);
+                pct => SetProgress(AggregatePercent(pct), "Writing " + name), ct, () => stopRequested);
             Log("[OK] " + name + " written.", Color.LightGreen);
         }
 
@@ -860,13 +875,13 @@ namespace PMKUnlocker
             {
                 if (stopRequested) throw new OperationCanceledException("STOP");
                 Log($"[*] Erasing {p.Name}: LBA {p.FirstLba}..{p.LastLba} ({FormatBytesLong(p.ByteLength(session.SectorSize))})...", Color.Orange);
-                SetProgress(20, "Erasing " + p.Name);
+                SetProgress(AggregatePercent(20), "Erasing " + p.Name);
                 await session.EraseAsync(p.FirstLba, p.SectorCount, token);
                 Log("[OK] " + p.Name + " erased.", Color.LightGreen);
             }, async token =>
             {
                 if (stopRequested) throw new OperationCanceledException("STOP");
-                SetProgress(90, "Resetting device");
+                SetProgress(AggregatePercent(90), "Resetting device");
                 await session.ResetAsync(token);
                 qcAuthed = false;
                 qcAuthedPort = "";
@@ -879,7 +894,10 @@ namespace PMKUnlocker
             string folder = args.Count > 1 ? args[1] : "";
             if (string.IsNullOrEmpty(folder)) throw new IOException("Select a valid backup folder.");
             Directory.CreateDirectory(folder);
+            SetProgress(AggregatePercent(0), "Reading partition table");
             var parts = await session.ReadGptAsync(ct);
+            // One partition per step: without this each partition's 0..100 restarted the bar and it hit 100 N times.
+            BeginAggregateProgress(parts.Count, "Backing up " + parts.Count + " partition(s)");
             int done = 0, failed = 0;
             foreach (var p in parts)
             {
@@ -888,8 +906,9 @@ namespace PMKUnlocker
                 try
                 {
                     Log("[*] Reading " + p.Name + " (" + FormatBytesLong(p.ByteLength(session.SectorSize)) + ")...", Color.Orange);
+                    AggregateStep(done + failed, "Backing up " + p.Name);
                     await session.ReadToFileAsync(p.FirstLba, p.SectorCount, dest,
-                        pct => SetProgress(pct, "Reading " + p.Name), ct, () => stopRequested);
+                        pct => SetProgress(AggregatePercent(pct), "Reading " + p.Name), ct, () => stopRequested);
                     done++;
                 }
                 catch (OperationCanceledException) { throw; }
@@ -900,6 +919,7 @@ namespace PMKUnlocker
                 }
             }
             Log($"[OK] Full backup finished — {done}/{parts.Count} partition(s) read" + (failed > 0 ? $" ({failed} failed)" : ""), Color.LightGreen);
+            EndAggregateProgress(failed == 0, failed == 0 ? "Completed" : "Completed with errors");
         }
 
         // Quote-aware tokenizer — `gpt "C:\my folder" --genxml` → ["gpt", "C:\my folder", "--genxml"]
@@ -989,8 +1009,13 @@ namespace PMKUnlocker
                 string dir = fbd.SelectedPath;
                 await RunFlashWorkflowAsync(async () =>
                 {
+                    int step = 0;
+                    BeginAggregateProgress(ReviewSafety.QcEfsPartitions.Length, "EFS backup");
                     foreach (string name in ReviewSafety.QcEfsPartitions)
+                    {
+                        AggregateStep(step++, "EFS Backup (" + name + ")");
                         await RunEdlAsync("r " + name + " \"" + Path.Combine(dir, name + ".bin") + "\"", "EFS Backup (" + name + ")");
+                    }
                 });
             }
         }
@@ -1078,9 +1103,11 @@ namespace PMKUnlocker
                 await RunFlashWorkflowAsync(async () =>
                 {
                     int done = 0;
+                    BeginAggregateProgress(plan.Count, "Restoring " + plan.Count + " partition(s)");
                     foreach (var f in plan)
                     {
                         if (stopRequested) break;
+                        AggregateStep(done, "Restore " + f.Name);
                         bool ok = await RunEdlCommandAsync(
                             "w " + f.Name + " \"" + f.Path + "\"", "Qualcomm Restore — " + f.Name, restoreGuard);
                         if (!ok)
@@ -1152,9 +1179,11 @@ namespace PMKUnlocker
                 await RunFlashWorkflowAsync(async () =>
                 {
                     int done = 0;
+                    BeginAggregateProgress(plan.Count, "Restoring " + plan.Count + " EFS partition(s)");
                     foreach (var p in plan)
                     {
                         if (stopRequested) break;
+                        AggregateStep(done, "EFS restore " + p.Name);
                         bool ok = await RunEdlCommandAsync(
                             "w " + p.Name + " \"" + p.Path + "\"", "Qualcomm EFS Restore — " + p.Name, efsGuard);
                         if (!ok)

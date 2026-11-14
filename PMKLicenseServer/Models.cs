@@ -19,6 +19,37 @@ sealed class Account
     // Remember-me auto-login token (password ကို client မှာ မသိမ်းတော့ပါ)
     public string AutoToken { get; set; } = "";
     public string AutoTokenAt { get; set; } = "";
+    // Password-reset token — SHA-256 hash only (link ထဲက token ကို ဖိုင်ထဲ မသိမ်း)
+    public string ResetToken { get; set; } = "";
+    public string ResetTokenAt { get; set; } = "";
+}
+
+sealed class ForgotReq
+{
+    public string? Email { get; set; }
+}
+
+sealed class ResetReq
+{
+    public string? Token { get; set; }
+    public string? Password { get; set; }
+}
+
+sealed class ResetLinkReq
+{
+    public string? Email { get; set; }
+}
+
+// Optional mailer: smtp.json ကို licenses.json ဘေးမှာ ထားမှ password-reset email ပို့မယ်
+sealed class SmtpConfig
+{
+    public string Host { get; set; } = "";
+    public int Port { get; set; } = 587;
+    public bool UseStartTls { get; set; } = true;
+    public string User { get; set; } = "";
+    public string Password { get; set; } = "";
+    public string From { get; set; } = "";
+    public string PublicUrl { get; set; } = "";
 }
 
 sealed class RegisterReq

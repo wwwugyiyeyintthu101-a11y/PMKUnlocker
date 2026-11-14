@@ -39,6 +39,9 @@ public partial class Form1
     private Label lblNativeBadge;
     private DataGridViewButtonColumn colNativeRead, colNativeWrite, colNativeErase;
     private bool nativeBusy;
+    // Set by the confirmation/folder decline paths the guarded operations own: a declined press did no work, and
+    // the strip must not read 100% "completed" for a dialog the operator answered No.
+    private bool nativeDeclined;
     // The last (booted, busy) pair the buttons and the badge were styled for, so a repeat call costs nothing.
     private string nativeButtonsState;
     private bool nativeBenchLogBroken;
@@ -428,6 +431,7 @@ public partial class Form1
         if (MessageBox.Show(this, MtkNativeBench.NativeFlashConfirmText(plan), "Native DA flash",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
+            nativeDeclined = true;
             NativeSay("[*] Native DA: flash declined by the operator — nothing was sent.");
             return;
         }
@@ -438,9 +442,14 @@ public partial class Form1
         NativeSay("[*] Native DA: all images prepared and held read-only until verify finishes.");
         NativeSay("[*] Native DA: " + plan.Count + " partition(s) to write over the session already open — no GPT " +
                   "rebuild, no replug between partitions.");
-        foreach (MtkNativeBench.NativeFlashItem item in prepared.Plan)
+        // One bar for the whole flash: preparation is the first slice, one write per partition follows, and the
+        // reboot lands the last slice — the strip must not restart 0..100 for every partition written.
+        BeginAggregateProgress(plan.Count + 2, "Native DA: flashing " + plan.Count + " partition(s)");
+        for (int fi = 0; fi < prepared.Plan.Count; fi++)
         {
+            MtkNativeBench.NativeFlashItem item = prepared.Plan[fi];
             nativeCancel.Token.ThrowIfCancellationRequested();
+            AggregateStep(fi + 1, "Native DA: flashing " + item.Extent.Name);
             NativeSay("[*] Native DA: writing " + item.Extent.Name + " from " + Path.GetFileName(item.ImagePath) +
                       " (" + MtkDaExtent.SizeText((ulong)item.ImageLength) + ")...");
             await nativeDa.WritePartitionAsync(item.Extent.Name, item.ImagePath,
@@ -448,10 +457,12 @@ public partial class Form1
                 ct: nativeCancel.Token).ConfigureAwait(false);
             NativeSay("[OK] Native DA: " + item.Extent.Name + " written and read back identical.");
         }
+        AggregateStep(plan.Count + 1, "Native DA: rebooting");
         nativeCancel.Token.ThrowIfCancellationRequested();
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) flashed in one session. The phone is rebooting — " +
                   "this session closes with it.");
         await NativeRebootAsync();
+        EndAggregateProgress(true, "Native DA: flash completed");
     }
 
     /// <summary>ERASE one named partition over the live session — the NATIVE tab textbox and the FLASH grid share it.</summary>
@@ -475,6 +486,7 @@ public partial class Form1
         if (MessageBox.Show(this, MtkNativeBench.ConfirmText(verb, extent, imagePath),
                 "Native DA " + verb, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
         {
+            nativeDeclined = true;
             NativeSay("[*] Native DA: " + verb + " declined by the operator — nothing was sent.");
             return null;
         }
@@ -533,12 +545,24 @@ public partial class Form1
         }
         nativeBusy = true;
         SetNativeButtonsLive();
+        // The strip belongs to this funnel: every native button runs straight here (the FLASH route calls it too), so
+        // one scope opened and closed here is what makes each press read 0→100 — and what keeps a native step inside
+        // the flash workflow it was launched from instead of painting 100 for the whole job.
+        int baseline = aggScopes.Count;
+        BeginAggregateProgress(1, "Native DA: " + what);
+        NativeProgress(what, 0);
+        nativeDeclined = false;
+        bool success = false;
+        string outcome = "Failed";
         try
         {
             await operation();
+            success = true;
+            outcome = "Completed";
         }
         catch (OperationCanceledException)
         {
+            outcome = "Stopped";
             NativeSay("[!] Native DA: " + what + " cancelled. The port is still open; close the session to release it.");
         }
         catch (MtkDataVerifyException ex)
@@ -559,6 +583,15 @@ public partial class Form1
             // A Close clicked mid-operation asked for cancellation; honour it now that no frame is in flight.
             if (nativeCloseRequested) { nativeCloseRequested = false; NativeClose(); }
             SetNativeButtonsLive();
+            // A step that threw may have left its own scope open; close everything back to where this press started
+            // and let the strip state what really happened, instead of freezing on the percent the failure hit.
+            while (aggScopes.Count > baseline)
+            {
+                bool finish = success && !nativeDeclined && aggScopes.Count == baseline + 1;
+                EndAggregateProgress(finish,
+                    "Native DA: " + what + " " + (nativeDeclined ? "cancelled" : outcome.ToLowerInvariant()));
+            }
+            nativeDeclined = false;
             NativeProgress(null, 0);
         }
     }
@@ -601,6 +634,7 @@ public partial class Form1
               "over mid-handshake answers 0xfe to every byte (RUN 15)."
             : MtkNativeBench.BootBlocker(nativeDa != null, NativeOtherClientHoldingPort());
         if (blocker != null) throw new InvalidOperationException(blocker);
+        NativeProgress("loading recipe", 5);
         var choice = MtkNativeBench.ProfileChoice(cmbNativeProfile.SelectedIndex, nativeProfilePaths.Count);
         if (!choice.Auto && choice.ProfileIndex < 0)
             throw new InvalidOperationException("No boot recipe is selected — the recipe list is " +
@@ -689,6 +723,7 @@ public partial class Form1
         bool rawUsb = pipe.Auto ? MtkNativeBench.PickRawPipe(bulkListed, comListed) : pipe.RawUsb;
         if (pipe.Auto)
             NativeSay(MtkNativeBench.AutoPipeLine(rawUsb, bulkListed, comListed));
+        NativeProgress("waiting for BROM", 12);
         IMtkTransport transport;
         IMtkDaStageHandoff handoff = null;
         IMtkBromRecovery recovery;
@@ -724,6 +759,7 @@ public partial class Form1
 
         // From this line the session owns the pipe: BootAsync disposes it on any failed boot, and the live session
         // disposes it at Close. Nobody else may close this port or release this interface.
+        NativeProgress("replaying BROM recipe", 18);
         // A real face answers every byte with (b + 1) until the four-pair USB handshake has been exchanged (run P,
         // 2026-10-31), so the hardware path — serial or raw USB — greets it before the recipe's 0xFD query, unless
         // the note says greet=off (the working client's own wire starts at the query itself).
@@ -779,7 +815,9 @@ public partial class Form1
     private async Task NativeReadDeviceTableAsync()
     {
         RequireNativeSession();
+        NativeProgress("storage geometry", 20);
         MtkStorageInfo storage = await nativeDa.QueryStorageAsync(nativeCancel.Token).ConfigureAwait(false);
+        NativeProgress("transfer limits", 40);
         MtkLimits limits = await nativeDa.QueryLimitsAsync(nativeCancel.Token).ConfigureAwait(false);
         // The screen gets the two facts an operator acts on; the indented line keeps the device's raw words in
         // native-da.log. Simple mode hides the detail line, so a UFS phone reads "Storage: UFS, 4096 B blocks, 238 GiB"
@@ -788,7 +826,9 @@ public partial class Form1
         NativeSay("    DA geometry: " + storage.Describe);
         NativeSay("[+] Transfer: " + MtkDaExtent.SizeText(limits.WriteChunkSize) + " chunk / " + MtkDaExtent.SizeText(limits.TransferPacketSize) + " frame");
         NativeSay("    DA limits: write chunk 0x" + limits.WriteChunkSize.ToString("x") + ", frame 0x" + limits.TransferPacketSize.ToString("x"));
+        NativeProgress("reading GPT", 65);
         MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token).ConfigureAwait(false);
+        NativeProgress("filling partitions", 85);
 
         // The cache is written while a loaded scatter is still known — the grid fill below clears the package, and
         // the cache key is that scatter's own hash, so handing over first is what makes the table survive a restart.
@@ -806,6 +846,7 @@ public partial class Form1
         foreach (MtkDaExtent extent in table.Extents.Take(12))
             NativeSay("    " + extent.Describe);
         if (table.Extents.Count > 12) NativeSay("    … " + (table.Extents.Count - 12) + " more (all resolvable by name)");
+        NativeProgress("geometry + GPT", 100);
     }
 
     /// <summary>Geometry and GPT as a button: the same read the boot already ran, on demand.</summary>
@@ -890,15 +931,21 @@ public partial class Form1
         RequireNativeSession();
         Directory.CreateDirectory(destination);
         NativeSay("[*] Native DA: reading " + names.Count + " INFO partition(s) over the session already open — no replug between them.");
-        foreach (string name in names)
+        // One bar for the whole tick, not one 0→100 per partition: the strip only reaches 100% when the last
+        // partition is written, so a two-partition read cannot finish on the wrong half.
+        BeginAggregateProgress(names.Count, "Native DA: reading " + names.Count + " partition(s)");
+        for (int i = 0; i < names.Count; i++)
         {
             nativeCancel.Token.ThrowIfCancellationRequested();
+            string name = names[i];
             string file = Path.Combine(destination, name + ".bin");
+            AggregateStep(i, "Native DA: reading " + name);
             NativeSay("[*] Native DA: reading " + name + "...");
             await nativeDa.ReadPartitionToFileAsync(name, file, p => NativeProgress("read " + name, p),
                 nativeCancel.Token).ConfigureAwait(false);
             NativeSay("  * Read " + name + " ... " + MtkDaExtent.SizeText((ulong)new FileInfo(file).Length));
         }
+        EndAggregateProgress(true, "Native DA: " + names.Count + " partition(s) read");
         NativeSay("[OK] Native DA: " + names.Count + " partition(s) read to " + destination +
                   " — the phone was never replugged for it.");
     }
@@ -939,12 +986,16 @@ public partial class Form1
             "The device's own GPT names none of the ticked partitions, so nothing was erased.", out string refusal);
         if (plan == null) throw new InvalidOperationException(refusal);
         NativeSay("[*] Native DA: erasing " + plan.Count + " INFO partition(s) over the session already open — no replug.");
-        foreach (MtkDaExtent extent in plan)
+        BeginAggregateProgress(plan.Count, "Native DA: erasing " + plan.Count + " partition(s)");
+        for (int ei = 0; ei < plan.Count; ei++)
         {
+            MtkDaExtent extent = plan[ei];
             nativeCancel.Token.ThrowIfCancellationRequested();
+            AggregateStep(ei, "Native DA: erasing " + extent.Name);
             NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
             await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
         }
+        EndAggregateProgress(true, "Native DA: " + plan.Count + " partition(s) erased");
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased. The session is still live — read/write the " +
                   "next partition, or press Eject Device / Reboot Device when done.");
     }
@@ -1017,6 +1068,7 @@ public partial class Form1
         {
             if (pick.ShowDialog(this) != DialogResult.OK)
             {
+                nativeDeclined = true;
                 NativeSay("[*] Native DA: GPT save declined — no folder was chosen, so nothing was read.");
                 return;
             }
@@ -1063,6 +1115,7 @@ public partial class Form1
         {
             if (pick.ShowDialog(this) != DialogResult.OK)
             {
+                nativeDeclined = true;
                 NativeSay("[*] Native DA: backup declined — no folder was chosen, nothing was read.");
                 return;
             }
@@ -1072,8 +1125,11 @@ public partial class Form1
 
         NativeSay("[*] Native DA: " + layout.Count + " partition(s) to read over the session already open — one boot, " +
                   "no replug between partitions.");
+        BeginAggregateProgress(layout.Count, "Native DA: backing up " + layout.Count + " partition(s)");
+        int bi = 0;
         foreach ((string name, long size) in layout)
         {
+            AggregateStep(bi++, "Native DA: backing up " + name);
             NativeSay("[*] Native DA: reading " + name + " (" + MtkDaExtent.SizeText((ulong)size) + ")...");
             await nativeDa.ReadPartitionToFileAsync(name, Path.Combine(dir, name + ".bin"),
                 p => NativeProgress("backup " + name, p), nativeCancel.Token).ConfigureAwait(false);
@@ -1085,6 +1141,7 @@ public partial class Form1
         // The NV set keeps its own folder shape (six images and a manifest is not a firmware package); everything
         // else this button reads is one, and the scatter is what makes it flashable.
         if (!nvOnly) TryWriteFirmwareScatter(dir, table, layout.Keys);
+        EndAggregateProgress(true, "Native DA: backup completed");
     }
 
     /// <summary>
@@ -1148,16 +1205,21 @@ public partial class Form1
 
         NativeSay("[*] Native DA: " + label + " of " + plan.Count + " partition(s) " +
                   string.Join(", ", plan.Select(p => p.Name)) + ", over the session already open.");
-        foreach (MtkDaExtent extent in plan)
+        BeginAggregateProgress(plan.Count + 1, "Native DA: " + label);
+        for (int ni = 0; ni < plan.Count; ni++)
         {
+            MtkDaExtent extent = plan[ni];
+            AggregateStep(ni, "Native DA: erasing " + extent.Name);
             NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
             await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
         }
+        AggregateStep(plan.Count, "Native DA: rebooting");
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased in one session. The phone is rebooting — this " +
                   "session closes with it, so an NV backup goes back over a new one: plug the phone in again and press NV Restore.");
         // The reset is the mtkclient flow's trailing `;reset`, and it spends this session: the phone is on its way
         // down, so NativeRebootAsync asks NativeGuarded to close the port when the operation returns.
         await NativeRebootAsync();
+        EndAggregateProgress(true, "Native DA: " + label + " completed");
     }
 
     /// <summary>
@@ -1170,7 +1232,7 @@ public partial class Form1
         RequireNativeSession();
         MtkDaPartitionTable table = await nativeDa.ReadPartitionTableAsync(nativeCancel.Token);
         var targets = MtkNativeBench.FormatAllTargets(table.Extents.Select(p => p.Name), NvPartitions).ToList();
-        if (!ConfirmFormatAll(targets)) { NativeSay("[*] Native DA: format all cancelled."); return; }
+        if (!ConfirmFormatAll(targets)) { nativeDeclined = true; NativeSay("[*] Native DA: format all cancelled."); return; }
 
         IReadOnlyList<MtkDaExtent> plan = MtkNativeBench.NvErasePlan(table, targets,
             "This device's GPT names none of the partitions to erase.", out string refusal);
@@ -1178,15 +1240,20 @@ public partial class Form1
 
         NativeSay("[*] Native DA: format all of " + plan.Count + " partition(s) " +
                   string.Join(", ", plan.Select(p => p.Name)) + ", over the session already open.");
-        foreach (MtkDaExtent extent in plan)
+        BeginAggregateProgress(plan.Count + 1, "Native DA: format all");
+        for (int ai = 0; ai < plan.Count; ai++)
         {
+            MtkDaExtent extent = plan[ai];
+            AggregateStep(ai, "Native DA: erasing " + extent.Name);
             NativeSay("[*] Native DA: erasing " + extent.Name + " (" + MtkDaExtent.SizeText(extent.ByteLength) + ")...");
             await nativeDa.ErasePartitionAsync(extent.Name, nativeCancel.Token).ConfigureAwait(false);
         }
+        AggregateStep(plan.Count, "Native DA: rebooting");
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) erased in one session — bootchain, " +
                   "seccfg and NV/IMEI are kept. The phone is rebooting — flash full firmware to recover; this " +
                   "session closes with it.");
         await NativeRebootAsync();
+        EndAggregateProgress(true, "Native DA: format all completed");
     }
 
     /// <summary>
@@ -1226,20 +1293,26 @@ public partial class Form1
         if (MessageBox.Show(this, MtkNativeBench.NvRestoreConfirmText(plan, srcDir), "Native DA NV restore",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
         {
+            nativeDeclined = true;
             NativeSay("[*] Native DA: NV restore declined by the operator — nothing was sent.");
             return;
         }
 
-        foreach (MtkNativeBench.NvRestoreItem item in plan)
+        BeginAggregateProgress(plan.Count + 1, "Native DA: restoring " + plan.Count + " partition(s)");
+        for (int ri = 0; ri < plan.Count; ri++)
         {
+            MtkNativeBench.NvRestoreItem item = plan[ri];
+            AggregateStep(ri, "Native DA: restoring " + item.Extent.Name);
             NativeSay("[*] Native DA: writing " + item.Extent.Name + " from " + Path.GetFileName(item.ImagePath) +
                       " (sha256 " + item.Sha256.Substring(0, 12).ToLowerInvariant() + "...)...");
             await nativeDa.WritePartitionAsync(item.Extent.Name, item.ImagePath,
                 p => NativeProgress("restore " + item.Extent.Name, p), verify: true,
                 ct: nativeCancel.Token).ConfigureAwait(false);
         }
+        AggregateStep(plan.Count, "Native DA: rebooting");
         NativeSay("[OK] Native DA: " + plan.Count + " partition(s) restored and read back byte-identical in one session. The phone is rebooting. Check the IMEI in the dialer once it is up.");
         await NativeRebootAsync();
+        EndAggregateProgress(true, "Native DA: restore completed");
     }
 
     private void NativeClose()
@@ -1474,6 +1547,12 @@ public partial class Form1
 
     private void NativeProgress(string what, int percent)
     {
+        // The strip at the bottom of the window is the one progress surface every route feeds, so a native read has
+        // to move it as well — mtkclient only did because its percent lines are parsed out of the output. The NATIVE
+        // tab's own line is cleared with what=null; that must not reset the strip the operator just watched finish.
+        // The percent goes through the aggregate because a multi-partition native loop owns a scope of its own: the
+        // file's own 0..100 is then a slice of that scope, not the whole strip.
+        if (what != null) SetProgress(AggregatePercent(percent), "Native DA: " + what);
         if (lblNativeProgress == null || lblNativeProgress.IsDisposed) return;
         try
         {

@@ -680,6 +680,12 @@
                 },
                 {
                     "brand":  "Xiaomi",
+                    "cpu":  "MT6886 (Dimensity 7200 Ultra)",
+                    "model":  "Redmi Note 13 Pro+ 5G (23090RA98C / zircon)",
+                    "extra":  "hwcode 0x1229"
+                },
+                {
+                    "brand":  "Xiaomi",
                     "cpu":  "MT6765G (Helio G35)",
                     "model":  "POCO C3",
                     "extra":  "hwcode 0x6765"

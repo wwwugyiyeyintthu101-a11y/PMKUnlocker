@@ -16,6 +16,7 @@ internal static class LicenseClient
         public int DaysLeft;
         public bool Offline; // server မရောက်
         public string AutoToken = ""; // remember=true password login OK → remember-me token
+        public bool Sent; // forgot-password: server က email ပို့နိုင်ခဲ့ခြင်း
     }
 
     private static string UrlFile => ShopServices.DataPath("pmk_license_url.txt");
@@ -91,13 +92,25 @@ internal static class LicenseClient
         return await PostAsync("/api/register", new { email, password }, ct);
     }
 
-    private static async Task<Result> PostAsync(string path, object payloadObj, CancellationToken ct)
+    // Password မေ့ရင် reset link — server က email ပို့မယ် (SMTP မရှိရင် admin link ပေးရမယ်)
+    internal static async Task<Result> ForgotPasswordAsync(string email, CancellationToken ct = default)
+    {
+        email = (email ?? "").Trim();
+        if (string.IsNullOrEmpty(email))
+            return new Result { Message = "Email ထည့်ပါ" };
+        if (!LocalLogin.IsValidEmail(email))
+            return new Result { Message = "Email မှားနေသည် (user@gmail.com)" };
+
+        return await PostAsync("/api/forgot", new { email }, ct, timeoutSeconds: 25);   // SMTP ပို့ချိန် ပါ
+    }
+
+    private static async Task<Result> PostAsync(string path, object payloadObj, CancellationToken ct, int timeoutSeconds = 8)
     {
         try
         {
             if (!HasConfiguredServer)
                 return new Result { Message = "License server မသတ်မှတ်ရသေးပါ — Server settings မှာ လိပ်စာထည့်ပါ။" };
-            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
             var payload = JsonSerializer.Serialize(payloadObj);
             using var content = new StringContent(payload, Encoding.UTF8, "application/json");
             using var resp = await http.PostAsync(BaseUrl + path, content, ct);
@@ -113,7 +126,8 @@ internal static class LicenseClient
             string exp = root.TryGetProperty("expiresAt", out var e) ? e.GetString() ?? "" : "";
             int days = root.TryGetProperty("daysLeft", out var d) ? d.GetInt32() : 0;
             string token = root.TryGetProperty("autoToken", out var t) ? t.GetString() ?? "" : "";
-            return new Result { Ok = ok, Message = msg, Plan = plan, ExpiresAt = exp, DaysLeft = days, AutoToken = token };
+            bool sent = root.TryGetProperty("sent", out var s) && s.ValueKind == JsonValueKind.True;
+            return new Result { Ok = ok, Message = msg, Plan = plan, ExpiresAt = exp, DaysLeft = days, AutoToken = token, Sent = sent };
         }
         catch (Exception ex)
         {

@@ -10,6 +10,7 @@ public class LoginForm : Form
     private CheckBox chkRemember;
     private Button btnLogin;
     private LinkLabel lnkRegister;
+    private LinkLabel lnkForgot;
     private Label lblStatus;
     private Panel panelBody;
     private Panel panelTitle;
@@ -412,6 +413,24 @@ public class LoginForm : Form
             Cursor = Cursors.Hand
         };
 
+        // password မေ့ရင် reset link (email) — server SMTP / admin link နဲ့
+        lnkForgot = new LinkLabel
+        {
+            Text = "Forgot password?",
+            Location = new Point(left + fieldW - 112, 266),
+            AutoSize = true,
+            LinkColor = AccentDark,
+            ActiveLinkColor = Accent,
+            Font = new Font("Segoe UI", 9f),
+            Cursor = Cursors.Hand
+        };
+        lnkForgot.LinkClicked += (_, _) =>
+        {
+            string mail = txtEmail.Text.Trim();
+            if (mail == "user@gmail.com") mail = "";   // placeholder
+            new PasswordResetForm(mail).ShowDialog(this);
+        };
+
         // gradient rounded Login
         btnLogin = new Button
         {
@@ -516,7 +535,7 @@ public class LoginForm : Form
             lblSub,
             lblEmail, emailWrap,
             lblPass, passWrap, chkShow,
-            chkRemember, btnLogin,
+            chkRemember, lnkForgot, btnLogin,
             lnkRegister
         });
         panelBody.Controls.Add(panelCard);
@@ -697,6 +716,7 @@ public class LoginForm : Form
     private void ToggleRegisterMode(bool on)
     {
         registerMode = on;
+        lnkForgot.Enabled = !on;
         if (on)
         {
             lnkRegister.Text = "Already have account?  Login  Here";
@@ -733,6 +753,7 @@ public class LoginForm : Form
         txtPassword.Enabled = false;
         chkRemember.Enabled = false;
         lnkRegister.Enabled = false;
+        lnkForgot.Enabled = false;
         lblStatus.ForeColor = TextMuted;
         lblStatus.Text = registerMode ? "Registering..." : "Loading — checking license server...";
         try
@@ -821,6 +842,7 @@ public class LoginForm : Form
             txtPassword.Enabled = true;
             chkRemember.Enabled = true;
             lnkRegister.Enabled = true;
+            lnkForgot.Enabled = !registerMode;
             btnLogin.Invalidate();
         }
     }
