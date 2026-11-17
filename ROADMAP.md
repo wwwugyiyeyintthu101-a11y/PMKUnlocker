@@ -454,6 +454,7 @@ dotnet build PMKUnlocker.sln --no-restore -m:1
 dotnet run --project tests/Regression/Regression.csproj
 ```
 
+- `scripts/release_preflight.ps1` checks every release asset, the seed/lock pin and both loader stores in one pass and exits 1 when anything is missing; `check_release.ps1` runs it before the first build, so an incomplete package never surfaces as a regression failure.
 - A running `PMKUnlocker.exe` locks the output; ask the user to close it after the current device operation finishes — never kill an active flash and never create an alternate output directory.
 - Debug and Release must both be 0/0; the regression baseline is **1068** (1068 = 1053 + 15 A7 panic/boot-verdict and per-boot-ledger checks; 1053 = 987 after the SPD batch plus 20 sparse / service-target checks; 987 = 979 + 8 SPD; 979 = 960 + 19 P2.1; 960 = 945 + 15 P2.0; 945 was 929 + 16 P1.8; 929 was 851 + 78 in the P1.5/P1.6/P1.7 batch; 851 = 846 + 5 P1.7 Format All; 846 = 839 + 7 P1.6 session-prune; 839 = 823 + 16 P1.5 native-flash / fallback-scatter; 823 = 795 + 28 P1.4; 795 = 778 + 17 P1.3; 778 = 775 + 3 read-probe; 775 at `e3045f5`, 739 at `07a8e3e`, 735 at `c93ea36`, 722 after the B6.6 auto-recipe wiring, 703 after the B6 closure batch, 700 at `7bc88a5`, 664 at `36b9e9c`).
 - Hardware runs are reported separately, with the session log as evidence, and are never inferred from a build.

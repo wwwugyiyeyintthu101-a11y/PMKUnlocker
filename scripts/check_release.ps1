@@ -6,6 +6,11 @@ $runId = (Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + [guid]::NewGuid().ToString
 $output = Join-Path $root "release-candidates/$runId"
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 
+# Report every missing asset before a build, so an incomplete package fails with the
+# whole list instead of surfacing as a confusing regression failure.
+& (Join-Path $PSScriptRoot 'release_preflight.ps1') -Root $root -JsonPath (Join-Path $output 'preflight.json')
+if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed: the missing release assets are listed above.' }
+
 function Invoke-CheckedDotnet([string[]]$Arguments) {
     & dotnet @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Release check failed: dotnet $($Arguments -join ' ')" }
@@ -25,16 +30,22 @@ $required = @(
     'fh_loader.exe', 'QSaharaServer.exe', 'samsung/heimdall.exe', 'samsung/libusb-1.0.dll',
     'libusb-1.0.dll', 'Potato.Fastboot.dll', 'Potato.ImageFlasher.dll', 'LibUsbDotNet.LibUsbDotNet.dll', 'System.IO.Ports.dll'
 )
+$missingFiles = @()
 foreach ($relative in $required) {
     $file = Join-Path $output $relative
     if (!(Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
-        throw "Missing or empty release file: $relative"
+        $missingFiles += $relative
     }
 }
+if ($missingFiles.Count -gt 0) {
+    throw ("Missing or empty release files ({0}): {1}" -f $missingFiles.Count, ($missingFiles -join ', '))
+}
+$staleFiles = @()
 foreach ($relative in @('pmk_devices.json', 'pmk_qc_loaders.json', 'pmk_codenames.json', 'pmk_models.json')) {
     if ((Get-FileHash (Join-Path $root "PMKUnlocker/$relative")).Hash -ne
-        (Get-FileHash (Join-Path $output $relative)).Hash) { throw "Stale published file: $relative" }
+        (Get-FileHash (Join-Path $output $relative)).Hash) { $staleFiles += $relative }
 }
+if ($staleFiles.Count -gt 0) { throw ("Stale published files: " + ($staleFiles -join ', ')) }
 $loaderCheck = & (Join-Path $PSScriptRoot 'verify_qc_loaders.ps1') -Root $output -SourceRoot (Join-Path $root 'PMKUnlocker/bundled-tools')
 $null = Get-Content -LiteralPath (Join-Path $output 'pmk_codenames.json') -Raw -Encoding utf8 | ConvertFrom-Json
 $database = Get-Content -LiteralPath (Join-Path $output 'pmk_devices.json') -Raw -Encoding utf8 | ConvertFrom-Json
