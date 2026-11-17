@@ -10,7 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <!-- The client halves of the login flow: DPAPI remember-me storage and the /api/login caller. -->
-    <Compile Include="../../PMKUnlocker/LocalLogin.cs" Link="LocalLogin.cs" />
-    <Compile Include="../../PMKUnlocker/LicenseClient.cs" Link="LicenseClient.cs" />
+    <Compile Include="../../PMKUnlocker/src/LocalLogin.cs" Link="LocalLogin.cs" />
+    <Compile Include="../../PMKUnlocker/src/LicenseClient.cs" Link="LicenseClient.cs" />
   </ItemGroup>
 </Project>
