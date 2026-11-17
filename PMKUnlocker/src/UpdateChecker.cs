@@ -146,7 +146,9 @@ internal static class UpdateChecker
     {
         string repo = Repo;
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        // Manifest is a few hundred bytes; a short cap keeps an unreachable GitHub from
+        // stalling the login gate (worst case 3 x 5 s + 2 x 1.5 s < the 25 s gate wait).
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         string json = "";
         for (int attempt = 1; ; attempt++)
         {
