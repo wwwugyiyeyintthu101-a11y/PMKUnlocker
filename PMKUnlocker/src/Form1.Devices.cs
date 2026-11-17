@@ -592,7 +592,7 @@ namespace PMKUnlocker
         // Ops menu item → တကယ့် UI button (rule[0] = op နာမည် keyword, ကျန်တဲ့ဟာတွေ = button text keyword, အဆင့်အလိုက်)
         private static readonly string[][] OpsMap =
         {
-            new[] { "temp root", "Xiaomi Temp Root" },
+            new[] { "temp root", "Android Temp Root" },
             new[] { "unlock code", "OEM Unlock" },
             new[] { "remove user lock", "Remove Lock", "Userlock Reset" },
             new[] { "remove all user lock", "Remove Lock", "Userlock Reset" },
@@ -636,7 +636,7 @@ namespace PMKUnlocker
             new[] { "check arb", "Check ARB" },
             // 44 no-impl op တွေအတွက် ထပ် map — demo/sim/imei/rpmb/account တွေက server/hardware ကိုယ်ရေး လိုလို့ ကျန်
             new[] { "adb enable", "Enable ADB" },
-            new[] { "make root", "Xiaomi Temp Root" },
+            new[] { "make root", "Android Temp Root" },
             // "auth bypass" → Firehose Loader button: SETUP group ဖယ်ပြီးနောက် button မရှိတော့ဘူး — rule ကိုပါ ဖယ်
             new[] { "network security", "NV Erase", "NV Restore" },
         };
@@ -1517,6 +1517,11 @@ namespace PMKUnlocker
         {
             if (isDetecting) return;
             isDetecting = true;
+            // Poll ရဲ့ ကိုယ်ပိုင် ExecutionContext (await ပြီးမှ ရတဲ့ copy) မှာသာ သတ်မှတ်တယ် —
+            // caller ရဲ့ context ဆီ ကူးမသွားရ (caller ရဲ့ နောက်ပိုင်း command တွေ မထိခိုက်ရ)။
+            await Task.Yield();
+            bool prevDevicePoll = devicePollContext.Value;
+            devicePollContext.Value = true;
 
             try
             {
@@ -1530,18 +1535,45 @@ namespace PMKUnlocker
 
                 if (adbRes.Contains("\tdevice"))
                 {
-                    string model = await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.product.model");
-                    currentState = "ADB:" + model.Trim();
-                    lblDeviceModeStatus.Text = "🟢 ADB: " + model.Trim();
+                    string model = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.product.model")).Trim();
+                    // module load / adbd restart အခိုက်မှာ getprop က ဗလာ (သို့) error text ပြန်တယ်။
+                    // အဲဒါကို device အသစ် မယူရ — state မပြောင်း၊ "ADB Connected -> " လည်း မ announce။
+                    if (IsAdbNoiseAnswer(model))
+                    {
+                        return;
+                    }
+                    currentState = "ADB:" + model;
+                    lblDeviceModeStatus.Text = "🟢 ADB: " + model;
                     lblDeviceModeStatus.ForeColor = Color.LightGreen;
-                    WarnUnknownModel(model.Trim());
+                    WarnUnknownModel(model);
                     await RefreshBatteryHeaderAsync(true);
+
+                    // temp root (DFRoot / KernelSU module) ကို ချက်ချင်းသိ — polling က ၆ စက္ကန့်တစ်ခါပါ။
+                    // state ပြောင်းမှ log ထုတ်တယ် (poll တစ်ခါတိုင်း မထုတ်ဘူး)။
+                    // probe က tri-state — adb အဖြေမရ (unknown) ရင် state ကို လုံးဝ မထိရ။
+                    bool? moduleProbe = await RootModuleProbeAsync();
+                    if (moduleProbe.HasValue && moduleProbe.Value != lastRootModuleLive)
+                    {
+                        bool moduleLive = moduleProbe.Value;
+                        lastRootModuleLive = moduleLive;
+                        // temp root flow ကိုယ်တိုင် ဒီအကြောင်းကို log ပြီးသားမို့ တစ်ကြိမ်ပဲ ထုတ်ရ
+                        if (tempRootFlowActive)
+                        {
+                        }
+                        else if (moduleLive)
+                        {
+                            Log("[OK] Temp root detected — KernelSU module is live on this boot.", Color.LightGreen);
+                            Log("[i] su မရရင် KernelSU Manager → Settings → ADB Root ဖွင့်ပြီး Detect နှိပ်ပါ။", Color.Orange);
+                        }
+                        else if (showLog)
+                            Log("[i] Temp root module is gone (reboot / unloaded).", Color.Gray);
+                    }
 
                     // profile auto-detect log ကို device အသစ် ချိတ်တဲ့အခါပဲ လုပ်တယ် —
                     // ၆ စက္ကန့် timer တစ်ခါတိုင်း ထပ်ခါတလဲလဲ log မဖြစ်အောင် (log မရှုပ်စေ)။
                     if (currentState != lastDeviceState)
                     {
-                        if (showLog) Log("[Auto-Detect] ADB Connected -> " + model.Trim(), Color.LightGreen);
+                        if (showLog) Log("[Auto-Detect] ADB Connected -> " + model, Color.LightGreen);
                     }
                 }
                 else if (adbRes.Contains("\tunauthorized"))
@@ -1643,6 +1675,7 @@ namespace PMKUnlocker
             }
             finally
             {
+                devicePollContext.Value = prevDevicePoll;
                 isDetecting = false;
             }
         }

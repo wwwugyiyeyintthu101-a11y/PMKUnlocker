@@ -514,7 +514,7 @@ internal static class ReviewSafety
     }
 
     internal static async Task<string> RunQuickAsync(string fileName, string arguments, int timeoutMs = 15000,
-        bool returnOutputOnFailure = false)
+        bool returnOutputOnFailure = false, bool includeStderr = false)
     {
         using var process = new Process { StartInfo = new ProcessStartInfo(fileName, arguments)
         {
@@ -541,7 +541,11 @@ internal static class ReviewSafety
                     return "";
                 }
                 if (process.ExitCode != 0 && !returnOutputOnFailure) return "";
-                return (string.IsNullOrWhiteSpace(stdout.Result) ? stderr.Result : stdout.Result).Trim();
+                string so = stdout.Result.Trim();
+                string se = stderr.Result.Trim();
+                if (includeStderr && so.Length > 0 && se.Length > 0)
+                    return so + Environment.NewLine + se;
+                return so.Length > 0 ? so : se;
             }
             finally { liveQuick.TryRemove(pid, out _); }
         }

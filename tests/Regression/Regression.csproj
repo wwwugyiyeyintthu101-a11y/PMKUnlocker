@@ -36,6 +36,12 @@
     <Compile Include="../../PMKUnlocker/src/ShopServices.cs" Link="ShopServices.cs" />
     <Compile Include="../../PMKUnlocker/src/QcLoaderSession.cs" Link="QcLoaderSession.cs" />
     <Compile Include="../../PMKUnlocker/src/KernelExploit.cs" Link="KernelExploit.cs" />
+    <!-- Root state without trusting one `su` binary: manager package + /proc/modules + id, pure parsers. -->
+    <Compile Include="../../PMKUnlocker/src/RootProbe.cs" Link="RootProbe.cs" />
+    <!-- A7: what the last boot was after a reconnect - pstore dump, panic markers, boot reason. No phone. -->
+    <Compile Include="../../PMKUnlocker/src/PanicProbe.cs" Link="PanicProbe.cs" />
+    <!-- A7: per-boot memory - a panic or a root on this boot blocks a second run of the same entry. -->
+    <Compile Include="../../PMKUnlocker/src/BootLedger.cs" Link="BootLedger.cs" />
     <Compile Include="../../PMKUnlocker/src/ToolIntegrity.cs" Link="ToolIntegrity.cs" />
     <Compile Include="../../PMKUnlocker/src/MiFlash.cs" Link="MiFlash.cs" />
     <Compile Include="../../PMKUnlocker/src/MtkFirmware/ScatterModels.cs" Link="MtkFirmware/ScatterModels.cs" />

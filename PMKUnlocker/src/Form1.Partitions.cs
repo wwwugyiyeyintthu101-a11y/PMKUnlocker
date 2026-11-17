@@ -91,6 +91,14 @@ namespace PMKUnlocker
         // disconnect wait/back ကို episode တစ်ခုမှာ တစ်ချက်ပဲ ပြ — gate + background helper နှစ်ခု
         // လုံးက ပြောတဲ့ dup line ရှင်းရန်
         private bool tempRootReconnectLogged = false;
+        // A7: the boot already reported, so a reconnect loop logs one verdict per boot, not per command.
+        private string lastBootVerdictKey = "";
+        private BootVerdict lastBootVerdict = BootVerdict.Unknown;
+        // A7 per-boot ledger: what already ran on this boot, kept in data\pmk_boot_ledger.json.
+        private string currentBootId = "";
+        private string lastExploitAttemptId = "";
+        private BootLedger bootLedger = new BootLedger();
+        private bool bootLedgerLoaded = false;
         // Partition list က MTK နဲ့ Qualcomm နှစ်ခုလုံးအတွက် ပြတယ် — လက်ရှိ tab ပေါ် မူတည်ပြီး
         // မှန်တဲ့ tool ကို ရွေးတယ် (MediaTek → mtk.exe / Qualcomm → edl.py)
         private bool IsQualcommTab()
@@ -157,8 +165,10 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
-                Log("[!] " + title + ": no root (su) — try Xiaomi Temp Root / Magisk / KernelSU", Color.OrangeRed);
-                ConfirmDialog.Show("Root (su) မရပါ။\n\nADB partition r/w/e အတွက် root လိုအပ်ပါတယ်。",
+                string why = await RootMissingReasonAsync();
+                Log("[!] " + title + ": root not usable from adb shell — " + why, Color.OrangeRed);
+                ConfirmDialog.Show("Root (su) မရပါ။\n\nအခြေအနေ : " + why +
+                    "\n\nADB partition r/w/e အတွက် root လိုအပ်ပါတယ်。",
                     title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
@@ -386,9 +396,11 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
-                ConfirmDialog.Show("Root (su) မရပါ။\n\n• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ",
+                string why = await RootMissingReasonAsync();
+                ConfirmDialog.Show("Root (su) မရပါ။\n\nအခြေအနေ : " + why +
+                    "\n\n• Android Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ",
                     "Mount RW", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                Log("[!] Mount RW: su not available", Color.OrangeRed);
+                Log("[!] Mount RW: root not usable from adb shell — " + why, Color.OrangeRed);
                 return;
             }
 

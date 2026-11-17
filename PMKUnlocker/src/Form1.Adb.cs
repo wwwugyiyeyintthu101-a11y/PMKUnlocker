@@ -36,8 +36,111 @@ namespace PMKUnlocker
             }
         }
 
-        private async Task<string> ExecuteCommandQuickAsync(string fileName, string arguments, int timeoutMs = 15000)
+        // Root state ကို manager package + /proc/modules + su သုံးခုနဲ့ ဆုံးဖြတ်တယ် (su တစ်ခုတည်း မဟုတ်)။
+        // KernelSU LKM / jailbreak mode မှာ su binary မရှိဘဲ root က app တစ်ခုချင်းစီကို ပေးတာမို့
+        // `which su` က false negative ဖြစ်တယ် — garnet / Android 16 မှာ တိုင်းထားတယ်။
+        private async Task<RootProbeState> ProbeRootStateAsync(int suTimeoutMs = 8000)
         {
+            // adb shell ကိုယ်တိုင် root ဖြစ်နေလား အရင်စစ် — `which su` မရှိရင်တောင် ShellRoot ဖြစ်နိုင်တယ်
+            string selfId = (await ExecuteCommandQuickAsync("adb.exe", "shell id")).Trim();
+            string packagesOut = await ExecuteCommandQuickAsync("adb.exe", "shell pm list packages", 30000);
+            string modulesOut = await ExecuteCommandQuickAsync("adb.exe", "shell cat /proc/modules", 20000);
+            string suOut = (await ExecuteCommandQuickAsync("adb.exe", "shell which su")).Trim();
+            if (string.IsNullOrWhiteSpace(suOut))
+            {
+                string tmpSu = (await ExecuteCommandQuickAsync("adb.exe", "shell ls /data/local/tmp/su")).Trim();
+                if (tmpSu.Contains("/data/local/tmp/su")) suOut = "/data/local/tmp/su";
+            }
+            string suIdOut;
+            if (selfId.Contains("uid=0"))
+            {
+                rootViaAdbRoot = true;
+                suIdOut = selfId;
+            }
+            else
+            {
+                // su မရှိရင် ဘာမှ မ run ဘဲ ကိုယ်တိုင် id ကို ပေး (shell uid ကို မှန်ကန်စွာ ဖတ်ရ)
+                suIdOut = string.IsNullOrWhiteSpace(suOut) ? selfId : (await ProbeSuAsync(suTimeoutMs, 0)).Trim();
+            }
+            return RootProbe.Evaluate(packagesOut, modulesOut, suOut, suIdOut);
+        }
+
+        /// <summary>Module live ပြီး exploit မရှိတော့တဲ့ အချိန်မှာ `adb root` ကို တစ်ခါ စမ်း။
+        /// KernelSU ADB Root ဖွင့်ထားရင် adbd က root ဖြစ်လာပြီး `shell id` → uid=0။
+        /// return: uid=0 ဖြစ်တဲ့ `id` output · မရရင် ""။</summary>
+        private async Task<string> TryAdbRootAsync()
+        {
+            string selfId = (await ExecuteCommandQuickAsync("adb.exe", "shell id")).Trim();
+            if (selfId.Contains("uid=0"))
+            {
+                rootViaAdbRoot = true;
+                return selfId;
+            }
+            string rootOut = (await ExecuteCommandQuickAsync("adb.exe", "root", 20000)).Trim();
+            await Task.Delay(1500);
+            // production build က ငြင်းရင် ထပ်စောင့်မနေဘူး (KernelSU ADB Root ဖွင့်မှသာ ရနိုင်တယ်)
+            bool refused = rootOut.IndexOf("cannot run as root", StringComparison.OrdinalIgnoreCase) >= 0;
+            // adbd restart ဖြစ်ရင် device က ခဏပျောက်တယ် — တစ်စက္ကန့် × ၆ အထိ ပြန်စစ်
+            for (int i = 0; i < (refused ? 0 : 6); i++)
+            {
+                string id = (await ExecuteCommandQuickAsync("adb.exe", "shell id", 8000)).Trim();
+                if (id.Contains("uid=0"))
+                {
+                    rootViaAdbRoot = true;
+                    return id;
+                }
+                if (i < 5) await Task.Delay(1000);
+            }
+            if (!string.IsNullOrWhiteSpace(rootOut))
+            {
+                string one = rootOut.Replace("\r", "").Replace("\n", " ").Trim();
+                if (one.Length > 120) one = one.Substring(0, 120) + "…";
+                Log("[i] adb root: " + one, Color.Gray);
+            }
+            return "";
+        }
+
+
+        /// `adb root` ကို လုံးဝ မခေါ်ရ — adbd restart ဖြစ်ရင် run နေတဲ့ exploit shell သေတယ်။
+        /// (ProbeSuAsync ရဲ့ 7-command ladder က 240s exploit budget ကို စားသွားနိုင်တယ်)</summary>
+        private async Task<string> ProbeSuQuickAsync(int timeoutMs = 5000)
+        {
+            string selfId = (await ExecuteCommandQuickAsync("adb.exe", "shell id", timeoutMs)).Trim();
+            if (selfId.Contains("uid=0"))
+            {
+                rootViaAdbRoot = true;
+                return selfId;
+            }
+            rootViaAdbRoot = false;
+            string suId = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c id", timeoutMs)).Trim();
+            if (suId.Contains("uid=0")) rootHandlePrefix = "su -c";
+            return suId;
+        }
+
+        // root လိုအပ်တဲ့ operation ငြင်းရင် "no root" လို့ မပြတော့ဘူး — module loaded ဆိုရင် အဲဒါကို ပြီး
+        // ဘာလုပ်ရမလဲ (manager မှာ app တစ်ခုကို ခွင့်ပြု) ကို ပြတယ်။
+        private async Task<string> RootMissingReasonAsync()
+        {
+            RootProbeState state = await ProbeRootStateAsync();
+            if (state.Verdict == RootVerdict.ModuleLoaded)
+                return state.Summary + " — adb shell is not authorized; grant the app root in the manager";
+            return state.Summary;
+        }
+
+        /// <summary>adb က device မရှိ/offline ချိန်မှာ ပြန်တဲ့ error text — တကယ့် command output မဟုတ်။
+        /// (module load ပြီးချိန် adbd restart ဖြစ်ရင် getprop / cat /proc/modules တွေ ဒီလို ပြန်တယ်)</summary>
+        private static bool IsAdbNoiseAnswer(string text)
+        {
+            string t = (text ?? "").Trim();
+            if (t.Length == 0) return true;
+            if (t.StartsWith("error:", StringComparison.OrdinalIgnoreCase)) return true;
+            if (t.IndexOf("device offline", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (t.IndexOf("device not found", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (t.IndexOf("no devices/emulators found", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        private async Task<string> ExecuteCommandQuickAsync(string fileName, string arguments, int timeoutMs = 15000)        {
             try { arguments = await BindDeviceArgumentsAsync(fileName, arguments); }
             catch (Exception ex)
             {
@@ -57,6 +160,12 @@ namespace PMKUnlocker
                 }
                 else
                 {
+                    // idle ၆ စက္ကန့် poll အတွင်း device ခဏပျောက်တာ ("not connected") — poll ကိုယ်တိုင်
+                    // နောက်တစ်ကြိမ် ပြန်စမ်းမှာမို့ အနီရောင် [!] မပြဘူး (log မရှုပ်စေ)၊
+                    // ဒါပေမယ့် state ကို မပြောင်းရ (module ရှိနေရင် "gone" လို့ မှားမပြ)။
+                    if (devicePollContext.Value &&
+                        ex.Message.IndexOf("not connected", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "";
                     Log("[!] " + ex.Message, Color.Orange);
                     return "";
                 }
@@ -111,8 +220,9 @@ namespace PMKUnlocker
                 if (tempRootReconnectLogged)
                 {
                     tempRootReconnectLogged = false;
-                    Log("[i] Device reconnected — continuing.", Color.Cyan);
+                    Log("[i] Device reconnected - continuing.", Color.Cyan);
                 }
+                await ReportLastBootVerdictAsync("after reconnect");
                 return true;
             }
             finally { rebootWaitActive = false; }
@@ -160,11 +270,131 @@ namespace PMKUnlocker
                 if (tempRootReconnectLogged)
                 {
                     tempRootReconnectLogged = false;
-                    Log("[i] Device reconnected — continuing.", Color.Cyan);
+                    Log("[i] Device reconnected - continuing.", Color.Cyan);
                 }
+                await ReportLastBootVerdictAsync("before retry");
                 return true;
             }
             finally { rebootWaitActive = prevWait; }
+        }
+
+        /// <summary>
+        /// A7: after a reconnect, say what the last boot was - a kernel panic, a failed-but-alive
+        /// run, or a boot that ended with root. Raw adb only: a lost device here must never start
+        /// another recovery loop. One report per boot, keyed on boot_id.
+        /// </summary>
+        private async Task ReportLastBootVerdictAsync(string where)
+        {
+            try
+            {
+                string bootId = await PanicProbeAdbAsync("shell cat /proc/sys/kernel/random/boot_id", 6000);
+                string key = bootId;
+                if (key.Length == 0)
+                {
+                    string uptime = await PanicProbeAdbAsync("shell cat /proc/uptime", 6000);
+                    string first = uptime.Split(' ')[0];
+                    double up;
+                    key = double.TryParse(first, NumberStyles.Float, CultureInfo.InvariantCulture, out up)
+                        ? "up" + (int)(up / 120.0) : "";
+                }
+                if (key.Length > 0)
+                {
+                    if (key == lastBootVerdictKey) return;
+                    lastBootVerdictKey = key;
+                }
+
+                string listing = await PanicProbeAdbAsync("shell ls /sys/fs/pstore", 8000);
+                string console = await PanicProbeAdbAsync("shell cat /sys/fs/pstore/console-ramoops-0", 10000);
+                if (console.Length == 0)
+                    console = await PanicProbeAdbAsync("shell cat /sys/fs/pstore/console-ramoops", 10000);
+                if (console.Length == 0)
+                    console = await PanicProbeAdbAsync("shell cat /sys/fs/pstore/dmesg-ramoops-0", 10000);
+                string reason = await PanicProbeAdbAsync("shell getprop ro.boot.bootreason", 6000);
+                if (reason.Length == 0)
+                    reason = await PanicProbeAdbAsync("shell getprop sys.boot.reason", 6000);
+                string selfId = await PanicProbeAdbAsync("shell id", 6000);
+                string modules = await PanicProbeAdbAsync("shell cat /proc/modules", 8000);
+                bool hasRoot = selfId.IndexOf("uid=0", StringComparison.Ordinal) >= 0 ||
+                               RootProbe.RootModules(modules).Count > 0;
+
+                BootReport report = PanicProbe.Classify(listing, console, reason, hasRoot);
+                lastBootVerdict = report.Verdict;
+                if (bootId.Length > 0) currentBootId = bootId;
+                RecordBootOutcome(report.Verdict, currentBootId);
+                string prefix = "Boot check " + where + ": ";
+                Color color = lastBootVerdict == BootVerdict.Rooted ? Color.Cyan
+                            : lastBootVerdict == BootVerdict.Panic ? Color.OrangeRed
+                            : lastBootVerdict == BootVerdict.FailedAlive ? Color.Orange
+                            : Color.Gray;
+                Log((lastBootVerdict == BootVerdict.Panic ? "[!] " : "[i] ") + prefix + report.Summary, color);
+                if (report.PanicLine != null)
+                    Log("[i] Panic evidence: " + report.PanicLine, Color.Orange);
+                if (report.RecoveryNote != null)
+                    Log("[i] " + report.RecoveryNote, Color.Gray);
+            }
+            catch { }
+        }
+
+        /// <summary>Raw adb for the boot check - no recovery, no log noise, "" when anything fails.</summary>
+        private async Task<string> PanicProbeAdbAsync(string arguments, int timeoutMs)
+        {
+            try
+            {
+                string bound = await BindDeviceArgumentsAsync("adb.exe", arguments);
+                return (await ReviewSafety.RunQuickAsync(ResolveToolPath("adb.exe"), bound, timeoutMs, true, true)).Trim();
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>Per-boot ledger file - small JSON next to pmk_settings.txt.</summary>
+        private string BootLedgerFile => ShopServices.DataPath("pmk_boot_ledger.json");
+
+        private string LedgerSerial =>
+            string.IsNullOrWhiteSpace(selectedAdbSerial) ? "default" : selectedAdbSerial.Trim();
+
+        private void LoadBootLedgerOnce()
+        {
+            if (bootLedgerLoaded) return;
+            bootLedgerLoaded = true;
+            try
+            {
+                bootLedger = BootLedger.FromJson(File.Exists(BootLedgerFile) ? File.ReadAllText(BootLedgerFile) : null);
+            }
+            catch { bootLedger = new BootLedger(); }
+        }
+
+        private void SaveBootLedger()
+        {
+            try { File.WriteAllText(BootLedgerFile, bootLedger.ToJson()); }
+            catch { }   // best-effort: a read-only data folder must never stop a run
+        }
+
+        /// <summary>Records the boot verdict against the entry that was running, then prunes older boots.</summary>
+        private void RecordBootOutcome(BootVerdict verdict, string bootId)
+        {
+            if (string.IsNullOrWhiteSpace(bootId) || string.IsNullOrWhiteSpace(lastExploitAttemptId)) return;
+            if (PanicProbe.Key(verdict).Length == 0) return;
+            LoadBootLedgerOnce();
+            bootLedger.Record(LedgerSerial, bootId, lastExploitAttemptId, verdict, DateTime.UtcNow);
+            bootLedger.PruneOtherBoots(LedgerSerial, bootId);
+            SaveBootLedger();
+        }
+
+        private async Task<string> EnsureBootIdAsync()
+        {
+            if (currentBootId.Length == 0)
+                currentBootId = await PanicProbeAdbAsync("shell cat /proc/sys/kernel/random/boot_id", 6000);
+            return currentBootId;
+        }
+
+        /// <summary>Why this entry must not run again on this boot, or null. Never blocks without a boot id.</summary>
+        private async Task<string> BootLedgerBlockAsync(ExploitEntry ex)
+        {
+            if (ex == null || string.IsNullOrWhiteSpace(ex.Id)) return null;
+            string bootId = await EnsureBootIdAsync();
+            if (bootId.Length == 0) return null;
+            LoadBootLedgerOnce();
+            return bootLedger.BlockReason(LedgerSerial, bootId, ex.Id);
         }
 
         // --- ADB Handlers ---
@@ -213,12 +443,7 @@ namespace PMKUnlocker
                 string dfOut = await ExecuteCommandQuickAsync("adb.exe", "shell df -h /data");
                 string memOut = await ExecuteCommandQuickAsync("adb.exe", "shell cat /proc/meminfo");
                 AggregateStep(3, "Reading security state");
-                string suOut = (await ExecuteCommandQuickAsync("adb.exe", "shell which su")).Trim();
-                if (string.IsNullOrWhiteSpace(suOut))
-                {
-                    string tmpSu = (await ExecuteCommandQuickAsync("adb.exe", "shell ls /data/local/tmp/su")).Trim();
-                    if (tmpSu.Contains("/data/local/tmp/su")) suOut = "/data/local/tmp/su";
-                }
+                RootProbeState rootState = await ProbeRootStateAsync();
                 string enforce = (await ExecuteCommandQuickAsync("adb.exe", "shell getenforce")).Trim();
 
                 // RAM (MemTotal kB → GB)
@@ -261,7 +486,7 @@ namespace PMKUnlocker
                 string selinuxText = string.IsNullOrWhiteSpace(enforce) ? (string.IsNullOrWhiteSpace(selinux) ? "?" : selinux) : enforce;
                 string selinuxFull = selinuxText +
                     "  (secure=" + (string.IsNullOrWhiteSpace(secureVal) ? "?" : secureVal) + ", debuggable=" + (string.IsNullOrWhiteSpace(debuggable) ? "?" : debuggable) + ")";
-                string rootText = string.IsNullOrWhiteSpace(suOut) ? "not detected (no su)" : "su found: " + suOut;
+                string rootText = rootState.Summary;
                 bool bootBad = bootState.Contains("UNLOCKED") || bootState.Contains("verifiedboot=orange") || bootState.Contains("verifiedboot=red");
 
                 Log("", Color.FromArgb(0, 110, 170));   // header နဲ့ အောက်စာကြောင်းတွေ ခြားရန်
@@ -285,7 +510,8 @@ namespace PMKUnlocker
                 if (!string.IsNullOrWhiteSpace(slotSuffix)) LogPair("A/B / Slots      : ", slotSuffix, lbl, uniCol);
                 if (bootState.Length > 0) LogPair("Bootloader State : ", bootState, lbl, bootBad ? badCol : okCol);
                 LogPair("SELinux          : ", selinuxFull, lbl, selinuxText == "?" ? Color.Gray : (selinuxText.Contains("Permissive") ? badCol : okCol));
-                LogPair("Root             : ", rootText, lbl, string.IsNullOrWhiteSpace(suOut) ? warnCol : okCol);
+                LogPair("Root             : ", rootText, lbl, rootState.Verdict == RootVerdict.ShellRoot ? okCol : warnCol);
+                if (rootState.Hint != null) LogPair("Root note        : ", rootState.Hint, lbl, warnCol);
                 Log("");   // နောက်လာမယ့် output နဲ့ ခြားရန်
                 EndAggregateProgress(true, "Completed");
             }
@@ -417,11 +643,13 @@ namespace PMKUnlocker
             string id = (await ProbeSuAsync()).Trim();
             if (!id.Contains("uid=0"))
             {
+                string why = await RootMissingReasonAsync();
                 ConfirmDialog.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
-                                + "• Xiaomi Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ" + Environment.NewLine
+                                + "အခြေအနေ : " + why + Environment.NewLine + Environment.NewLine
+                                + "• Android Temp Root / Magisk / KernelSU ရအောင်လုပ်ပါ" + Environment.NewLine
                                 + "• ဖုန်း screen က su prompt Allow မလုပ်ရသေးရင် လုပ်ပါ",
                     "Partitions (ROOT)", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                Log("[!] Partitions: su not available (" + (string.IsNullOrWhiteSpace(id) ? "no output" : id) + ")", Color.OrangeRed);
+                Log("[!] Partitions: root not usable from adb shell — " + why, Color.OrangeRed);
                 EndAggregateProgress(false, "Failed");
                 return;
             }

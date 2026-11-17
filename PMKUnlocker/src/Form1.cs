@@ -91,7 +91,7 @@ namespace PMKUnlocker
         private Button btnAdbInfo;
         private Button btnAdbFrp;   // ADB FRP Reset (USB debugging ဖွင့်ထားတဲ့ ဖုန်း)
         private Button btnAdbFrpRoot;   // ADB FRP Reset (root ရှိတဲ့ ဖုန်း — su လိုတယ်)
-        private Button btnXiaomiTempRootFrp; // Xiaomi Temp Root (ADB + su/exploit) — FRP က FRP Reset (ROOT)
+        private Button btnXiaomiTempRootFrp; // Android Temp Root (ADB + su/exploit, brand မရွေး) — FRP က FRP Reset (ROOT)
         private Button btnAdbBatteryInfo;
         private Button btnAdbScreenshot;
         private Button btnAdbListApps;
@@ -280,6 +280,8 @@ namespace PMKUnlocker
 
         // State Tracking & Active Process
         private string lastDeviceState = "";
+        // ၆ စက္ကန့် auto-detect က temp root module ပေါ်/ပျောက်ကို ချက်ချင်းသိဖို့ မှတ်ထားတဲ့ state
+        private bool lastRootModuleLive;
         private bool mediaTekWriteActive;
         private Process activeProcess;
         private bool isDetecting;
@@ -287,6 +289,9 @@ namespace PMKUnlocker
         private bool isTaskRunning = false;
         private bool flashWorkflowRunning;
         private readonly AsyncLocal<bool> flashWorkflowContext = new AsyncLocal<bool>();
+        // ၆ စက္ကန့် idle device poll အတွင်း "device not connected" ကို အနီရောင် [!] အဖြစ် မပြရ —
+        // poll ကိုယ်တိုင် နောက်တစ်ကြိမ် ပြန်စမ်းမှာမို့ (module load ချိန် adbd ခဏ restart ဖြစ်တယ်)။
+        private readonly AsyncLocal<bool> devicePollContext = new AsyncLocal<bool>();
 
         private volatile bool workflowDidOp = false;
         private bool workflowFailed;

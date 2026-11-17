@@ -567,6 +567,203 @@ try
             "Shipped patched-kernels.txt flags the bench firmware 5.15.194 with a remove_waiter() reason");
     }
 
+    // Published fix floor — the gate must deny GhostLock at/above the branch floor, not only on the measured list
+    Check(KernelExploit.GhostLockFixed("5.15.212-android13-8") &&
+          KernelExploit.GhostLockFixed("6.6.140-android15") &&
+          !KernelExploit.GhostLockFixed("5.15.211-android13-8") &&
+          !KernelExploit.GhostLockFixed("4.19.191-x") &&
+          !KernelExploit.GhostLockFixed("") &&
+          !KernelExploit.GhostLockFixed(null),
+        "GhostLockFixed is true only at/above a published branch floor");
+    string floorNote = KernelExploit.PatchedKernelNote(pkRoot, "5.15.212-android13-8-00001-x", "") ?? "";
+    Check(floorNote.Contains("at/above the published 5.15.212"),
+        "PatchedKernelNote denies a build at the published 5.15.212 floor");
+    Check(KernelExploit.PatchedKernelNote(pkRoot, "5.15.194-android13-8-00038-x", "") ==
+          "remove_waiter() has the GKI fix",
+        "PatchedKernelNote prefers the measured list over the floor");
+    Check(KernelExploit.PatchedKernelNote(pkRoot, "5.10.236-android12-9-00003-gfb24cf99ad97-ab14313284",
+              "2026-07-01") == null,
+        "PatchedKernelNote stays null below the floor (garnet 5.10.236 may still be attempted)");
+    Check(KernelExploit.PatchedKernelNote(Path.Combine(dir, "pk-none"), "5.15.212-x", "") != null,
+        "PatchedKernelNote applies the floor even without patched-kernels.txt");
+
+    // DirtyFrag floor (CVE-2026-43284) — a hint the DFRoot run logs, never a block
+    string dfLow = KernelExploit.DirtyFragFixNote("5.10.236-android12-9-00003-gfb24cf99ad97-ab14313284",
+        "2026-07-01") ?? "";
+    Check(dfLow.Contains("below the fixed 5.10.255") && dfLow.Contains("vendor backport cannot be ruled out"),
+        "DirtyFrag note marks garnet 5.10.236 as below the 5.10.255 floor with the backport caveat");
+    Check((KernelExploit.DirtyFragFixNote("6.12.87-android16", "") ?? "").Contains("at/above the fixed 6.12.87"),
+        "DirtyFrag note reports a build at the floor as patched");
+    Check((KernelExploit.DirtyFragFixNote("4.19.191-x", "") ?? "").Contains("patch status unknown") &&
+          KernelExploit.DirtyFragFixNote("", "") == null,
+        "DirtyFrag note is honest for an unbranched kernel and silent for an empty one");
+    Check(KernelExploit.DirtyFragFixed("5.10.255-android12-9") &&
+          KernelExploit.DirtyFragFixed("6.6.138-android15") &&
+          !KernelExploit.DirtyFragFixed("5.10.254-android12-9") &&
+          !KernelExploit.DirtyFragFixed("6.6.137-android15") &&
+          !KernelExploit.DirtyFragFixed(null),
+        "DirtyFragFixed is true only at/above a published branch floor");
+
+    // KMI selection — the late-load module is chosen by KMI, not by the marketing Android version
+    Check(KernelExploit.KmiTarget("5.10.236-android12-9-00003-gfb24cf99ad97-ab14313284") == "android12-5.10" &&
+          KernelExploit.KmiTarget("6.12.30-android16-5-g6e872b4863d6-ab13847919-4k") == "android16-6.12" &&
+          KernelExploit.KmiTarget("6.6.140-android15") == "android15-6.6" &&
+          KernelExploit.KmiTarget("4.19.191-x") == null &&
+          KernelExploit.KmiTarget(null) == null,
+        "KmiTarget reads androidN-major.minor out of the kernel release and stays null without a tag");
+    Check(KernelExploit.KmiModuleNote("android12-5.10", "5.10.236-android12-9") ==
+              "upstream DirtyFrag module set: Tested",
+        "KmiModuleNote reports the tested android12-5.10 module set");
+    string kmiPartial = KernelExploit.KmiModuleNote("android14-6.1", "6.1.145-android14-11");
+    Check(kmiPartial.Contains("Partial") && kmiPartial.Contains("up to 6.1.71") &&
+          kmiPartial.Contains("past the supported ceiling"),
+        "KmiModuleNote flags a 6.1.145 build past the 6.1.71 partial ceiling");
+    Check(KernelExploit.KmiModuleNote("android14-6.1", "6.1.71-android14-11").Contains("up to 6.1.71") &&
+          !KernelExploit.KmiModuleNote("android14-6.1", "6.1.71-android14-11").Contains("ceiling"),
+        "KmiModuleNote keeps a 6.1.71 build inside the partial ceiling");
+    Check(KernelExploit.KmiModuleNote("android17-6.18", "6.18.21-android17-5").Contains("may not load") &&
+          KernelExploit.KmiModuleNote("android99-9.99", "9.99.1").Contains("no published per-KMI module set"),
+        "KmiModuleNote warns on an untested KMI and admits an unknown one");
+
+    // GhostLock verdicts — the shipped loader's own strings (glk-str.txt / docs/GHOSTLOCK-STRINGS.md)
+    Check(KernelExploit.GhostLockWriteFailed("[-] Write 1 failed") &&
+          !KernelExploit.GhostLockWriteFailed("W1: SELinux attempt 1 route failed; backing off") &&
+          !KernelExploit.GhostLockWriteFailed(null),
+        "GhostLockWriteFailed is terminal for `Write 1 failed` and silent for a route backoff");
+    Check(KernelExploit.GhostLockBackedOffRoute("W1: SELinux attempt 1 route failed; backing off") &&
+          KernelExploit.GhostLockBackedOffRoute("W3 attempt 2 mode route failed; backing off") &&
+          !KernelExploit.GhostLockBackedOffRoute("Write 1 complete") &&
+          !KernelExploit.GhostLockBackedOffRoute(""),
+        "GhostLockBackedOffRoute recognizes the W1/W3 fallback notices only");
+    Check(KernelExploit.GhostLockWriteVerified("Write 1 complete") &&
+          KernelExploit.GhostLockWriteVerified("SELinux already permissive") &&
+          !KernelExploit.GhostLockWriteVerified("Write 1 failed") &&
+          !KernelExploit.GhostLockWriteVerified(null),
+        "GhostLockWriteVerified accepts completion and the already-permissive shortcut, not a failure");
+    Check(KernelExploit.GhostLockHeapSprayFailed("[spray] futex collisions not found\n  heap spray failed") &&
+          !KernelExploit.GhostLockHeapSprayFailed("[spray] futex collisions found +1900ms") &&
+          !KernelExploit.GhostLockHeapSprayFailed("Write 1 failed"),
+        "GhostLockHeapSprayFailed needs the spray failure and no later collision success");
+
+    // Root state — KernelSU LKM mode has no `su` binary, so the module must carry the verdict
+    const string ksuModules = "kernelsu 212992 1 - Live 0x0000000000000000\n";
+    RootProbeState lkm = RootProbe.Evaluate("package:me.weishu.kernelsu\n", ksuModules, "", "");
+    Check(lkm.Verdict == RootVerdict.ModuleLoaded && lkm.HasRoot &&
+          lkm.Summary.Contains("no su on PATH"),
+        "RootProbe reads a live kernelsu module as rooted even with no su binary");
+    RootProbeState managerOnly = RootProbe.Evaluate("package:me.weishu.kernelsu\n", "", "", "");
+    Check(managerOnly.Verdict == RootVerdict.ManagerOnly && !managerOnly.HasRoot,
+        "RootProbe does not call an idle manager package rooted");
+    RootProbeState shellRoot = RootProbe.Evaluate("", "", "su  no su binary\n",
+        "uid=0(root) gid=0(root) groups=0(root)");
+    Check(shellRoot.Verdict == RootVerdict.ShellRoot && shellRoot.HasRoot,
+        "RootProbe reads uid=0 from the shell probe as ShellRoot");
+    Check(RootProbe.UidFromId("uid=2000(shell) gid=2000(shell)") == 2000 &&
+          RootProbe.UidFromId("su: inaccessible or not found") == null &&
+          RootProbe.UidFromId(null) == null,
+        "RootProbe never turns an error message into uid 0");
+    Check(RootProbe.ManagersFromPackages("package:com.topjohnwu.magisk\npackage:me.weishu.kernelsu\n")
+              .Count == 2 &&
+          RootProbe.RootModules(ksuModules).Count == 1,
+        "RootProbe parses manager packages and root modules");
+
+    // A7 boot verdict - a panic must be named as a panic, and a clean reboot must not be
+    const string ramoopsConsole =
+        "[    0.000000] Booting Linux on physical CPU 0x0000000000\n" +
+        "[    1.234567] Kernel panic - not syncing: Oops: Fatal exception\n" +
+        "[    1.234999] Rebooting in 5 seconds..\n";
+    Check(PanicProbe.LooksLikePanic(ramoopsConsole) &&
+          PanicProbe.LooksLikePanic("[  12.1] Unable to handle kernel NULL pointer dereference at virtual address 0000") &&
+          PanicProbe.LooksLikePanic("BUG: unable to handle page fault for address: ffffffff") &&
+          !PanicProbe.LooksLikePanic("[    0.000000] Booting Linux on physical CPU 0x0000000000\n[    2.1] init: starting service 'logd'") &&
+          !PanicProbe.LooksLikePanic("") && !PanicProbe.LooksLikePanic(null),
+        "PanicProbe reads real panic markers and leaves a clean boot log alone");
+    string? panicLine = PanicProbe.FirstPanicLine(ramoopsConsole);
+    Check(panicLine != null && panicLine.Contains("Kernel panic - not syncing") &&
+          PanicProbe.FirstPanicLine(new string('x', 400) + "panic - not syncing")!.Length <= 200,
+        "PanicProbe keeps the panic line whole and caps a long one at 200 chars");
+
+    const string pstoreLong =
+        "total 0\n" +
+        "-r--r--r-- 1 root root 262144 1970-01-01 00:00 console-ramoops-0\n" +
+        "-r--r--r-- 1 root root  65536 1970-01-01 00:00 dmesg-ramoops-0\n" +
+        "drwxr-xr-x 2 root root   4096 1970-01-01 00:00 .\n";
+    Check(PanicProbe.PstoreCrashFiles(pstoreLong).SequenceEqual(new[] { "console-ramoops-0", "dmesg-ramoops-0" }) &&
+          PanicProbe.PstoreCrashFiles("console-ramoops-0\npmsg-ramoops-0\nconsole-ramoops-0\n")
+              .SequenceEqual(new[] { "console-ramoops-0", "pmsg-ramoops-0" }) &&
+          PanicProbe.PstoreCrashFiles("ls: /sys/fs/pstore: No such file or directory").Count == 0 &&
+          PanicProbe.PstoreCrashFiles(null).Count == 0,
+        "PstoreCrashFiles keeps crash dumps only (long or plain), deduped, and ignores ls errors");
+
+    Check(PanicProbe.NormalizeBootReason("0") == "normal" &&
+          PanicProbe.NormalizeBootReason(" Kernel_Panic ") == "kernel_panic" &&
+          PanicProbe.NormalizeBootReason("unknown") == "" &&
+          PanicProbe.NormalizeBootReason(null) == "" &&
+          PanicProbe.BootReasonIsPanic("kernel_panic") &&
+          PanicProbe.BootReasonIsPanic("watchdog") &&
+          !PanicProbe.BootReasonIsPanic("normal") &&
+          !PanicProbe.BootReasonIsPanic("hard") &&
+          !PanicProbe.BootReasonIsPanic("soft"),
+        "Boot reason maps vendor zero to normal and only panic/watchdog reasons to a panic");
+
+    BootReport bootPanic = PanicProbe.Classify(pstoreLong, ramoopsConsole, "kernel_panic", false);
+    Check(bootPanic.Verdict == BootVerdict.Panic && bootPanic.PanicLine != null &&
+          bootPanic.CrashFiles.Count == 2 && bootPanic.Summary.Contains("kernel panic") &&
+          bootPanic.RecoveryNote!.Contains("retry once"),
+        "Classify calls a panic a panic and names the pstore dumps");
+    Check(PanicProbe.Classify("", "", "watchdog", false).Verdict == BootVerdict.Panic &&
+          PanicProbe.Classify("console-ramoops-0\n", "", "normal", false).Verdict == BootVerdict.Panic,
+        "Classify accepts a panic boot reason or a crash dump without console text");
+    Check(PanicProbe.Classify(pstoreLong, ramoopsConsole, "kernel_panic", true).Verdict == BootVerdict.Rooted &&
+          PanicProbe.Classify("", "", "normal", false).Verdict == BootVerdict.FailedAlive &&
+          PanicProbe.Classify("", "", "", false).Verdict == BootVerdict.Unknown,
+        "Classify lets live root win, keeps a clean reboot as FailedAlive and admits an empty read as Unknown");
+    Check(PanicProbe.Classify("", "", "normal", false).RecoveryNote!.Contains("safe") &&
+          PanicProbe.Classify("", "", "", false).Summary.Contains("unknown") &&
+          PanicProbe.Classify("", "", "0", false).Summary.Contains("boot reason: normal"),
+        "BootSummary is honest for a clean reboot, an empty read and a vendor zero boot reason");
+    Check(PanicProbe.Key(BootVerdict.Rooted) == "rooted" && PanicProbe.Key(BootVerdict.Panic) == "panic" &&
+          PanicProbe.Key(BootVerdict.FailedAlive) == "failed-alive" &&
+          PanicProbe.Key(BootVerdict.Unknown) == "",
+        "PanicProbe keys the ledger verdicts and leaves unknown unrecorded");
+
+    // A7 per-boot ledger - a panic or a root blocks only the boot it was seen on
+    var ledger = new BootLedger();
+    DateTime at = new DateTime(2026, 11, 17, 1, 2, 3, DateTimeKind.Utc);
+    ledger.Record("d3964a60", "boot-a", "ghostlock", BootVerdict.Panic, at);
+    Check(ledger.BlockReason("d3964a60", "boot-a", "ghostlock") == "panic" &&
+          ledger.BlockReason("d3964a60", "boot-b", "ghostlock") == null &&
+          ledger.BlockReason("other", "boot-a", "ghostlock") == null &&
+          ledger.BlockReason("d3964a60", "boot-a", "dfroot-dirtyfrag") == null,
+        "BootLedger blocks a panicked entry on its own boot only");
+    ledger.Record("d3964a60", "boot-b", "ghostlock", BootVerdict.FailedAlive, at);
+    Check(ledger.BlockReason("d3964a60", "boot-b", "ghostlock") == null,
+        "BootLedger lets a failed-but-alive run retry on the same boot");
+    ledger.Record("d3964a60", "boot-b", "ghostlock", BootVerdict.Rooted, at);
+    Check(ledger.BlockReason("d3964a60", "boot-b", "ghostlock") == "rooted" &&
+          ledger.ForBoot("d3964a60", "boot-b").Count == 1 &&
+          ledger.Last("d3964a60", "boot-b", "ghostlock")!.At == "2026-11-17T01:02:03Z",
+        "BootLedger replaces the same boot+entry row and keeps root terminal");
+
+    var reloaded = BootLedger.FromJson(ledger.ToJson());
+    Check(reloaded.Entries.Count == ledger.Entries.Count &&
+          reloaded.BlockReason("d3964a60", "boot-b", "ghostlock") == "rooted" &&
+          BootLedger.FromJson("").Entries.Count == 0 &&
+          BootLedger.FromJson("{ not json").Entries.Count == 0 &&
+          BootLedger.FromJson("{\"entries\":[{\"bootId\":\"\",\"entry\":\"x\",\"verdict\":\"panic\"}]}").Entries.Count == 0,
+        "BootLedger round-trips its JSON and treats a corrupt or partial file as empty");
+    Check(reloaded.PruneOtherBoots("d3964a60", "boot-b") == 1 &&
+          reloaded.Entries.All(e => e.BootId == "boot-b") &&
+          reloaded.PruneOtherBoots("d3964a60", "") == 0,
+        "BootLedger prunes older boots for the same phone only when a new boot id is known");
+    var capped = new BootLedger();
+    for (int i = 0; i < BootLedger.MaxEntries + 5; i++)
+        capped.Record("s", "b", "entry" + i, BootVerdict.FailedAlive, at);
+    Check(capped.Entries.Count == BootLedger.MaxEntries &&
+          capped.Last("s", "b", "entry0") == null &&
+          capped.Last("s", "b", "entry" + (BootLedger.MaxEntries + 4)) != null,
+        "BootLedger keeps the newest entries and drops the oldest past its cap");
+
     // Route success claim — separates a refused route from a write the route acknowledged but never landed
     Check(KernelExploit.RouteClaimedWrite("[route] route_done status=0 clean=1/1 step=0 errno=0 calls=1 success=1") &&
           KernelExploit.RouteClaimedWrite("multicast route status=0 clean=1/1 step=0 errno=0"),

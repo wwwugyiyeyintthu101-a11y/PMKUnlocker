@@ -133,8 +133,10 @@ namespace PMKUnlocker
         {
             string id = (await ProbeSuAsync()).Trim();
             if (id.Contains("uid=0")) return true;
-            Log("[!] " + title + ": root (su) မရပါ — Magisk / KernelSU root ဖုန်းမှာသာ လုပ်လို့ရတယ်.", Color.OrangeRed);
-            ConfirmDialog.Show("Root (su) မရပါ။\n\nEFS backup/restore ကို ADB + root နဲ့သာ လုပ်လို့ရတယ် (heimdall က partition ဖတ်လို့မရ)။",
+            string why = await RootMissingReasonAsync();
+            Log("[!] " + title + ": root not usable from adb shell — " + why, Color.OrangeRed);
+            ConfirmDialog.Show("Root (su) မရပါ။\n\nအခြေအနေ : " + why +
+                "\n\nEFS backup/restore ကို ADB + root နဲ့သာ လုပ်လို့ရတယ် (heimdall က partition ဖတ်လို့မရ)။",
                 title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }

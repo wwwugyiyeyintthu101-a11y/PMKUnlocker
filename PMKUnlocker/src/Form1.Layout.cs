@@ -298,13 +298,17 @@ namespace PMKUnlocker
                 }
 
                 string id = (await ProbeSuAsync()).Trim();
+                if (id.Contains("uid=0"))
+                    Log("[OK] Root handle: " + RootHandle + " — " + id, Color.LightGreen);
                 if (!id.Contains("uid=0"))
                 {
+                    string why = await RootMissingReasonAsync();
                     ConfirmDialog.Show("Root (su) မရပါ။" + Environment.NewLine + Environment.NewLine
-                                    + "• ဒီဖုန်းမှာ root မရှိပါ (သို့) ဖုန်း screen က su prompt ကို Allow မလုပ်ရသေးပါ" + Environment.NewLine
-                                    + "• root မရှိရင် 🔓 FRP Reset (no root) ခလုတ်ကို သုံးပါ",
+                                    + "အခြေအနေ : " + why + Environment.NewLine + Environment.NewLine
+                                    + "• root မရှိရင် 🔓 FRP Reset (no root) ခလုတ်ကို သုံးပါ" + Environment.NewLine
+                                    + "• root ရှိပြီး adb shell ကို ခွင့်မပြုရသေးရင် manager မှာ ခွင့်ပြုပါ",
                         "ROOT FRP Reset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    Log("[!] ROOT FRP: su not available (" + (string.IsNullOrWhiteSpace(id) ? "no output" : id) + ")", Color.OrangeRed);
+                    Log("[!] ROOT FRP: root not usable from adb shell — " + why, Color.OrangeRed);
                     return;
                 }
 
@@ -322,12 +326,14 @@ namespace PMKUnlocker
                 Log("   ROOT FRP RESET (su)", Color.White);
                 Log("========================================================", Color.FromArgb(0, 180, 255));
 
+                // ဘယ်လမ်းနဲ့ root ရခဲ့ပါစေ — ProbeSuAsync က မှတ်ထားတဲ့ handle ကိုပဲ သုံး (su / tmpsu / …)
+                Log("[i] Root handle: " + RootHandle, Color.Cyan);
                 bool ok = await ExecuteCommandCleanAsync("adb.exe",
-                    "shell su -c \"rm -f /data/system/accounts.db /data/system/users/0/accounts.db /data/system/users/0/accounts_ce.db /data/system/users/0/accounts_de.db\"",
+                    RootShellArgs("rm -f /data/system/accounts.db /data/system/users/0/accounts.db /data/system/users/0/accounts_ce.db /data/system/users/0/accounts_de.db"),
                     "ROOT FRP - accounts.db", false, true);
 
                 await ExecuteCommandCleanAsync("adb.exe",
-                    "shell su -c \"rm -f /data/system/device_policies.xml /data/system/users/0/device_policies.xml\"",
+                    RootShellArgs("rm -f /data/system/device_policies.xml /data/system/users/0/device_policies.xml"),
                     "ROOT FRP - device_policies", false, true);
 
                 await ExecuteCommandQuickAsync("adb.exe", "shell pm clear com.google.android.gms");
@@ -337,16 +343,16 @@ namespace PMKUnlocker
                 Log("[OK] accounts/policies cleared + provisioning set", Color.LightGreen);
 
                 // FRP partition (ရှိရင်သာ) — root FRP ရဲ့ အပြီးသတ် လမ်း
-                string frpDev = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c \"ls /dev/block/by-name/frp\"")).Trim();
+                string frpDev = (await ExecuteCommandQuickAsync("adb.exe", RootShellArgs("ls /dev/block/by-name/frp"))).Trim();
                 if (!string.IsNullOrWhiteSpace(frpDev) && !frpDev.ToLowerInvariant().Contains("no such") && !frpDev.ToLowerInvariant().Contains("not found"))
                 {
                     // Query real partition size first — fixed 1MB fails on 512KB FRP (No space left)
                     long frpBytes = 0;
-                    string sizeOut = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c \"blockdev --getsize64 /dev/block/by-name/frp\"")).Trim();
+                    string sizeOut = (await ExecuteCommandQuickAsync("adb.exe", RootShellArgs("blockdev --getsize64 /dev/block/by-name/frp"))).Trim();
                     long.TryParse(sizeOut, out frpBytes);
                     if (frpBytes <= 0)
                     {
-                        string secOut = (await ExecuteCommandQuickAsync("adb.exe", "shell su -c \"cat /sys/class/block/$(basename $(readlink -f /dev/block/by-name/frp))/size\"")).Trim();
+                        string secOut = (await ExecuteCommandQuickAsync("adb.exe", RootShellArgs("cat /sys/class/block/$(basename $(readlink -f /dev/block/by-name/frp))/size"))).Trim();
                         long secs = 0;
                         long.TryParse(secOut, out secs);
                         if (secs > 0) frpBytes = secs * 512;
@@ -356,7 +362,7 @@ namespace PMKUnlocker
                     if (ddBlocks < 1) ddBlocks = 1;
                     Log("[*] FRP partition: " + frpDev + " → zeroing (" + frpBytes + " bytes) ...", Color.Orange);
                     await ExecuteCommandCleanAsync("adb.exe",
-                        "shell su -c \"dd if=/dev/zero of=/dev/block/by-name/frp bs=4096 count=" + ddBlocks + "\"",
+                        RootShellArgs("dd if=/dev/zero of=/dev/block/by-name/frp bs=4096 count=" + ddBlocks),
                         "ROOT FRP - frp partition", false, true);
                 }
                 else
@@ -401,12 +407,12 @@ namespace PMKUnlocker
             btnAdbFactoryReset = Create3DButton("🗑 Factory Reset", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Red);
             btnAdbFactoryReset.Click += BtnAdbFactoryReset_Click;
 
-            // Xiaomi Temp Root — ADB → su / kernel exploit (ART-style) temp root ရယူပြီး ရပ်
+            // Android Temp Root — ADB → su / kernel exploit temp root (brand မရွေး) ရယူပြီး ရပ်
             // LOCK group 3-col က tab ညာဘက် cut ဖြစ် — APPS row2 col0 (FRP ဘေး) ထဲ ထည့်
-            btnXiaomiTempRootFrp = Create3DButton("📱 Xiaomi Temp Root", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
+            btnXiaomiTempRootFrp = Create3DButton("📱 Android Temp Root", 0, 0, UiBtnW, UiBtnH, ButtonTheme.Purple);
             btnXiaomiTempRootFrp.Click += BtnXiaomiTempRootFrp_Click;
             Tip(btnXiaomiTempRootFrp,
-                "ADB → su temp root / kernel exploit (exploits\\manifest.json) ရယူပြီး ရပ်မယ် — FRP ကို FRP Reset (ROOT) နဲ့ ဆက်မယ်။");
+                "Android ဖုန်း အားလုံးအတွက် — ADB → su temp root / kernel exploit (exploits\\manifest.json) ရယူပြီး ရပ်မယ် — FRP ကို FRP Reset (ROOT) နဲ့ ဆက်မယ်။");
             grpAdbApps.Controls.Add(btnXiaomiTempRootFrp);
             btnXiaomiTempRootFrp.Location = new Point(10, 26 + UiRowStep);             // FRP Reset ဘေး (col0 row2)
 

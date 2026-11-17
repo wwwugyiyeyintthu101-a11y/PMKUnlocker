@@ -81,6 +81,15 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
+    <!-- Temp-root exploit plugins: manifest + payloads. APK payloads are verified against the
+         SHA-256 pinned in the manifest, not integrity.json, because they are installed rather
+         than pushed. -->
+    <None Remove="exploits\**\*" />
+    <Content Include="exploits\**\*">
+      <TargetPath>exploits\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- MTK Auth Bypass (in-tool) — MTK-bypass/bypass_utility (MIT) + exploits_collection payloads

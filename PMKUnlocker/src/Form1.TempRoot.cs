@@ -25,8 +25,27 @@ namespace PMKUnlocker
     public partial class Form1
     {
         // - su မရရင်: exploits\manifest.json match → payload push/run (ART-style kernel temp root)
-        // - နောက်ဆုံး: MIUI provision/settings + wizard skip (best-effort, no-root path)
+        // - နောက်ဆုံး: provision/settings + wizard skip (best-effort, no-root path — any brand)
         private async void BtnXiaomiTempRootFrp_Click(object sender, EventArgs e)
+        {
+            // exit path တိုင်းမှာ tempRootFlowActive ကို ပြန်ချရမယ် — မချရင် နောက်ပိုင်း ADB error တွေ
+            // တိတ်ဆိတ်သွားပြီး recovery path မှား ဝင်တတ်တယ် (confirm dialog မှာ No နှိပ်တာ အပါအဝင်)။
+            try
+            {
+                await RunTempRootFlowAsync();
+            }
+            catch (Exception exFlow)
+            {
+                Log("[!] Temp Root flow stopped on an error: " + exFlow.Message, Color.OrangeRed);
+                Log("[i] Phone ကို စစ်ပြီး ထပ်စမ်းပါ — exploit run နေတုန်း ဖုန်း reboot ဖြစ်နိုင်တယ်။", Color.Gray);
+            }
+            finally
+            {
+                tempRootFlowActive = false;
+            }
+        }
+
+        private async Task RunTempRootFlowAsync()
         {
             string dv = await ExecuteCommandQuickAsync("adb.exe", "devices -l");
             var adbTargets = new List<(string Serial, string Model)>();
@@ -46,7 +65,7 @@ namespace PMKUnlocker
                 ConfirmDialog.Show("ADB device not found." + Environment.NewLine + Environment.NewLine
                                 + "- Developer options > USB debugging ဖွင့်ပါ" + Environment.NewLine
                                 + "- Cable ချိတ်ပြီး RSA prompt ကို Allow ပါ",
-                    "Xiaomi Temp Root FRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    "Android Temp Root", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             // MCT-style: model ရွေးစရာမလို — fingerprint auto-match နဲ့ပဲ run
@@ -62,6 +81,11 @@ namespace PMKUnlocker
             tempRootAborted = false;
             tempRootRecoveryDone = false;
             tempRootReconnectLogged = false;
+            lastBootVerdictKey = "";
+            lastBootVerdict = BootVerdict.Unknown;
+            currentBootId = "";
+            lastExploitAttemptId = "";
+            LoadBootLedgerOnce();
             tempRootFlowActive = true;
 
             await LoadDevicePropsAsync();
@@ -84,10 +108,12 @@ namespace PMKUnlocker
                 if (string.IsNullOrWhiteSpace(miui))
                     miui = (await ExecuteCommandQuickAsync("adb.exe", "shell getprop ro.miui.ui.version.name")).Trim();
             }
-            bool looksXiaomi = brand.IndexOf("xiaomi", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                               brand.IndexOf("redmi", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                               brand.IndexOf("poco", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                               !string.IsNullOrWhiteSpace(miui);
+            // Xiaomi/MIUI flag — MST token payload က Xiaomi-only ဖြစ်လို့ အဲဒီ step ကိုပဲ ကျော်မယ်။
+            // ကျန်တဲ့ (su/adb root, kernel exploit, provision) တွေက Android တိုင်းမှာ run မယ်။
+            bool looksMiui = brand.IndexOf("xiaomi", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             brand.IndexOf("redmi", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             brand.IndexOf("poco", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             !string.IsNullOrWhiteSpace(miui);
 
             string kernelVer = (await ExecuteCommandQuickAsync("adb.exe", "shell uname -r")).Trim();
             if (string.IsNullOrWhiteSpace(kernelVer) || kernelVer.IndexOf('\n') >= 0)
@@ -127,11 +153,24 @@ namespace PMKUnlocker
             string exploitsRoot = Path.Combine(Application.StartupPath, "exploits");
             string manifestPath = Path.Combine(exploitsRoot, "manifest.json");
             ExploitManifest manifest = KernelExploit.LoadManifest(manifestPath);
-            ExploitEntry exploitMatch = KernelExploit.FindMatch(manifest, fp, out string exploitStatus);
-            // measured-patched firmware (exploits\patched-kernels.txt) — the kernel clears the stale waiter,
-            // so GhostLock's stack write cannot land on it no matter which profile is pushed
-            string patchedNote = KernelExploit.PatchedFirmwareNote(exploitsRoot, fp.Kernel);
-            bool unsupportedFirmware = exploitMatch != null && patchedNote != null;
+            // ရွေးချယ်မှု: GLK1 profile ကိုက်တဲ့ exploit ရှိရင် အဲဒါကို အရင်စမ်း၊ မရှိရင် ရိုးရိုး primary (DFRoot) ကို အရင်
+            var exploitMatches = KernelExploit.FindMatches(manifest, fp);
+            ExploitEntry exploitMatch = null;
+            string exploitStatus = exploitMatches.Count == 0
+                ? "no match — " + (string.IsNullOrWhiteSpace(fp.Kernel) ? "?" : fp.Kernel)
+                : "matched: " + exploitMatches.Count + " entr" + (exploitMatches.Count == 1 ? "y" : "ies");
+            ExploitEntry profileFirst = exploitMatches.FirstOrDefault(e => KernelExploit.HasExactProfile(exploitsRoot, e, fp.Kernel));
+            // GhostLock reclaim ဖြစ်နိုင်ခြေ နည်းလို့ ကျရှုံးရင် kernel panic + reboot ဖြစ်တယ် (garnet တိုင်းထား: boot ၄ ခါ ၁ ခါ)။
+            // ဒါကြောင့် profile ကိုက်ရင်တောင် DFRoot ကို အရင်စမ်းပြီး၊ မရမှ profile exploit ကို fallback အနေနဲ့ ဆက်စမ်းတယ်။
+            if (profileFirst != null && exploitMatches.Count > 1)
+                exploitMatch = exploitMatches.First(e => !string.Equals(e.Id, profileFirst.Id, StringComparison.Ordinal));
+            else if (profileFirst != null) exploitMatch = profileFirst;
+            else if (exploitMatches.Count > 0) exploitMatch = exploitMatches[0];
+            // measured-patched firmware (exploits\patched-kernels.txt) သို့မဟုတ် published fix floor —
+            // kernel က stale waiter ကို ရှင်းထားရင် GhostLock ရဲ့ stack write က ဘယ် profile နဲ့မှ မရောက်နိုင်
+            string patchedNote = KernelExploit.PatchedKernelNote(exploitsRoot, fp.Kernel, fp.Patch);
+            // gate ကို entry တစ်ခုချင်းအတွက် — DFRoot (APK) ကို kernel fix floor နဲ့ မပိတ်ရ
+            bool unsupportedFirmware = exploitMatch != null && IsGhostLockExploit(exploitMatch) && patchedNote != null;
 
             // ရွေးထားတဲ့ model ≠ ချိတ်ထားတဲ့ဖုန်း → ရပ် (Auto = pickedEntry null → ကျော်)
             if (pickedEntry != null &&
@@ -144,30 +183,37 @@ namespace PMKUnlocker
                     " (" + (string.IsNullOrWhiteSpace(fp.Codename) ? "?" : fp.Codename) + ")" + Environment.NewLine +
                     "match       : " + exploitStatus + Environment.NewLine + Environment.NewLine +
                     "→ ရွေးထားတဲ့ model နဲ့ တူတဲ့ဖုန်း ချိတ်ပြီး ထပ်နှိပ်ပါ (သို့) Auto ရွေးပြီး ဆက်ပါ)။",
-                    "Xiaomi Temp Root", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    "Android Temp Root", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             string suId = (await ProbeSuAsync()).Trim();
             bool hasRoot = suId.Contains("uid=0");
+            // KernelSU (LKM / jailbreak mode) — su binary မရှိဘဲ module က root ပေးနေတယ်။
+            // ဒီ state ကို "no root" လို့ မယူဘူး (garnet / Android 16 မှာ တိုင်းထားတယ်)။
+            RootProbeState rootState = await ProbeRootStateAsync();
+            bool moduleRoot = !hasRoot && rootState.Verdict == RootVerdict.ModuleLoaded;
+            bool rootReady = hasRoot || moduleRoot;
 
-            if (!looksXiaomi)
+            if (!looksMiui)
             {
-                Log("[!] Device brand='" + brand + "' MIUI='" + miui + "' — not Xiaomi. Generic ADB FRP path will still run.", Color.Orange);
+                Log("[i] Brand='" + brand + "' (no MIUI) — Xiaomi-only MST token step is skipped; every other step runs.", Color.Gray);
             }
 
-            string mode = hasRoot
+            string mode = rootReady
                 ? "temp root (ready)"
                 : unsupportedFirmware
                     ? "unsupported firmware (kernel patched)"
                     : exploitMatch != null
-                        ? "kernel exploit → temp root"
+                        ? (string.Equals(exploitMatch.RunMode, "apk", StringComparison.OrdinalIgnoreCase)
+                            ? "APK UI exploit → temp root"
+                            : "kernel exploit → temp root")
                         : "no-root (ADB only)";
             string exploitLine = exploitMatch != null
                 ? "Match : " + exploitMatch.Name + (string.IsNullOrWhiteSpace(exploitMatch.Id) ? "" : " (" + exploitMatch.Id + ")")
                 : "Match : none";
             if (ConfirmDialog.Show(
-                    "Xiaomi Temp Root" + Environment.NewLine + Environment.NewLine +
+                    "Android Temp Root" + Environment.NewLine + Environment.NewLine +
                     "Model : " + (string.IsNullOrWhiteSpace(model) ? "?" : model) + Environment.NewLine +
                     "Brand : " + (string.IsNullOrWhiteSpace(brand) ? "?" : brand) +
                     (string.IsNullOrWhiteSpace(miui) ? "" : "  ·  MIUI " + miui) + Environment.NewLine +
@@ -175,25 +221,45 @@ namespace PMKUnlocker
                     (string.IsNullOrWhiteSpace(kernelVer) ? "" : "  ·  " + kernelVer) + Environment.NewLine +
                     "Mode  : " + mode + Environment.NewLine +
                     exploitLine + Environment.NewLine + Environment.NewLine +
-                    (hasRoot
+                    (rootReady
                         ? "• Temp root ရှိပြီး — FRP မလုပ်ဘူး" + Environment.NewLine +
-                          "• ဆက်လုပ်ရန်: FRP Reset (ROOT) ခလုတ်"
+                          (moduleRoot
+                              ? "• Root: " + rootState.Summary + Environment.NewLine +
+                                "• " + rootState.Hint + Environment.NewLine +
+                                "• adb shell ဆီ su မရောက်လို့ FRP Reset (ROOT) က ငြင်းမယ် — root လိုတဲ့ app ကို manager မှာ ခွင့်ပြုပါ"
+                              : "• ဆက်လုပ်ရန်: FRP Reset (ROOT) ခလုတ်")
                         : unsupportedFirmware
                             ? "• ဒီ firmware ကို GhostLock မထောက်ပံ့ဘူး — kernel မှာ CVE-2026-43499 fix ပါပြီ" + Environment.NewLine +
                               "• " + patchedNote + Environment.NewLine +
                               "• Exploit ကို မစမ်းတော့ဘူး — reboot / profile အသစ်ကလည်း မပြောင်းနိုင်" + Environment.NewLine +
-                              "• No-root MIUI path နဲ့ ဆက်မယ်"
+                              "• No-root provision path နဲ့ ဆက်မယ်"
                         : exploitMatch != null
-                            ? "• su မရ — kernel exploit payload စမ်းမယ် (ART-style)" + Environment.NewLine +
-                              "• Root ရရင် ရပ်မယ် — FRP Reset (ROOT) နဲ့ ဆက်" + Environment.NewLine +
-                              "• payload မရှိရင် no-root path ကျ"
-                            : "• su / exploit မရှိ — MIUI provision + wizard skip (best-effort)" + Environment.NewLine +
+                            ? (string.Equals(exploitMatch.RunMode, "apk", StringComparison.OrdinalIgnoreCase)
+                                ? "• su မရ — DFRoot app install + UI automation စမ်းမယ်" + Environment.NewLine +
+                                  "• Developer options → 'USB debugging (Security settings)' ဖွင့်ထားရမယ်" + Environment.NewLine +
+                                  "• ဖုန်းမျက်နှာပြင် ဖွင့်ထားပြီး မလော့ခ်ထားပါ (UI ကို tool ကိုယ်တိုင် tap မယ်)" + Environment.NewLine +
+                                  "• Root ရရင် ရပ်မယ် — FRP Reset (ROOT) နဲ့ ဆက်"
+                                : "• su မရ — kernel exploit payload စမ်းမယ် (ART-style)" + Environment.NewLine +
+                                  "• Root ရရင် ရပ်မယ် — FRP Reset (ROOT) နဲ့ ဆက်" + Environment.NewLine +
+                                  "• payload မရှိရင် no-root path ကျ")
+                            : "• su / exploit မရှိ — provision + wizard skip (best-effort, any brand)" + Environment.NewLine +
                               "• Android 11+ မှာ full FRP အတွက် root/temp root လိုနိုင်") + Environment.NewLine + Environment.NewLine +
                     "ဖုန်းပိုင်ရှင် ခွင့်ပြုချက် ရှိမှ လုပ်ပါ။ ဆက်လုပ်မလား?",
-                    "Confirm Xiaomi Temp Root", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                    "Confirm Android Temp Root", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
 
-            Log("═══ Xiaomi Temp Root · " + model + " (" + fp.Codename + ") · " + selectedAdbSerial + " ═══", Color.FromArgb(0, 180, 255));
+            Log("═══ Android Temp Root · " + model + " (" + fp.Codename + ") · " + selectedAdbSerial + " ═══", Color.FromArgb(0, 180, 255));
+            string ExploitName(ExploitEntry e) => string.IsNullOrWhiteSpace(e.Name) ? e.Id : e.Name;
+            if (profileFirst != null && exploitMatch != null &&
+                !string.Equals(exploitMatch.Id, profileFirst.Id, StringComparison.Ordinal))
+                Log("[i] GLK1 profile ready for " + fp.Kernel + " → " + ExploitName(exploitMatch) +
+                    " runs first (profile exploit goes as fallback)", Color.Cyan);
+            else if (profileFirst != null)
+                Log("[i] GLK1 profile ready for " + fp.Kernel + " → " + ExploitName(profileFirst) + " runs first", Color.Cyan);
+            else if (exploitMatches.Count > 1)
+                Log("[i] No GLK1 profile for " + fp.Kernel + " → " +
+                    (exploitMatch == null ? "no exploit" : ExploitName(exploitMatch)) +
+                    " runs first (profile exploit goes as fallback)", Color.Cyan);
             // ---- Device info — compact summary (detail တွေအတွက် Read Full Info) ----
             string sel = (await ExecuteCommandQuickAsync("adb.exe", "shell getenforce")).Trim();
             string blLocked = Prop("ro.boot.flash.locked");
@@ -212,9 +278,50 @@ namespace PMKUnlocker
                 (string.IsNullOrWhiteSpace(board) ? "" : " (" + board + ")") +
                 " · kernel " + fp.Kernel, Color.Gainsboro);
             Log("State: bootloader " + blState + " · SELinux " + sel +
-                " · root " + (hasRoot ? "Success" : "Denied"),
-                hasRoot ? Color.LightGreen : Color.Orange);
-            Log("Temp Root running — do not unplug or reboot the device.", Color.Orange);
+                " · root " + (rootReady ? "Success" : "Denied"),
+                rootReady ? Color.LightGreen : Color.Orange);
+            if (moduleRoot)
+            {
+                Log("Root: " + rootState.Summary, Color.LightGreen);
+                Log("Note: " + rootState.Hint, Color.Orange);
+            }
+            // root မရှိသေးရင် "do not unplug" လို့ မပြ — ဒီလိုင်းက root တကယ်ရမှသာ အဓိပ္ပာယ်ရှိတယ်
+            if (rootReady)
+                Log("Temp Root running — do not unplug or reboot the device.", Color.Orange);
+            else if (exploitMatch == null)
+            {
+                // manifest မှာ ဒီ kernel အတွက် entry မရှိ → exploit ဘာလို့ မစမ်းတာလဲ ရှင်းရှင်းပြ
+                string knownKernels = string.Join(", ", manifest.Exploits
+                    .Where(e => e.Enabled)
+                    .SelectMany(e => e.KernelPrefix ?? new string[0])
+                    .Distinct()
+                    .OrderBy(k => k));
+                Log("[i] No exploit match for this kernel: " + (string.IsNullOrWhiteSpace(fp.Kernel) ? "?" : fp.Kernel) +
+                    " — exploits\\manifest.json covers: " + (knownKernels.Length == 0 ? "none" : knownKernels), Color.Orange);
+                Log("[i] So no kernel exploit/payload is tried on this boot — continuing with the no-root path.", Color.Gray);
+            }
+            else
+                Log("No temp root yet — exploit/payload steps run next.", Color.Orange);
+
+            // KernelSU module က root ပေးနေပြီ — payload/exploit ထပ် run ရင် ဖုန်း reboot ဖြစ်နိုင်တယ်၊ မလိုအပ်တော့ဘူး
+            if (moduleRoot)
+            {
+                // module က root ပေးနေပြီမို့ `adb root` ကို တစ်ခါ စမ်းခွင့်ရှိတယ် — ရရင် exploit မလိုဘဲ ဆက်နိုင်တယ်
+                string rootId = await TryAdbRootAsync();
+                if (rootId.Contains("uid=0"))
+                {
+                    hasRoot = true;
+                    moduleRoot = false;
+                    suId = rootId;
+                    Log("[OK] Module live + adb root ရ — shell is root, exploit မလိုပါ။", Color.LightGreen);
+                }
+                else
+                {
+                    LogTempRootState(rootState, model, fp.Codename, false);
+                    tempRootFlowActive = false;
+                    return;
+                }
+            }
 
             // Step A: su prompt — screen ပေါ် Allow စောင့် (temp root)
             if (!hasRoot)
@@ -241,9 +348,9 @@ namespace PMKUnlocker
                              (fp.Codename.IndexOf("zircon", StringComparison.OrdinalIgnoreCase) >= 0 ||
                               fp.Soc.IndexOf("MT6886", StringComparison.OrdinalIgnoreCase) >= 0 ||
                               fp.Kernel.IndexOf("5.15.180", StringComparison.Ordinal) >= 0);
-            if (!hasRoot && looksXiaomi && skipToken)
+            if (!hasRoot && looksMiui && skipToken)
                 Log("[2/4] Token path skip — Android16/zircon (token payload unreliable here, ~30s) → going straight to kernel exploit", Color.Cyan);
-            if (!hasRoot && looksXiaomi && !skipToken)
+            if (!hasRoot && looksMiui && !skipToken)
             {
                 var swMst = Stopwatch.StartNew();
                 (bool mstRoot, double mstRealSec) = await TryMstTempRootAsync();
@@ -267,6 +374,9 @@ namespace PMKUnlocker
 
             // Step A2: ART-style kernel exploit (su မရရင် payload စမ်း)
             double exploitSec = -1;
+            bool moduleRootAfterExploit = false;
+            bool anyExploitRan = false;
+            ExploitEntry rootExploit = null;
             if (!hasRoot && unsupportedFirmware)
             {
                 // measured kernel: remove_waiter() fix present → no stale waiter → the PI write can never land
@@ -279,6 +389,7 @@ namespace PMKUnlocker
             }
             else if (!hasRoot && exploitMatch != null)
             {
+                anyExploitRan = true;
                 var swExploit = Stopwatch.StartNew();
                 (bool exRoot, double exSec) = await TryKernelExploitAsync(exploitsRoot, exploitMatch, fp);
                 swExploit.Stop();
@@ -286,6 +397,43 @@ namespace PMKUnlocker
                 // realSec >= 0 → run.log/stdout က actual exploit time (timeout wait မဟုတ်)
                 exploitSec = exSec >= 0 ? exSec : swExploit.Elapsed.TotalSeconds;
                 if (hasRoot) suId = await ProbeSuAsync();
+                // module loaded ဖြစ်ပြီး su မရတဲ့ state — exploit ထပ်မ run ရ (fallback ကို မဆက်)
+                if (!hasRoot && await RootModuleLiveAsync()) moduleRootAfterExploit = true;
+                if (hasRoot || moduleRootAfterExploit) rootExploit = exploitMatch;
+            }
+
+            // Fallback — primary (DFRoot) မရရင် manifest ထဲက ကျန်တဲ့ matching exploit ကို ဆက် (GhostLock)
+            // profile မကိုက်ရင် TryKernelExploitAsync ကိုယ်တိုင် "No GLK1 profile" ပြီး abort လုပ်မယ်
+            if (!hasRoot && !moduleRootAfterExploit && !tempRootAborted && exploitMatch != null)
+            {
+                foreach (ExploitEntry alt in KernelExploit.FindMatches(manifest, fp))
+                {
+                    if (string.Equals(alt.Id, exploitMatch.Id, StringComparison.Ordinal)) continue;
+                    if (tempRootAborted) break;
+                    Log("[i] Fallback exploit: " + (string.IsNullOrWhiteSpace(alt.Name) ? alt.Id : alt.Name), Color.Cyan);
+                    anyExploitRan = true;
+                    var swAlt = Stopwatch.StartNew();
+                    (bool altRoot, double altSec) = await TryKernelExploitAsync(exploitsRoot, alt, fp);
+                    swAlt.Stop();
+                    if (altRoot)
+                    {
+                        exploitMatch = alt;
+                        hasRoot = true;
+                        suId = await ProbeSuAsync();
+                        exploitSec = altSec >= 0 ? altSec : swAlt.Elapsed.TotalSeconds;
+                        rootExploit = alt;
+                        break;
+                    }
+                    // fallback လည်း "module live, su မရ" ဖြစ်ရင် နောက် exploit ကို မဆက်တော့ဘူး
+                    if (await RootModuleLiveAsync()) { moduleRootAfterExploit = true; rootExploit = alt; break; }
+                }
+            }
+
+            // DFRoot က ဒီဖုန်းမှာ root ရဖူးပြီ → နောက် run တွေမှာ GhostLock ကို မစမ်းတော့ (panic အန္တရာယ်)
+            if (rootExploit != null && IsDfrootExploit(rootExploit))
+            {
+                RememberDfrootVerified(selectedAdbSerial);
+                Log("[i] DFRoot က ဒီဖုန်းမှာ temp root ရပြီ — နောက်ပိုင်း GhostLock ကို မစမ်းတော့ပါ။", Color.Gray);
             }
 
             if (tempRootAborted && !hasRoot)
@@ -293,6 +441,27 @@ namespace PMKUnlocker
                 tempRootFlowActive = false;
                 Log("[i] Temp Root flow stopped — device disconnected.", Color.OrangeRed);
                 return;
+            }
+
+            // module က live ဖြစ်နေပြီ — temp root ရှိပြီ၊ ဒါပေမယ့် adb shell ဆီ su မရောက်။
+            // ဒီ state မှာ exploit ထပ်တွန်း / reboot လုပ်ရင် ရနေတဲ့ root ကို ဆုံးရှုံးမယ်။
+            if (!hasRoot && (moduleRootAfterExploit || await RootModuleLiveAsync()))
+            {
+                // exploit run မရှိတော့ဘူး → `adb root` ကို တစ်ခါ စမ်းခွင့်ရှိတယ်။
+                // KernelSU ADB Root ဖွင့်ထားရင် adbd က root ဖြစ်လာပြီး shell id → uid=0 (ဒါဆို ကိုယ်တိုင် ဆက်သွား)။
+                string rootId = await TryAdbRootAsync();
+                if (rootId.Contains("uid=0"))
+                {
+                    hasRoot = true;
+                    suId = rootId;
+                    Log("[OK] Module live + adb root ရ — shell is root, root handle ရပြီ။", Color.LightGreen);
+                }
+                else
+                {
+                    RootProbeState liveState = await ProbeRootStateAsync();
+                    LogTempRootState(liveState, model, fp.Codename, moduleRootAfterExploit);
+                    return;
+                }
             }
 
             // Root ရရင် summary block ပြပြီး ရပ် — FRP ကို FRP Reset (ROOT) နဲ့ ဆက်လုပ်မယ်
@@ -317,17 +486,22 @@ namespace PMKUnlocker
                 Log("Root: " + (suId ?? "").Trim() + "  ·  KernelSU " +
                     (viaKsu ? "loaded ✓" : "temp only (gone after reboot)"),
                     viaKsu ? Color.LightGreen : Color.Orange);
+                Log(rootHandlePrefix != null || rootViaAdbRoot
+                        ? "[OK] Root handle: " + RootHandle + " — FRP Reset (ROOT) က ဒါကို သုံးမယ"
+                        : "[!] Root handle: မရ — KernelSU loaded ဖြစ်ပေမဲ့ adb shell ဆီ su မရောက်ဘူး " +
+                          "(FRP Reset (ROOT) က ငြင်းမယ် · no-root path သုံးပါ)",
+                    (rootHandlePrefix != null || rootViaAdbRoot) ? Color.LightGreen : Color.Orange);
                 Log("Next: press 🔓 FRP Reset (ROOT)  ·  reboot removes temp root", Color.Orange);
                 tempRootFlowActive = false;
                 return;
             }
 
-            Log(unsupportedFirmware
-                    ? "[4/4] No temp root — firmware unsupported (kernel patched) → No-root MIUI path: provision + wizard skip..."
-                    : "[4/4] No temp root → No-root MIUI path: provision + wizard skip...",
+            Log(unsupportedFirmware && !anyExploitRan
+                    ? "[4/4] No temp root — firmware unsupported (kernel patched) → No-root provision path: provision + wizard skip..."
+                    : "[4/4] No temp root → No-root provision path: provision + wizard skip...",
                 Color.Cyan);
 
-            // Step B: MIUI/Xiaomi provision settings (no-root path only)
+            // Step B: provision settings (no-root path, any brand)
             if (!tempRootAborted)
             {
                 await ExecuteCommandQuickAsync("adb.exe", "shell settings put secure user_setup_complete 1");
@@ -339,7 +513,7 @@ namespace PMKUnlocker
                 Log("[i] Provision settings sent — values verified at Step E2.", Color.Gray);
             }
 
-            // Step C: setup wizards (Google + MIUI/Xiaomi)
+            // Step C: setup wizards (Google + vendor)
             // pm disable က system pkgs များ — best effort only
             foreach (string pkg in new[] { "com.google.android.setupwizard", "com.android.setupwizard" })
             {
@@ -348,7 +522,7 @@ namespace PMKUnlocker
                     Log("[OK] " + pkg + " → disabled", Color.LightGreen);
             }
 
-            // Step D: Google/Xiaomi account packages clear
+            // Step D: Google/vendor account packages clear
             foreach (string pkg in new[] { "com.google.android.gms", "com.google.android.gsf", "com.xiaomi.account", "com.xiaomi.mipicks" })
             {
                 string outp = (await ExecuteCommandQuickAsync("adb.exe", "shell pm clear " + pkg)).Trim();
@@ -365,7 +539,7 @@ namespace PMKUnlocker
                 return;
             }
 
-            // Step E2: no-root MIUI path — second space / user provision tricks
+            // Step E2: no-root provision path — second space / user provision tricks
             Log("[i] E2: provision verify + second-space attempt...", Color.Orange);
             await ExecuteCommandQuickAsync("adb.exe", "shell am start -a android.intent.action.MAIN -c android.intent.category.HOME");
             string prov = (await ExecuteCommandQuickAsync("adb.exe", "shell settings get global device_provisioned")).Trim();
@@ -384,7 +558,7 @@ namespace PMKUnlocker
                 Log("[!] ADB/device disconnected — provision verify skipped (not a settings failure).", Color.Orange);
             else
             {
-Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root (Magisk/su).", Color.Orange);
+Log("[!] Provision settings not applied — Android 11+ may need temp root (Magisk/su).", Color.Orange);
             Log("[i] Fallback: use 🔓 FRP Reset (ROOT) / EDL firehose erase frp.", Color.Orange);
             }
 
@@ -610,25 +784,172 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
         // (timeout/retry ဗားရှင်းကို param နဲ့ ခေါ် — bare call က ဒီ wrapper ကိုပဲ ပြန်ရောက်လို့ recursion ဖြစ်)
         // KernelSU su daemon settle — ပထမ pass fail ပြီး error ရှိရင် 2.5s စောင့်ပြီး ထပ်စမ်း၊ uid=0 မရရင်
         // နောက်ဆုံး error text ကို return (caller တွေက Contains("uid=0") နဲ့ပဲ check → "no output" မဟုတ်တော့)
+        // root ရနိုင်တဲ့ လမ်းတွေ — ပထမ အောင်တဲ့ တစ်ခုကို handle အဖြစ် သိမ်းတယ်
+        private static readonly string[] SuProbeCommands =
+        {
+            "shell su -c id",
+            "shell su 0 id",
+            "shell /system/bin/su -c id",
+            "shell /data/adb/ksu/bin/su -c id",
+            "shell /debug_ramdisk/su -c id",
+            "shell /data/local/tmp/su -c id",
+            "shell /data/local/tmp/cve-2026-43499-root -c id"
+        };
+        // "su -c" / "/data/local/tmp/su -c" — null = root handle မရှိ (KernelSU module only)
+        private static string rootHandlePrefix = null;
+        // KernelSU Settings → ADB Root ဖွင့်ထားရင် adbd ကိုယ်တိုင် root ဖြစ်နေတယ် — su မလိုဘူး
+        private static bool rootViaAdbRoot = false;
+        // Exploit run နေတုန်း adb root ကို မခေါ်ရ — userdebug build မှာ adbd restart ဖြစ်ပြီး
+        // run နေတဲ့ exploit shell ကို သတ်ပစ်တယ် (root ရခါနီး ပျက်သွားနိုင်တယ်)။
+        private static bool exploitRunActive = false;
+
+        // Exploit entry က GhostLock (CVE-2026-43499) လား — patched-kernel gate က ဒီ entry တွေအတွက်ပဲ
+        // (DFRoot APK က kernel fix floor နဲ့ မသက်ဆိုင်ဘူး)
+        private static bool IsGhostLockExploit(ExploitEntry ex) =>
+            ex != null && !string.IsNullOrEmpty(ex.Id) &&
+            ex.Id.IndexOf("ghostlock", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // DFRoot က ဒီဖုန်းမှာ temp root ရဖူးပြီလား — pmk_settings.txt ထဲမှာ serial နဲ့ မှတ်ထားတယ်။
+        // မှတ်ထားရင် နောက် run တွေမှာ GhostLock (CVE-2026-43499) ကို လုံးဝ မစမ်းတော့ဘူး (panic အန္တရာယ်)။
+        // ပြန်ဖွင့်ချင်ရင် pmk_settings.txt ထဲက DfrootVerifiedSerials လိုင်းကို ဖျက်ပါ။
+        private const string DfrootVerifiedKey = "DfrootVerifiedSerials";
+
+        private static bool IsDfrootExploit(ExploitEntry ex) =>
+            ex != null && !string.IsNullOrEmpty(ex.Id) &&
+            ex.Id.IndexOf("dfroot", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // DirtyFrag မိသားစု (DFRoot APK / DirtyFrag payload) — kernel floor နဲ့ KMI ကို ကြိုပြရန်
+        private static bool IsDirtyFragExploit(ExploitEntry ex) =>
+            ex != null && !string.IsNullOrEmpty(ex.Id) &&
+            (ex.Id.IndexOf("dfroot", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             ex.Id.IndexOf("dirtyfrag", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        private List<string> LoadDfrootVerifiedSerials()
+        {
+            var serials = new List<string>();
+            try
+            {
+                if (!File.Exists(SettingsFile)) return serials;
+                foreach (string raw in File.ReadAllLines(SettingsFile))
+                {
+                    string line = raw.Trim();
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    if (!line.Substring(0, eq).Trim().Equals(DfrootVerifiedKey, StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (string s in line.Substring(eq + 1).Split(','))
+                        if (s.Trim().Length > 0 && !serials.Contains(s.Trim(), StringComparer.OrdinalIgnoreCase))
+                            serials.Add(s.Trim());
+                    break;
+                }
+            }
+            catch { }
+            return serials;
+        }
+
+        private bool DfrootVerifiedFor(string serial) =>
+            !string.IsNullOrWhiteSpace(serial) &&
+            LoadDfrootVerifiedSerials().Contains(serial.Trim(), StringComparer.OrdinalIgnoreCase);
+
+        private void RememberDfrootVerified(string serial)
+        {
+            if (string.IsNullOrWhiteSpace(serial)) return;
+            try
+            {
+                var serials = LoadDfrootVerifiedSerials();
+                if (serials.Contains(serial.Trim(), StringComparer.OrdinalIgnoreCase)) return;
+                serials.Add(serial.Trim());
+                string value = DfrootVerifiedKey + "=" + string.Join(",", serials);
+                var lines = new List<string>();
+                bool replaced = false;
+                if (File.Exists(SettingsFile))
+                {
+                    foreach (string raw in File.ReadAllLines(SettingsFile))
+                    {
+                        string line = raw.Trim();
+                        int eq = line.IndexOf('=');
+                        bool isKey = eq > 0 && line.Substring(0, eq).Trim()
+                            .Equals(DfrootVerifiedKey, StringComparison.OrdinalIgnoreCase);
+                        if (isKey)
+                        {
+                            if (!replaced) { lines.Add(value); replaced = true; }
+                            continue;
+                        }
+                        lines.Add(raw);
+                    }
+                }
+                if (!replaced) lines.Add(value);
+                Directory.CreateDirectory(ShopServices.DataDirectory);
+                File.WriteAllLines(SettingsFile, lines, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                // မှတ်မရရင် flow ကို မရပ်ဘူး — ဒီ run အတွက် ဆက်အလုပ်လုပ်နိုင်တယ်
+                Log("[i] DFRoot marker not saved: " + ex.Message, Color.Gray);
+            }
+        }
+
+        /// <summary>Module live ဖြစ်နေတဲ့ state — exploit မတွန်းတော့ဘဲ ရပ်ရမယ့် တစ်နေရာတည်း စာသား။
+        /// loadedByThisRun=true ဆိုရင် ဒီ run က module ကို အခုမှ တင်တာ (ALREADY PRESENT လို့ မပြရ)။</summary>
+        private void LogTempRootState(RootProbeState state, string model, string codename, bool loadedByThisRun)
+        {
+            Log("", Color.Gray);
+            Log((loadedByThisRun ? "✅ TEMP ROOT ACTIVE" : "✅ TEMP ROOT ALREADY PRESENT") +
+                "  ·  " + (string.IsNullOrWhiteSpace(model) ? "?" : model) +
+                (string.IsNullOrWhiteSpace(codename) ? "" : " (" + codename + ")") +
+                (loadedByThisRun ? "  ·  this run loaded the module" : ""), Color.LightGreen);
+            Log("Root  : " + state.Summary, Color.White);
+            if (!string.IsNullOrWhiteSpace(state.Hint)) Log("Next  : " + state.Hint, Color.Orange);
+            Log("Reboot removes temp root.", Color.Orange);
+        }
+
+        private string RootHandle => rootViaAdbRoot
+            ? "adb root (shell is root)"
+            : (string.IsNullOrWhiteSpace(rootHandlePrefix) ? "su -c" : rootHandlePrefix);
+        // root အဖြစ် shell command တစ်ခု run ရန် adb args
+        private string RootShellArgs(string inner) => rootViaAdbRoot
+            ? "shell \"" + inner + "\""
+            : "shell " + (string.IsNullOrWhiteSpace(rootHandlePrefix) ? "su -c" : rootHandlePrefix) + " \"" + inner + "\"";
+
         private async Task<string> ProbeSuAsync()
         {
+            // adbd ကိုယ်တိုင် root ဖြစ်နေလား (KernelSU ADB Root) — su ထက် ပိုတိုတယ်
+            string selfId = (await ExecuteCommandQuickAsync("adb.exe", "shell id")).Trim();
+            if (selfId.Contains("uid=0"))
+            {
+                rootViaAdbRoot = true;
+                return selfId;
+            }
+            rootViaAdbRoot = false;
+
             string last = "";
             for (int pass = 0; pass < 2; pass++)
             {
                 if (pass > 0)
                 {
-                    if (last.Length == 0) return "";   // su လုံးဝမရှိ — settle မလို
-                    await Task.Delay(2500);            // KernelSU/legacy su daemon settle
+                    // exploit run နေတုန်း `adb root` ကို မခေါ်ရ — userdebug build မှာ adbd restart ဖြစ်ပြီး
+                    // run နေတဲ့ exploit shell သေတယ် (root မရခင် ပျက်သွားနိုင်တယ်)
+                    if (exploitRunActive) return last;
+                    // ဒုတိယ pass: adb root ကို စမ်း (KernelSU ADB Root ဖွင့်ထားရင် adbd restart ဖြစ်ပြီး root ဖြစ်တယ်)
+                    await ExecuteCommandQuickAsync("adb.exe", "root");
+                    await Task.Delay(1500);
+                    string rootId = (await ExecuteCommandQuickAsync("adb.exe", "shell id")).Trim();
+                    if (rootId.Contains("uid=0"))
+                    {
+                        rootViaAdbRoot = true;
+                        return rootId;
+                    }
+                    if (last.Length == 0) return "";   // su လုံးဝမရှိ — settle မလိုတော့
+                    await Task.Delay(1000);            // KernelSU/legacy su daemon settle
                 }
-                foreach (string cmd in new[]
-                         {
-                             "shell su -c id",
-                             "shell /data/local/tmp/su -c id",
-                             "shell /data/local/tmp/cve-2026-43499-root -c id"
-                         })
+                foreach (string cmd in SuProbeCommands)
                 {
                     string s = (await ExecuteCommandQuickAsync("adb.exe", cmd)).Trim();
-                    if (s.Contains("uid=0")) return s;
+                    if (s.Contains("uid=0"))
+                    {
+                        // root ရတဲ့ လမ်းကို မှတ် — FRP Reset (ROOT) က ဒီ handle ကိုပဲ သုံးမယ
+                        rootHandlePrefix = cmd.Replace("shell ", "").Replace(" id", "").Trim();
+                        return s;
+                    }
                     if (s.Length > 0) last = s;
                 }
             }
@@ -657,10 +978,17 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
         {
             const string remote = "/data/local/tmp/.preload.so";
             string local = Path.Combine(Application.StartupPath, "exploits", "payloads", "mst-temproot.elf");
-            ToolIntegrity.Verify(local);
             if (!File.Exists(local))
             {
-                Log("[i] PMK payload not bundled — skip token root: " + local, Color.Gray);
+                // path အရှည်ကြီး မပြ — ပြီးတော့ [2/4] နံပါတ် မကျော်စေရ
+                Log("[2/4] Token payload (MST) — not bundled, skipped", Color.Gray);
+                Log("     expected: exploits\\payloads\\mst-temproot.elf", Color.Gray);
+                return (false, -1);
+            }
+            try { ToolIntegrity.Verify(local); }
+            catch (Exception exMst)
+            {
+                Log("[i] PMK payload integrity unavailable (" + exMst.Message + ") — skip token root.", Color.Gray);
                 return (false, -1);
             }
 
@@ -730,17 +1058,80 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
         private async Task<(bool Root, double Sec)> TryKernelExploitAsync(string exploitsRoot, ExploitEntry ex, DeviceFingerprint fp, int attempt = 0)
         {
             bool hostMode = string.Equals(ex.RunMode, "host", StringComparison.OrdinalIgnoreCase);
+            bool apkMode = string.Equals(ex.RunMode, "apk", StringComparison.OrdinalIgnoreCase);
             Log("[3/4] Kernel exploit: " + (string.IsNullOrWhiteSpace(ex.Name) ? ex.Id : ex.Name) +
-                (hostMode ? " [host]" : " [device]") +
+                (apkMode ? " [apk]" : hostMode ? " [host]" : " [device]") +
                 (attempt > 0 ? " · retry " + attempt + "/1" : ""), Color.Cyan);
 
-            if (!hostMode && ex.Id.IndexOf("ghostlock", StringComparison.OrdinalIgnoreCase) >= 0)
+            // A7 per-boot ledger: one entry gets one outcome per boot. A root or a panic recorded for
+            // this boot blocks a rerun; a failed-but-alive run does not (that is what the retry is for).
+            lastExploitAttemptId = ex.Id;
+            string ledgerBlock = await BootLedgerBlockAsync(ex) ?? "";
+            if (ledgerBlock.Length > 0)
             {
-                string fixNote = KernelExploit.GhostLockFixNote(fp.Kernel, fp.Patch);
-                if (!string.IsNullOrEmpty(fixNote)) Log("[i] " + fixNote, Color.Orange);
+                if (ledgerBlock == "rooted")
+                {
+                    Log("[!] " + ex.Id + " already produced root on this boot - not running it again.", Color.OrangeRed);
+                    Log("[i] Root is live - stop here and do not reboot.", Color.Orange);
+                }
+                else
+                {
+                    Log("[!] " + ex.Id + " panicked the kernel on this boot - not running it again.", Color.OrangeRed);
+                    Log("[i] Reboot once to start a clean boot, then retry only if root is still missing. " +
+                        "A second panic means this profile does not fit this phone.", Color.Orange);
+                }
+                return (false, -1);
             }
 
-            string local = KernelExploit.PayloadFullPath(exploitsRoot, ex);
+            // DirtyFrag လမ်း (DFRoot/DirtyFrag): floor က hint ပဲ — APK ကိုယ်တိုင် vulnerability စစ်တယ်။
+            // ဒါပေမယ့် KMI က အရေးကြီး — loader က KMI တစ်ခုစီအတွက် kernel module သီးသန့် တင်တယ်။
+            if (IsDirtyFragExploit(ex))
+            {
+                string dirtyNote = KernelExploit.DirtyFragFixNote(fp.Kernel, fp.Patch);
+                if (!string.IsNullOrEmpty(dirtyNote)) Log("[i] " + dirtyNote, Color.Orange);
+                string kmi = KernelExploit.KmiTarget(fp.Kernel);
+                if (kmi != null)
+                    Log("[i] KMI " + kmi + " · " + KernelExploit.KmiModuleNote(kmi, fp.Kernel), Color.Gray);
+                else
+                    Log("[i] KMI မသိ (kernel string မှာ -androidN- tag မပါ) — module load မအောင်နိုင်ခြေ ရှိတယ်။",
+                        Color.Gray);
+            }
+
+            if (apkMode) return await TryApkUiExploitAsync(exploitsRoot, ex, fp);
+
+            if (!hostMode && IsGhostLockExploit(ex))
+            {
+                // DFRoot က ဒီဖုန်းမှာ temp root ရဖူးပြီ — GhostLock ကို လုံးဝ မစမ်းတော့ဘူး (panic အန္တရာယ်)
+                if (DfrootVerifiedFor(selectedAdbSerial))
+                {
+                    Log("[i] GhostLock (CVE-2026-43499) ကို မစမ်းတော့ဘူး — DFRoot က ဒီဖုန်းမှာ temp root ရဖူးပြီ။", Color.Gray);
+                    Log("[i] ပြန်ဖွင့်ချင်ရင် ဒီဖိုင်ထဲက DfrootVerifiedSerials လိုင်းကို ဖျက်ပါ: " + SettingsFile, Color.Gray);
+                    return (false, -1);
+                }
+                string fixNote = KernelExploit.GhostLockFixNote(fp.Kernel, fp.Patch);
+                if (!string.IsNullOrEmpty(fixNote)) Log("[i] " + fixNote, Color.Orange);
+                // per-entry gate: measured list → published fix floor → refuse before pushing anything
+                string patchedNote = KernelExploit.PatchedKernelNote(exploitsRoot, fp.Kernel, fp.Patch);
+                if (patchedNote != null)
+                {
+                    Log("[!] UNSUPPORTED FIRMWARE — " + fp.Kernel, Color.OrangeRed);
+                    Log("    " + patchedNote, Color.Orange);
+                    Log("[i] GhostLock (CVE-2026-43499) ကို မစမ်းတော့ဘူး — kernel မှာ fix ရှိပြီးသား " +
+                        "(push/run လုံးဝ မလုပ်ပါ)။", Color.Orange);
+                    Log("[i] A reboot or a rebuilt GLK1 profile cannot change a patched kernel.", Color.Gray);
+                    return (false, -1);
+                }
+            }
+
+            string local;
+            try { local = KernelExploit.PayloadFullPath(exploitsRoot, ex); }
+            catch (Exception exPath)
+            {
+                // manifest .. escape / missing integrity entry — async void ထဲကို exception မလွှတ်ရ
+                Log("[!] Payload path rejected: " + exPath.Message, Color.OrangeRed);
+                Log("[i] exploits\\manifest.json ထဲက Path ကို စစ်ပါ (exploits folder အတွင်းသာ ခွင့်ပြု)။", Color.Gray);
+                return (false, -1);
+            }
             if (!File.Exists(local))
             {
                 Log("[!] Payload missing: " + local, Color.OrangeRed);
@@ -754,6 +1145,10 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             double realSec = -1;
             string runOut = "";
             string profileRel = null;
+            // GhostLock timeout policy: a hard kill can land in the middle of a write. The process gets a
+            // grace window past the policy timeout, and a run killed with no verdict is never retried.
+            bool runTimedOut = false;
+            int runGraceSec = 0;
 
             if (hostMode)
             {
@@ -823,7 +1218,14 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     foreach (string compRel in ex.Companions)
                     {
                         if (string.IsNullOrWhiteSpace(compRel)) continue;
-                        string compLocal = KernelExploit.CompanionFullPath(exploitsRoot, ex, compRel);
+                        string compLocal;
+                        try { compLocal = KernelExploit.CompanionFullPath(exploitsRoot, ex, compRel); }
+                        catch (Exception exComp)
+                        {
+                            // manifest escape / missing integrity entry — ဒီ companion ကို ကျော်၊ exploit ကို မရပ်ဘူး
+                            Log("[!] Companion path rejected (skip): " + exComp.Message, Color.Orange);
+                            continue;
+                        }
                         if (!File.Exists(compLocal))
                         {
                             Log("[!] Companion missing (skip): " + compLocal, Color.Orange);
@@ -860,7 +1262,8 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                             string rel = Path.GetFileNameWithoutExtension(binPath) ?? "";
                             if (rel.Length == 0) continue;
                             bool exact = string.Equals(rel, fp.Kernel, StringComparison.Ordinal);
-                            bool prefix = !string.IsNullOrWhiteSpace(fp.Kernel) &&
+                            // GhostLock (ExactProfile) က exact match ပဲ လက်ခံ — profile တစ်ခုက kernel တစ်ခုအတွက်ပဲ
+                            bool prefix = !ex.ExactProfile && !string.IsNullOrWhiteSpace(fp.Kernel) &&
                                           (fp.Kernel.StartsWith(rel, StringComparison.Ordinal) ||
                                            rel.StartsWith(fp.Kernel, StringComparison.Ordinal));
                             if (exact || (prefix && (matchedBin == null || rel.Length > matchedRel.Length)))
@@ -970,20 +1373,74 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 // GhostLock race can take 15-45s — use timeoutSec, not ExecuteCommandQuickAsync's 15s default
                 // returnOutputOnFailure=true: payload fail path (exit≠0) ကောင်းကောင်း stdout လိုချင်
                 // progress ticker — exploit ပိတ်နေတယ် မထင်စေဖို့ 30s တစ်ခါ elapsed ပြ
+                bool earlyRoot = false;
+                string earlyEvidence = "";
+                int tickSec = 0;
+                runGraceSec = IsGhostLockExploit(ex) ? 90 : 0;
+                int hardTimeoutSec = timeoutSec + runGraceSec;
+                bool graceLogged = false;
+                exploitRunActive = true;
                 var expTask = ReviewSafety.RunQuickAsync(ResolveToolPath("adb.exe"), runCmd,
-                    timeoutSec * 1000, true);
-                _ = Task.Run(async () =>
+                    hardTimeoutSec * 1000, true);
+                try
                 {
-                    int tickSec = 0;
-                    while (!expTask.IsCompleted && tickSec < timeoutSec)
+                    // Root ကို ချက်ချင်းသိအောင်: exploit run နေတုန်း 10s တစ်ခါ su probe / GhostLock ksu log ကို စစ်။
+                    // (stdout မထွက်ဘဲ sigsuspend မှာ ရပ်နေတတ်တဲ့ GhostLock အတွက် 240s timeout ကုန်တာကို မစော့ရ၊
+                    //  root ရပြီဆိုရင် ချက်ချင်းရပ် → DFRoot fallback ကို မဆက်ဘူး)
+                    while (!expTask.IsCompleted && tickSec < hardTimeoutSec)
                     {
-                        await Task.Delay(30000);
+                        await Task.Delay(5000);
                         if (expTask.IsCompleted) break;
-                        tickSec += 30;
-                        Log("[i] Exploit running... " + tickSec + "s / " + timeoutSec + "s", Color.Gray);
+                        tickSec += 5;
+                        if (runGraceSec > 0 && !graceLogged && tickSec >= timeoutSec)
+                        {
+                            graceLogged = true;
+                            Log("[i] GhostLock still running at the " + timeoutSec + "s policy timeout - waiting up to " +
+                                runGraceSec + "s more instead of killing a write in flight.", Color.Orange);
+                        }
+                        if (tickSec % 30 == 0)
+                            Log("[i] Exploit running... " + tickSec + "s / " + hardTimeoutSec + "s", Color.Gray);
+                        if (tickSec % 10 != 0 || tempRootAborted) continue;
+                        // quick probe: `su -c id` တစ်ခုတည်း၊ 5s — ProbeSuAsync ရဲ့ 7-command ladder က
+                        // 240s budget ထဲမှာ ~105s စောင့်နိုင်တယ်။ `adb root` လည်း မခေါ်ရ။
+                        string suNow = (await ProbeSuQuickAsync()).Trim();
+                        if (suNow.Contains("uid=0"))
+                        {
+                            earlyRoot = true;
+                            earlyEvidence = "quick su probe · " + suNow;
+                            break;
+                        }
+                        string ksuNow = (await ExecuteCommandQuickAsync("adb.exe",
+                            "shell cat /data/local/tmp/.ghostlock_ksu.log")).Trim();
+                        if (ksuNow.IndexOf("root script start uid=0", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            ksuNow.IndexOf("KernelSU module loaded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            ksuNow.IndexOf("KernelSU ready", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            earlyRoot = true;
+                            earlyEvidence = "GhostLock ksu log · uid=0";
+                            break;
+                        }
                     }
-                });
-                runOut = await expTask;
+                    if (earlyRoot)
+                    {
+                        if (realSec < 0) realSec = tickSec;
+                        Log("[OK] Root detected while the exploit was still running — " + earlyEvidence, Color.LightGreen);
+                        Log("[i] GhostLock ကို ချက်ချင်းရပ်လိုက်ပြီ (timeout ကို မစော့ပါ) · DFRoot fallback ကို မဆက်ပါ။", Color.Cyan);
+                        await ExecuteCommandQuickAsync("adb.exe",
+                            "shell \"kill -9 $(pidof ghostlock) 2>/dev/null; true\"");
+                        if (!expTask.IsCompleted) await Task.WhenAny(expTask, Task.Delay(5000));
+                        suPathCache.Clear(); // root တက်ပြီ → PATH su ပြန်ရှာ
+                    }
+                    try { runOut = expTask.IsCompleted ? await expTask : ""; }
+                    catch { runOut = ""; }
+                }
+                finally
+                {
+                    // exploit shell က ကျန်နေရင်တောင် `adb root` ကို ပြန်ခွင့်ပြု (adbd restart က အဲဒီ shell ကို သတ်မယ်)
+                    exploitRunActive = false;
+                }
+                // A kill at the hard timeout leaves no verdict and may have cut a write in half.
+                runTimedOut = !expTask.IsCompleted && !earlyRoot;
                 if (!string.IsNullOrWhiteSpace(runOut))
                 {
                     // full output debug အတွက် file ထဲ သိမ်း — log box မှာ key line တွေပဲ ပြ
@@ -1033,7 +1490,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                         shownLines++;
                     }
                 }
-                else
+                else if (!earlyRoot)
                 {
                     Log("[i] No exploit stdout (exit/timeout) — probing root directly...", Color.Orange);
                 }
@@ -1133,7 +1590,7 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             if (hostMode)
             {
                 Log("[!] Host tool finished/timeout — no uid=0 on device yet. " +
-                    "Complete any dialog in the tool window, then re-run Xiaomi Temp FRP.", Color.OrangeRed);
+                    "Complete any dialog in the tool window, then re-run Android Temp Root.", Color.OrangeRed);
                 return (false, -1);
             }
 
@@ -1224,7 +1681,12 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
             //   route refused → the profile's kernel_phys_load / kernel_phys_offset do not describe this build.
             // Neither can be changed by a reboot — no retry.
             // (observed shape: "W1: SELinux attempt 1/1" then "[-] Write 1 failed")
-            bool w1Exhausted = sigSrc.Contains("Write 1 failed");
+            // NOT terminal: "… route failed; backing off" — the loader drops one route and tries the next.
+            if (KernelExploit.GhostLockBackedOffRoute(sigSrc))
+                Log("[i] GhostLock က route တစ်ခုကို စွန့်ပြီး fallback ကို ပြောင်းတယ် (`route failed; backing off`) — " +
+                    "ဒါ verdict မဟုတ်ဘူး၊ run က ဆက်သွားနေတယ်။", Color.Gray);
+
+            bool w1Exhausted = KernelExploit.GhostLockWriteFailed(sigSrc);
             if (w1Exhausted)
             {
                 if (profileRel != null)
@@ -1259,8 +1721,32 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                 return (false, -1);
             }
 
+            // A timeout kill can land in the middle of a GhostLock write. There is no verdict to read, so a
+            // same-boot retry would stack a second write on an unknown page state - stop and let the user
+            // check root, then reboot once before trying again.
+            if (runTimedOut && IsGhostLockExploit(ex))
+            {
+                Log("[!] GhostLock hit the " + (timeoutSec + runGraceSec) + "s hard timeout with no verdict - " +
+                    "the process was killed.", Color.OrangeRed);
+                Log("[i] A write may have been in flight. Do not retry on this boot:", Color.Orange);
+                Log("    1) check root: adb shell su -c id  (or /data/local/tmp/.ghostlock_ksu.log)", Color.Gray);
+                Log("    2) if root did not appear, reboot once and run again.", Color.Gray);
+                return (false, realSec);
+            }
+
             if (attempt == 0)
             {
+                // module live ဖြစ်နေပြီဆိုရင် root ရပြီး — reboot က temp root ကို ဖျက်မယ်၊ မ reboot ဘဲ ရပ်
+                if (await RootModuleLiveAsync())
+                {
+                    Log("[!] KernelSU module is live — reboot က temp root ကို ဖျက်ပစ်မယ်။ Auto-reboot မလုပ်တော့ဘူး.", Color.Orange);
+                    Log("[i] adb shell ဆီ su မရောက်ရင် KernelSU Manager → Settings → ADB Root ဖွင့်ပါ " +
+                        "(သို့) root လိုတဲ့ app ကို manager မှာ ခွင့်ပြုပါ။", Color.Orange);
+                    return (false, realSec);
+                }
+                if (KernelExploit.GhostLockHeapSprayFailed(sigSrc))
+                    Log("[i] Heap spray က futex collision မတွေ့ဘူး — heap layout က probabilistic မို့ reboot က " +
+                        "တကယ် ပြောင်းလဲနိုင်တယ်။ ဒါက profile verdict မဟုတ်ဘူး။", Color.Orange);
                 Log(burnt
                         ? "[i] Stack writer already used on this boot — same-boot retry would be refused by the exploit"
                         : "[i] Leak/pipe stage failed — probabilistic (flaky)",
@@ -1290,6 +1776,786 @@ Log("[!] Provision settings not applied — Android 11+ MIUI may need temp root 
                     : "[i] Hint: reboot ပြီး ထပ်စမ်းကြည့်ပါ — leak stage က တစ်ခါတလေ fail ဖြစ်တတ်တယ်",
                 Color.Orange);
             return (false, -1);
+        }
+
+        // ================= DFRoot / DirtyFrag — APK + UI automation =================
+        // DFRoot is not an ELF payload: the exploit needs the app UID, a selected manager that
+        // ships libksud.so, and its own UI run. Install the pinned APKs, pick the manager, tap
+        // Run twice, then prove root with the su probe. The APKs are verified by the SHA-256
+        // pinned in the manifest (they are installed, not pushed, so integrity.json does not
+        // cover them).
+        /// <summary>DFRoot က ksud ကို SU manager app ရဲ့ nativeLibraryDir/libksud.so ကနေ stage လုပ်တယ်။
+        /// ဒါကြောင့် install ထားတဲ့ manager တွေထဲက libksud.so ပါတာကို ရှာတယ် (KernelSU ကို ဦးစားပေး)။</summary>
+        private async Task<string> FindSuManagerPackageAsync()
+        {
+            string list = await ExecuteCommandQuickAsync("adb.exe", "shell pm list packages", 15000);
+            var installed = new List<string>();
+            foreach (string raw in (list ?? "").Replace("\r", "").Split('\n'))
+            {
+                string l = raw.Trim();
+                if (l.StartsWith("package:", StringComparison.Ordinal)) installed.Add(l.Substring(8).Trim());
+            }
+            string[] known = { "me.weishu.kernelsu", "com.dergoogler.mmrl", "com.topjohnwu.magisk", "me.bmax.apatch" };
+            var hits = new List<string>();
+            foreach (string want in known) if (installed.Contains(want)) hits.Add(want);
+            foreach (string p in installed)
+                if (!hits.Contains(p) &&
+                    (p.IndexOf("kernelsu", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     p.IndexOf("sukisu", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     p.IndexOf("bakasu", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     p.IndexOf("apatch", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     p.IndexOf("magisk", StringComparison.OrdinalIgnoreCase) >= 0))
+                    hits.Add(p);
+            foreach (string p in hits)
+            {
+                string pmPath = await ExecuteCommandQuickAsync("adb.exe", "shell pm path " + p, 8000);
+                int at = pmPath.IndexOf("package:", StringComparison.Ordinal);
+                if (at < 0) continue;
+                string apk = pmPath.Substring(at + 8).Split('\n')[0].Trim();
+                int slash = apk.LastIndexOf('/');
+                if (slash <= 0) continue;
+                string probe = await ExecuteCommandQuickAsync("adb.exe",
+                    "shell ls " + apk.Substring(0, slash) + "/lib/arm64/libksud.so 2>/dev/null", 8000);
+                if (probe.IndexOf("libksud.so", StringComparison.Ordinal) >= 0) return p;
+            }
+            return "";
+        }
+
+        /// <summary>Headless autorun: `am start -n &lt;Launch&gt; --es autorun 1 --es su_manager &lt;pkg&gt;`.
+        /// APK ကိုယ်တိုင် Run ကို ၂ ချက် နှိပ်သလို လုပ်တာမို့ INJECT_EVENTS မလိုဘူး။
+        /// Attempted=false = ဒီ APK က autorun မပံ့ပိုးဘူး (UI path ကို ဆက်သင့်တယ်)။</summary>
+        private async Task<(bool Attempted, bool Root, double Sec)> RunHeadlessAutorunAsync(
+            ExploitEntry ex, ApkUiSpec ui, string managerPkg)
+        {
+            var sw = Stopwatch.StartNew();
+            await ExecuteCommandQuickAsync("adb.exe", "shell am force-stop " + ui.Package, 8000);
+            await ExecuteCommandQuickAsync("adb.exe", "shell logcat -c", 8000);
+            Log("[*] Headless autorun: " + ui.Package + " · su_manager=" + managerPkg, Color.Cyan);
+            string started = await ExecuteCommandQuickAsync("adb.exe",
+                "shell am start -n " + ui.Launch + " --es autorun 1 --es su_manager " + managerPkg, 20000);
+            if (started.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Log("[i] am start: " + started.Replace("\r", "").Replace("\n", " ").Trim(), Color.Gray);
+                return (false, false, -1);
+            }
+
+            int timeoutSec = ex.TimeoutSec <= 0 ? 240 : ex.TimeoutSec;
+            DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSec);
+            string logText = "";
+            bool supported = false, failed = false;
+            int tick = 0;
+            while (DateTime.UtcNow < deadline && !tempRootAborted)
+            {
+                await Task.Delay(5000);
+                tick += 5;
+                logText = await AdbRunAsync("logcat -d -s dfroot", 20000);
+                if (!supported)
+                {
+                    if (logText.IndexOf("autorun=1", StringComparison.Ordinal) >= 0)
+                    {
+                        supported = true;
+                        Log("[OK] Headless autorun accepted — UI tap မလိုပါ။", Color.LightGreen);
+                    }
+                    else if (tick >= 15)
+                    {
+                        Log("[i] Install ထားတဲ့ " + (ui.Package ?? "APK") + " က autorun မပံ့ပိုးပါ — UI path ကို ပြောင်းမယ်။", Color.Orange);
+                        return (false, false, -1);
+                    }
+                    continue;
+                }
+                if (await RootModuleLiveAsync())
+                {
+                    sw.Stop();
+                    LogDfrootResult(logText, "rooted");
+                    string suId = await ProbeSuQuickAsync();
+                    if (suId.Contains("uid=0"))
+                    {
+                        Log("[OK] Temp root OK (headless) — " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s · " + suId, Color.LightGreen);
+                        suPathCache.Clear();
+                        return (true, true, sw.Elapsed.TotalSeconds);
+                    }
+                    RootProbeState hlState = await ProbeRootStateAsync();
+                    Log("[OK] Temp root IS active — " + (hlState.Verdict == RootVerdict.ModuleLoaded
+                        ? hlState.Summary : "kernelsu module is live"), Color.LightGreen);
+                    Log("[i] KernelSU Manager → Settings → ADB Root ဖွင့်ပြီး Detect ပြန်နှိပ်ပါ (Tool ကိုယ်တိုင် adb root လုပ်လို့ မရပါ)။", Color.Orange);
+                    Log("[i] Reboot မလုပ်ပါနဲ့ — temp root ပျက်သွားပါမယ်။", Color.Orange);
+                    return (true, false, -1);
+                }
+                if (logText.IndexOf("=== exploit failed:", StringComparison.Ordinal) >= 0)
+                {
+                    failed = true;
+                    break;
+                }
+                if (tick % 30 == 0)
+                    Log("[i] Headless run running... " + tick + "s / " + timeoutSec + "s", Color.Gray);
+            }
+            sw.Stop();
+            LogDfrootResult(logText, failed ? "failed" : "timeout");
+            if (!failed)
+            {
+                string suId2 = await ProbeSuQuickAsync();
+                if (suId2.Contains("uid=0"))
+                {
+                    Log("[OK] Temp root OK (headless) — " + suId2, Color.LightGreen);
+                    suPathCache.Clear();
+                    return (true, true, sw.Elapsed.TotalSeconds);
+                }
+            }
+            Log("[!] Headless autorun က temp root မရဘူး (" + (failed ? "exploit failed" : "timeout") + ").", Color.OrangeRed);
+            return (true, false, -1);
+        }
+
+        private async Task<(bool Root, double Sec)> TryApkUiExploitAsync(string exploitsRoot, ExploitEntry ex, DeviceFingerprint fp)
+        {
+            ApkUiSpec ui = ex.Ui ?? new ApkUiSpec();
+            if (ex.Packages is not { Length: > 0 } || string.IsNullOrWhiteSpace(ui.Launch) ||
+                string.IsNullOrWhiteSpace(ui.RunButtonId))
+            {
+                Log("[!] APK exploit entry needs Packages, Ui.Launch and Ui.RunButtonId.", Color.OrangeRed);
+                return (false, -1);
+            }
+
+            var installs = new List<(ExploitPackage Spec, string Local)>();
+            foreach (ExploitPackage pkg in ex.Packages)
+            {
+                try
+                {
+                    string local = KernelExploit.PackageFullPath(exploitsRoot, ex, pkg);
+                    installs.Add((pkg, local));
+                    Log("[OK] APK verified · " + Path.GetFileName(local) + " · " + pkg.Sha256.Substring(0, 12) + "…",
+                        Color.LightGreen);
+                }
+                catch (Exception exPkg)
+                {
+                    Log("[!] " + exPkg.Message, Color.OrangeRed);
+                    Log("[i] Expected at exploits\\" + (pkg.Path ?? "?"), Color.Gray);
+                    return (false, -1);
+                }
+            }
+
+            if (!await EnsureTempRootDeviceConnectedAsync())
+            {
+                Log("[!] Device not connected — APK exploit skipped.", Color.OrangeRed);
+                return (false, -1);
+            }
+            bool inputOk = await UiInputAllowedAsync();
+            bool manual = !inputOk;
+            if (manual)
+            {
+                Log("[i] Manual mode — tool က touch မထိုးပါ။ ဖုန်းပေါ်မှာ ပြသပေးတဲ့အတိုင်း " +
+                    "သင်ကိုယ်တိုင် tap လုပ်ပါ။", Color.Cyan);
+                Log("[i] ဖုန်း screen ကို unlock လုပ်ထားပြီး လက်ထဲမှာ ကိုင်ထားပါ။", Color.Gray);
+            }
+
+            if (manual)
+            {
+                foreach (var (spec, local) in installs)
+                {
+                    string label = string.IsNullOrWhiteSpace(spec.Package) ? Path.GetFileName(local) : spec.Package;
+                    bool present = !string.IsNullOrWhiteSpace(spec.Package) && await ApkInstalledAsync(spec.Package);
+                    if (present)
+                    {
+                        Log("[i] " + label + " already installed — skip.", Color.Gray);
+                        continue;
+                    }
+                    string remote = "/sdcard/Download/" + Path.GetFileName(local);
+                    Log("[*] Push " + Path.GetFileName(local) + " → " + remote + "...", Color.Cyan);
+                    await AdbRunAsync("push \"" + local + "\" \"" + remote + "\"", 180000);
+                    Log("[manual] ဖုန်းရဲ့ File Manager ကနေ " + remote + " ကို install လုပ်ပါ " +
+                        "(လိုရင် Install unknown apps ကို ခွင့်ပြုပါ)။", Color.Orange);
+                    if (string.IsNullOrWhiteSpace(spec.Package))
+                    {
+                        Log("[i] Package id unknown — push ပြီးပါပြီ၊ install လုပ်ပြီးမှ ဆက်ပါ။", Color.Gray);
+                        continue;
+                    }
+                    if (!await WaitForManualInstallAsync(spec.Package, label, 300)) return (false, -1);
+                }
+            }
+            else
+            {
+                foreach (var (spec, local) in installs)
+                {
+                    string label = string.IsNullOrWhiteSpace(spec.Package) ? Path.GetFileName(local) : spec.Package;
+                    bool present = !string.IsNullOrWhiteSpace(spec.Package) && await ApkInstalledAsync(spec.Package);
+                    Log("[*] Install " + Path.GetFileName(local) + " · " + label + (present ? " (already installed)" : "") + "...",
+                        Color.Cyan);
+                    // No -g: Android 16 shell lacks INSTALL_GRANT_RUNTIME_PERMISSIONS, and both
+                    // APKs declare no runtime permissions anyway.
+                    string insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
+                    bool insOk = insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (!insOk)
+                    {
+                        if (present && insOut.IndexOf("INSTALL_FAILED_UPDATE_INCOMPATIBLE", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            if (ui.Headless && !string.IsNullOrWhiteSpace(spec.Package))
+                            {
+                                // ကျွန်တော်တို့ရဲ့ headless build ကို လိုအပ်တယ် — signature မတူလို့ uninstall ပြီး အသစ်ပြန်တင်ရမယ်
+                                Log("[i] " + label + " installed က signature မတူလို့ replace လုပ်မယ် (uninstall → install).", Color.Orange);
+                                await AdbRunAsync("uninstall " + spec.Package, 60000);
+                                insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
+                                insOk = insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
+                                if (!insOk)
+                                {
+                                    Log("[!] Headless APK install failed: " + label, Color.OrangeRed);
+                                    foreach (string raw in (insOut ?? "").Replace("\r", "").Split('\n'))
+                                        if (raw.Trim().Length > 0) Log("    " + raw.Trim(), Color.OrangeRed);
+                                    return (false, -1);
+                                }
+                                Log("[OK] " + label + " replaced with the bundled headless build.", Color.LightGreen);
+                            }
+                            else
+                                Log("[i] Installed " + label + " has a different signature — keeping the installed copy.", Color.Orange);
+                        }
+                        else
+                        {
+                            Log("[!] Install failed: " + label, Color.OrangeRed);
+                            foreach (string raw in (insOut ?? "").Replace("\r", "").Split('\n'))
+                                if (raw.Trim().Length > 0) Log("    " + raw.Trim(), Color.OrangeRed);
+                            if (insOut.IndexOf("USER_RESTRICTED", StringComparison.OrdinalIgnoreCase) >= 0)
+                                Log("[i] MIUI/HyperOS blocks adb install — Developer options → 'Install via USB' " +
+                                    "(and 'USB debugging (Security settings)') ကို ဖွင့်ပြီး ထပ်လုပ်ပါ။", Color.Orange);
+                            else if (insOut.IndexOf("VERIFICATION", StringComparison.OrdinalIgnoreCase) >= 0)
+                                Log("[i] Install verification rejected the APK — allow USB installs for this PC, then retry.",
+                                    Color.Orange);
+                            return (false, -1);
+                        }
+                    }
+                }
+            }
+            foreach (var (spec, _) in installs)
+            {
+                if (string.IsNullOrWhiteSpace(spec.Package)) continue;
+                if (!await ApkInstalledAsync(spec.Package))
+                {
+                    Log("[!] " + spec.Package + " is not installed.", Color.OrangeRed);
+                    return (false, -1);
+                }
+            }
+
+            Log("[*] Launch " + ui.Launch + "...", Color.Cyan);
+            // Headless (autorun) လမ်း: APK ကိုယ်တိုင် Run ကို ၂ ချက် နှိပ်သလို လုပ်တာမို့ touch မလိုဘူး
+            if (ui.Headless)
+            {
+                string managerPkg = await FindSuManagerPackageAsync();
+                if (string.IsNullOrWhiteSpace(managerPkg))
+                    Log("[!] Headless: libksud ပါတဲ့ SU manager မတွေ့ပါ — UI path ကို ပြောင်းပါမယ်။", Color.Orange);
+                else
+                {
+                    (bool hAttempted, bool hRoot, double hSec) = await RunHeadlessAutorunAsync(ex, ui, managerPkg);
+                    if (hAttempted) return (hRoot, hSec);
+                }
+            }
+            await ExecuteCommandQuickAsync("adb.exe", "shell input keyevent KEYCODE_WAKEUP", 8000);
+            await ExecuteCommandQuickAsync("adb.exe", "shell wm dismiss-keyguard", 8000);
+            await ExecuteCommandQuickAsync("adb.exe", "shell svc power stayon usb", 8000);
+            if (!string.IsNullOrWhiteSpace(ui.Package))
+                await ExecuteCommandQuickAsync("adb.exe", "shell am force-stop " + ui.Package, 8000);
+            // logcat -c gives the run its own window; if it is refused the last "=== setup ==="
+            // inside the dump still marks where this run begins.
+            await ExecuteCommandQuickAsync("adb.exe", "shell logcat -c", 8000);
+            string startOut = await ExecuteCommandQuickAsync("adb.exe", "shell am start -W -n " + ui.Launch, 30000);
+            if (string.IsNullOrWhiteSpace(startOut) || startOut.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0)
+                Log("[i] am start: " + (startOut ?? "").Replace("\r", "").Replace("\n", " ").Trim(), Color.Gray);
+
+            XDocument doc = await WaitForUiAsync(d => UiFind(d, ui.RunButtonId, null) != null, 30);
+            if (doc == null || UiFind(doc, ui.RunButtonId, null) == null)
+            {
+                Log("[!] App screen did not come up (uiautomator dump empty).", Color.OrangeRed);
+                Log("[i] Unlock the phone and keep the screen on, then run again.", Color.Orange);
+                return (false, -1);
+            }
+
+            XElement sub = UiFind(doc, ui.SuManagerSubtitleId, null);
+            string subText = sub == null ? "" : UiText(sub);
+            bool needManager = string.IsNullOrWhiteSpace(subText) ||
+                               subText.IndexOf("Not selected", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                               (!string.IsNullOrWhiteSpace(ui.SuManagerLabel) &&
+                                subText.IndexOf(ui.SuManagerLabel, StringComparison.OrdinalIgnoreCase) < 0);
+            if (needManager)
+            {
+                if (manual)
+                {
+                    string want = string.IsNullOrWhiteSpace(ui.SuManagerLabel) ? "KernelSU" : ui.SuManagerLabel;
+                    Log("[manual] SU Manager row ကို tap → '" + want + "' ကို ရွေးပါ။", Color.Orange);
+                    Log("[i] App က permission တောင်းရင် 'Access list of installed apps' ကို Allow ပေးပါ။",
+                        Color.Gray);
+                    XDocument sel = await WaitForUiAsync(d =>
+                    {
+                        if (UiAnyText(d, "No app with libksud.so found")) return true;
+                        XElement s = UiFind(d, ui.SuManagerSubtitleId, null);
+                        string t = s == null ? "" : UiText(s);
+                        return !string.IsNullOrWhiteSpace(t) &&
+                               t.IndexOf("Not selected", StringComparison.OrdinalIgnoreCase) < 0 &&
+                               (string.IsNullOrWhiteSpace(ui.SuManagerLabel) ||
+                                t.IndexOf(ui.SuManagerLabel, StringComparison.OrdinalIgnoreCase) >= 0);
+                    }, 180);
+                    if (sel != null && UiAnyText(sel, "No app with libksud.so found"))
+                    {
+                        Log("[!] DFRoot က installed apps list ကို မမြင်ပါ — HyperOS privacy permission ပိတ်ထားတယ်။",
+                            Color.OrangeRed);
+                        Log("[i] Settings → Apps → DirtyFrag → Permissions → Other permissions → " +
+                            "\"Access list of installed apps\" → Always allow.", Color.Orange);
+                        return (false, -1);
+                    }
+                    XElement s2 = sel == null ? null : UiFind(sel, ui.SuManagerSubtitleId, null);
+                    subText = s2 == null ? "" : UiText(s2);
+                    if (string.IsNullOrWhiteSpace(subText) ||
+                        subText.IndexOf("Not selected", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        Log("[!] SU manager still not selected (" + subText + ").", Color.OrangeRed);
+                        return (false, -1);
+                    }
+                    doc = sel;
+                    Log("[OK] SU manager: " + subText, Color.LightGreen);
+                }
+                else
+                {
+                    Log("[*] Select SU manager: " + (string.IsNullOrWhiteSpace(ui.SuManagerLabel) ? "?" : ui.SuManagerLabel) + "...",
+                        Color.Cyan);
+                    XElement row = UiFind(doc, ui.SuManagerRowId, null);
+                    if (row == null || !await UiTapAsync(row))
+                    {
+                        Log("[!] SU Manager row not found on screen.", Color.OrangeRed);
+                        return (false, -1);
+                    }
+                    XDocument pop = await WaitForUiAsync(d => UiFindChoice(d, ui.SuManagerLabel) != null ||
+                                                              UiAnyText(d, "No app with libksud.so found"), 8);
+                    if (pop != null && UiAnyText(pop, "No app with libksud.so found"))
+                    {
+                        // HyperOS hides the package list from apps unless this MIUI privacy op is allowed;
+                        // DFRoot then sees zero candidates even though KernelSU's libksud.so exists.
+                        Log("[!] DFRoot က installed apps list ကို မမြင်ပါ — HyperOS privacy permission ပိတ်ထားတယ်။",
+                            Color.OrangeRed);
+                        Log("[i] Settings → Apps → DirtyFrag → Permissions → Other permissions → " +
+                            "\"Access list of installed apps\" → Always allow.", Color.Orange);
+                        Log("[i] ပြီးရင် Android Temp Root ကို ထပ်နှိပ်ပါ။", Color.Gray);
+                        return (false, -1);
+                    }
+                    XElement choice = pop == null ? null : UiFindChoice(pop, ui.SuManagerLabel);
+                    if (choice != null) await UiTapAsync(choice);
+                    else if (!await TapFirstSuManagerEntryAsync(row))
+                    {
+                        Log("[!] SU manager list did not appear.", Color.OrangeRed);
+                        return (false, -1);
+                    }
+                    await Task.Delay(1200);
+                    doc = await DumpUiAsync() ?? doc;
+                    sub = UiFind(doc, ui.SuManagerSubtitleId, null);
+                    subText = sub == null ? "" : UiText(sub);
+                    if (string.IsNullOrWhiteSpace(subText) ||
+                        subText.IndexOf("Not selected", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        Log("[!] SU manager still not selected (" + subText + ").", Color.OrangeRed);
+                        return (false, -1);
+                    }
+                    Log("[OK] SU manager: " + subText, Color.LightGreen);
+                }
+            }
+            else Log("[i] SU manager already selected: " + subText, Color.Gray);
+
+            var sw = Stopwatch.StartNew();
+            bool moduleSeen = false;
+            string successSpec = string.IsNullOrWhiteSpace(ui.SuccessText) ? "Rooted" : ui.SuccessText;
+            string failureSpec = string.IsNullOrWhiteSpace(ui.FailureText) ? "Reboot" : ui.FailureText;
+            bool Matches(string text, string spec) => !string.IsNullOrWhiteSpace(text) &&
+                spec.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(w => text.IndexOf(w.Trim(), StringComparison.OrdinalIgnoreCase) >= 0);
+            XElement run = UiFind(doc, ui.RunButtonId, null);
+            string runText = run == null ? "" : UiText(run);
+            string verdict;
+            if (Matches(runText, successSpec))
+            {
+                verdict = "rooted";
+                Log("[OK] App already reports Rooted — verifying with su...", Color.LightGreen);
+            }
+            else if (Matches(runText, failureSpec))
+            {
+                Log("[!] DFRoot: the hook already fired this boot without su (" + runText + ").", Color.OrangeRed);
+                Log("[i] /dev/df is one-shot — reboot the phone, then run once.", Color.Orange);
+                return (false, -1);
+            }
+            else
+            {
+                bool runEnabled = !string.Equals(run?.Attribute("enabled")?.Value, "false", StringComparison.OrdinalIgnoreCase);
+                if (!runEnabled)
+                {
+                    Log("[!] Run button is disabled (" + runText + ").", Color.OrangeRed);
+                    return (false, -1);
+                }
+                int timeoutSec = ex.TimeoutSec <= 0 ? 240 : ex.TimeoutSec;
+                verdict = "timeout";
+
+                if (manual)
+                {
+                    int grace = timeoutSec + 60;
+                    Log("[manual] Run exploit ကို tap ပါ — 'Are you sure?' ပေါ်လာရင် ထပ်နှိပ်ပါ။ " +
+                        "Tool က " + grace + "s စောင့်ပါမယ်။", Color.Orange);
+                    DateTime deadline = DateTime.UtcNow.AddSeconds(grace);
+                    int tick = 0;
+                    bool reminded = false;
+                    while (DateTime.UtcNow < deadline && !tempRootAborted)
+                    {
+                        await Task.Delay(5000);
+                        tick += 5;
+                        // module က live ဖြစ်တာနဲ့ ချက်ချင်း သိ — app UI text ကို စောင့်မနေဘူး
+                        if (!moduleSeen && await RootModuleLiveAsync())
+                        {
+                            moduleSeen = true;
+                            verdict = "rooted";
+                            Log("[OK] Temp root went live during the run — detected immediately (KernelSU module).", Color.LightGreen);
+                            break;
+                        }
+                        XDocument cur = await DumpUiAsync();
+                        if (cur == null) continue;      // exploit busy / UI thread blocked — try again
+                        XElement btn = UiFind(cur, ui.RunButtonId, null);
+                        string bt = btn == null ? "" : UiText(btn);
+                        if (Matches(bt, successSpec)) { verdict = "rooted"; break; }
+                        if (Matches(bt, failureSpec)) { verdict = "no-su"; break; }
+                        if (!reminded &&
+                            bt.IndexOf("Are you sure", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            Log("[manual] ဖုန်းပေါ်မှာ 'Are you sure?' ကို ထပ်နှိပ်ပါ။", Color.Orange);
+                            reminded = true;
+                        }
+                        if (bt.IndexOf("Run exploit", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            string.Equals(btn.Attribute("enabled")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+                        { verdict = "failed"; break; }
+                        if (tick % 30 == 0)
+                            Log("[i] DFRoot waiting for your taps / running... " + tick + "s / " + grace + "s",
+                                Color.Gray);
+                    }
+                }
+                else
+                {
+                    Log("[*] Tap Run exploit (two-step confirm)...", Color.Cyan);
+                    await UiTapAsync(run);
+                    XDocument armed = await WaitForUiAsync(d =>
+                    {
+                        XElement b = UiFind(d, ui.RunButtonId, null);
+                        return b != null && UiText(b).IndexOf("Are you sure", StringComparison.OrdinalIgnoreCase) >= 0;
+                    }, 8);
+                    XElement armBtn = armed == null ? null : UiFind(armed, ui.RunButtonId, null);
+                    if (armBtn == null ||
+                        UiText(armBtn).IndexOf("Are you sure", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        Log("[!] Run button did not arm — screen locked or tap missed.", Color.OrangeRed);
+                        return (false, -1);
+                    }
+                    await UiTapAsync(armBtn);
+
+                    DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSec);
+                    int tick = 0;
+                    while (DateTime.UtcNow < deadline && !tempRootAborted)
+                    {
+                        // 5s, not 1s: uiautomator dump costs CPU, and the hook it is watching is a race.
+                        await Task.Delay(5000);
+                        tick += 5;
+                        // module က live ဖြစ်တာနဲ့ ချက်ချင်း သိ — app UI text ကို စောင့်မနေဘူး
+                        if (!moduleSeen && await RootModuleLiveAsync())
+                        {
+                            moduleSeen = true;
+                            verdict = "rooted";
+                            Log("[OK] Temp root went live during the run — detected immediately (KernelSU module).", Color.LightGreen);
+                            break;
+                        }
+                        XDocument cur = await DumpUiAsync();
+                        if (cur == null) continue;      // exploit busy / UI thread blocked — try again
+                        XElement btn = UiFind(cur, ui.RunButtonId, null);
+                        string bt = btn == null ? "" : UiText(btn);
+                        if (Matches(bt, successSpec)) { verdict = "rooted"; break; }
+                        if (Matches(bt, failureSpec)) { verdict = "no-su"; break; }
+                        if (bt.IndexOf("Run exploit", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            string.Equals(btn.Attribute("enabled")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+                        { verdict = "failed"; break; }
+                        if (tick % 30 == 0)
+                            Log("[i] DFRoot running... " + tick + "s / " + timeoutSec + "s", Color.Gray);
+                    }
+                }
+            }
+
+            string runLog = await AdbRunAsync("logcat -d -s dfroot", 20000);
+            LogDfrootResult(runLog, verdict);
+
+            string suId = "";
+            // module တကယ္ live ျဖစ္ေနရင္ su ကို ၾကာၾကာ မေစာင့္ေတာ့ဘူး (jailbreak mode မွာ su မလာဘူး)
+            int suTries = moduleSeen ? 2 : 6;
+            for (int i = 0; i < suTries; i++)
+            {
+                suId = await ProbeSuAsync();
+                if (suId.Contains("uid=0")) break;
+                if (i == 0) await ExecuteCommandQuickAsync("adb.exe", "root", 10000);
+                if (i < suTries - 1) await Task.Delay(5000);
+            }
+            sw.Stop();
+            if (suId.Contains("uid=0"))
+            {
+                Log("[OK] DFRoot temp root OK — " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s · " + suId,
+                    Color.LightGreen);
+                suPathCache.Clear();
+                return (true, sw.Elapsed.TotalSeconds);
+            }
+            // KernelSU jailbreak/LKM mode: module က root ပေးနေပေမဲ့ adb shell ကို su မပေးဘူး —
+            // ဒါကို "exploit မအောင်" လို့ မဆုံးဖြတ်ရဘူး (reboot အကြံပြုရင် temp root ပျက်သွားမယ်)
+            RootProbeState afterRun = await ProbeRootStateAsync();
+            if (moduleSeen || afterRun.Verdict == RootVerdict.ModuleLoaded)
+            {
+                Log("[OK] Temp root IS active — " + (afterRun.Verdict == RootVerdict.ModuleLoaded
+                    ? afterRun.Summary
+                    : "kernelsu module was live during the run"), Color.LightGreen);
+                if (afterRun.Hint != null) Log("[i] " + afterRun.Hint, Color.Orange);
+                Log("[i] KernelSU Manager → Settings → ADB Root ဖွင့်ပြီး Detect ပြန်နှိပ်ပါ " +
+                    "(Tool ကိုယ်တိုင် adb root လုပ်လို့ မရပါ)။", Color.Orange);
+                Log("[i] Reboot မလုပ်ပါနဲ့ — temp root ပျက်သွားပါမယ်။", Color.Orange);
+                return (false, -1);   // root ရှိပေမဲ့ adb shell က မသုံးနိုင်သေး
+            }
+            Log("[!] DFRoot finished without uid=0 (" + verdict + ").", Color.OrangeRed);
+            if (runLog.IndexOf("DEVICE NOT VULNERABLE", StringComparison.OrdinalIgnoreCase) >= 0)
+                Log("[i] Kernel က DirtyFrag page-cache write ကို ငြင်းတယ် (patched) — " +
+                    "reboot လုပ်လည်း ထပ်မရပါ။ အခြား method လိုပါမယ်။", Color.Orange);
+            else
+                Log("[i] Reboot ပြီး တစ်ကြိမ်ပဲ ပြန်စမ်းပါ — /dev/df mutex က boot တစ်ခါ တစ်ချက်ပဲ။", Color.Orange);
+            return (false, -1);
+        }
+
+        /// <summary>DF Root က root ရတာနဲ့ ချက်ချင်းသိဖို့ — /proc/modules ပဲ ဖတ်တဲ့ ပေါ့ပါးတဲ့ စစ်ဆေးမှု။
+        /// su probe မလုပ်ဘူး (KernelSU prompt ကို ခဏခဏ မပေါ်စေရ)။
+        /// tri-state: true = module live · false = module တကယ် မရှိ · null = adb အဖြေမရ (unknown)။
+        /// module load ပြီးချိန် adbd ခဏ restart ဖြစ်ရင် `cat /proc/modules` က "" ပြန်တယ် — အဲဒါကို
+        /// "module ပျောက်ပြီ" လို့ မယူရဘူး (မှားတဲ့ "Temp root module is gone" log ရဲ့ အရင်း)။</summary>
+        private async Task<bool?> RootModuleProbeAsync()
+        {
+            string modules = await ExecuteCommandQuickAsync("adb.exe", "shell cat /proc/modules", 8000);
+            // device မရှိ/offline ချိန် adb က error text ပြန်တယ် — အဲဒါ output မဟုတ်
+            if (IsAdbNoiseAnswer(modules)) return null;
+            return RootProbe.RootModules(modules).Count > 0;
+        }
+
+        /// <summary>unknown (null) ကို false အနေနဲ့ ပြန်တယ် — flow ရဲ့ ယခင် အပြုအမူ မပြောင်း။
+        /// poll လို "state မပြောင်းရ" နေရာတွေက RootModuleProbeAsync ကို တိုက်ရိုက် သုံးရမယ်။</summary>
+        private async Task<bool> RootModuleLiveAsync()
+        {
+            bool? probe = await RootModuleProbeAsync();
+            return probe == true;
+        }
+
+        /// <summary>MIUI/HyperOS revokes INJECT_EVENTS from shell unless "USB debugging
+        /// (Security settings)" is on; without it every input tap fails with SecurityException.</summary>
+        private async Task<bool> UiInputAllowedAsync()
+        {
+            // input writes its SecurityException to stderr and exits non-zero — QuickAsync would
+            // return "" and look like a pass, so use AdbRunAsync (stdout+stderr on failure).
+            string probe = await AdbRunAsync("shell input keyevent 0", 10000);
+            if (probe.IndexOf("INJECT_EVENTS", StringComparison.OrdinalIgnoreCase) < 0 &&
+                probe.IndexOf("SecurityException", StringComparison.OrdinalIgnoreCase) < 0)
+                return true;
+            Log("[!] ADB input injection is blocked on this phone (INJECT_EVENTS).", Color.OrangeRed);
+            Log("[i] Developer options → 'USB debugging (Security settings)' / 'USB调试（安全设置）' " +
+                "ကို ဖွင့်ပါ (SIM ထည့်ပြီး Mi account ဝင်ရနိုင်)။", Color.Orange);
+            Log("[i] မဖွင့်နိုင်ရင် manual mode နဲ့ ဆက်ပါမယ် — APK install နဲ့ tap တွေကို " +
+                "ဖုန်းပေါ်မှာ သင်ကိုယ်တိုင် လုပ်ရပါမယ်။", Color.Gray);
+            return false;
+        }
+
+        /// <summary>Run adb with the selected serial and always return stdout/stderr, even on failure.</summary>
+        private async Task<string> AdbRunAsync(string arguments, int timeoutMs)
+        {
+            try
+            {
+                string bound = await BindDeviceArgumentsAsync("adb.exe", arguments);
+                return await ReviewSafety.RunQuickAsync(ResolveToolPath("adb.exe"), bound, timeoutMs, true, true);
+            }
+            catch (Exception ex)
+            {
+                Log("[!] adb " + arguments.Split(' ')[0] + ": " + ex.Message, Color.Orange);
+                return "";
+            }
+        }
+
+        private async Task<bool> ApkInstalledAsync(string package)
+        {
+            string p = (await ExecuteCommandQuickAsync("adb.exe", "shell pm path " + package, 10000)).Trim();
+            return p.IndexOf("package:", StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>Manual mode: the APK was pushed to /sdcard/Download and the user installs it
+        /// from the phone's file manager; poll until PackageManager reports it.</summary>
+        private async Task<bool> WaitForManualInstallAsync(string package, string label, int timeoutSec)
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSec);
+            int tick = 0;
+            while (DateTime.UtcNow < deadline && !tempRootAborted)
+            {
+                await Task.Delay(3000);
+                tick += 3;
+                if (await ApkInstalledAsync(package))
+                {
+                    Log("[OK] " + label + " installed.", Color.LightGreen);
+                    return true;
+                }
+                if (tick % 30 == 0)
+                    Log("[i] Waiting for manual install: " + label + " · " + tick + "s / " + timeoutSec + "s",
+                        Color.Gray);
+            }
+            Log("[!] " + label + " was not installed within " + timeoutSec + "s.", Color.OrangeRed);
+            return false;
+        }
+
+        private async Task<XDocument> DumpUiAsync()
+        {
+            const string remote = "/data/local/tmp/pmk_ui.xml";
+            await ExecuteCommandQuickAsync("adb.exe", "shell rm -f " + remote, 5000);
+            await ExecuteCommandQuickAsync("adb.exe", "shell uiautomator dump " + remote, 25000);
+            string xml = await ExecuteCommandQuickAsync("adb.exe", "shell cat " + remote, 12000);
+            if (string.IsNullOrWhiteSpace(xml) || xml.IndexOf("<hierarchy", StringComparison.Ordinal) < 0)
+                return null;
+            try { return XDocument.Parse(xml); }
+            catch { return null; }
+        }
+
+        private async Task<XDocument> WaitForUiAsync(Func<XDocument, bool> ready, int timeoutSec)
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSec);
+            XDocument last = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                last = await DumpUiAsync();
+                if (last != null && ready(last)) return last;
+                await Task.Delay(1000);
+            }
+            return last;
+        }
+
+        private static IEnumerable<XElement> UiNodes(XDocument doc) =>
+            doc.Descendants().Where(e => e.Name.LocalName == "node");
+
+        private static string UiText(XElement n) => n.Attribute("text")?.Value ?? "";
+
+        private static bool UiAnyText(XDocument doc, string needle) =>
+            UiNodes(doc).Any(n => UiText(n).IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0);
+
+        private static XElement UiFind(XDocument doc, string resId, string textContains)
+        {
+            foreach (XElement n in UiNodes(doc))
+            {
+                string rid = n.Attribute("resource-id")?.Value ?? "";
+                if (!string.IsNullOrWhiteSpace(resId))
+                {
+                    bool ridMatch = rid.Equals(resId, StringComparison.Ordinal) ||
+                                    rid.EndsWith(":id/" + resId, StringComparison.Ordinal) ||
+                                    rid.EndsWith("/" + resId, StringComparison.Ordinal);
+                    if (!ridMatch) continue;
+                }
+                if (!string.IsNullOrWhiteSpace(textContains) &&
+                    UiText(n).IndexOf(textContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                return n;
+            }
+            return null;
+        }
+
+        /// <summary>Popup rows are plain TextViews: label text exact, no resource id.</summary>
+        private static XElement UiFindChoice(XDocument doc, string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return null;
+            return UiNodes(doc).FirstOrDefault(n =>
+                string.IsNullOrWhiteSpace(n.Attribute("resource-id")?.Value) &&
+                string.Equals(UiText(n).Trim(), label, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static Rectangle? UiRect(XElement n)
+        {
+            string b = n.Attribute("bounds")?.Value ?? "";
+            Match m = Regex.Match(b, @"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]");
+            if (!m.Success) return null;
+            int x1 = int.Parse(m.Groups[1].Value), y1 = int.Parse(m.Groups[2].Value);
+            int x2 = int.Parse(m.Groups[3].Value), y2 = int.Parse(m.Groups[4].Value);
+            if (x2 <= x1 || y2 <= y1) return null;
+            return new Rectangle(x1, y1, x2 - x1, y2 - y1);
+        }
+
+        private async Task<bool> UiTapAsync(XElement n)
+        {
+            Rectangle? r = UiRect(n);
+            if (r == null) return false;
+            string outText = await ExecuteCommandQuickAsync("adb.exe",
+                "shell input tap " + (r.Value.Left + r.Value.Width / 2) + " " + (r.Value.Top + r.Value.Height / 2), 10000);
+            if (outText.IndexOf("INJECT_EVENTS", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Log("[!] Tap blocked — turn on 'USB debugging (Security settings)'.", Color.OrangeRed);
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>Fallback when a PopupWindow does not show up in the accessibility dump:
+        /// the list opens under the SU Manager card, first row 6dp padding + 28dp half-row down.</summary>
+        private async Task<bool> TapFirstSuManagerEntryAsync(XElement row)
+        {
+            Rectangle? r = UiRect(row);
+            if (r == null) return false;
+            string densityOut = await ExecuteCommandQuickAsync("adb.exe", "shell wm density", 8000);
+            Match dm = Regex.Match(densityOut, @"(\d+)");
+            float dp = (dm.Success ? int.Parse(dm.Groups[1].Value) : 420) / 160f;
+            string sizeOut = await ExecuteCommandQuickAsync("adb.exe", "shell wm size", 8000);
+            Match sm = Regex.Match(sizeOut, @"(\d+)x(\d+)");
+            int x = sm.Success ? int.Parse(sm.Groups[1].Value) / 2 : r.Value.Left + r.Value.Width / 2;
+            int y = r.Value.Bottom + (int)(10 * dp) + (int)(28 * dp);
+            await ExecuteCommandQuickAsync("adb.exe", "shell input tap " + x + " " + y, 8000);
+            return true;
+        }
+
+        /// <summary>Print this run's DFRoot logcat block (setup → cleanup) with failure reason.</summary>
+        private void LogDfrootResult(string runLog, string verdict)
+        {
+            string[] lines = (runLog ?? "").Replace("\r", "").Split('\n');
+            int start = -1;
+            for (int i = lines.Length - 1; i >= 0; i--)
+                if (lines[i].IndexOf("=== setup ===", StringComparison.Ordinal) >= 0) { start = i; break; }
+            string failReason = "";
+            int shown = 0;
+            bool headerShown = false;
+            for (int i = start >= 0 ? start : 0; i < lines.Length && shown < 60; i++)
+            {
+                string t = lines[i].TrimEnd();
+                if (t.Length == 0) continue;
+                int tagAt = t.IndexOf(" dfroot ", StringComparison.Ordinal);
+                if (tagAt >= 0)
+                {
+                    int colon = t.IndexOf(':', tagAt + 8);
+                    t = colon >= 0 ? t.Substring(colon + 1).Trim() : t.Substring(tagAt + 8).Trim();
+                }
+                if (t.Length == 0) continue;
+                const string failMark = "=== exploit failed: ";
+                if (t.IndexOf(failMark, StringComparison.Ordinal) >= 0)
+                    failReason = t.Substring(t.IndexOf(failMark, StringComparison.Ordinal) + failMark.Length)
+                        .Trim().TrimEnd('=').Trim();
+                bool bad = t.IndexOf("ERROR - ", StringComparison.Ordinal) >= 0 ||
+                           t.IndexOf("=== exploit failed", StringComparison.Ordinal) >= 0 ||
+                           t.IndexOf("DEVICE NOT VULNERABLE", StringComparison.Ordinal) >= 0;
+                bool good = t.IndexOf("=== setup ===", StringComparison.Ordinal) >= 0 ||
+                            t.IndexOf("=== exploit", StringComparison.Ordinal) >= 0 ||
+                            t.IndexOf("=== init", StringComparison.Ordinal) >= 0 ||
+                            t.IndexOf("=== cleanup ===", StringComparison.Ordinal) >= 0 ||
+                            t.IndexOf("ksud start: SUCCESS", StringComparison.Ordinal) >= 0 ||
+                            t.IndexOf("EXPLOIT SUCCESS", StringComparison.Ordinal) >= 0;
+                bool detail = t.IndexOf("ksud:", StringComparison.Ordinal) >= 0 ||
+                              t.IndexOf("bootstrap:", StringComparison.Ordinal) >= 0 ||
+                              t.IndexOf("kernel module:", StringComparison.Ordinal) >= 0 ||
+                              t.IndexOf("libc++:", StringComparison.Ordinal) >= 0;
+                if (!bad && !good && !detail) continue;
+                if (!headerShown)
+                {
+                    Log("[i] DFRoot log:", Color.Gray);
+                    headerShown = true;
+                }
+                Log("   │ " + t, bad ? Color.OrangeRed : good ? Color.LightGreen : Color.Gray);
+                shown++;
+            }
+            if (failReason.Length > 0)
+                Log("[!] DFRoot: " + failReason, Color.OrangeRed);
+            else if (verdict == "no-su")
+                Log("[!] DFRoot: the hook fired but no su appeared — reboot, then run once.", Color.OrangeRed);
+            else if (verdict == "timeout")
+                Log("[!] DFRoot did not report a result within the timeout.", Color.OrangeRed);
         }
 
         // ================= HUAWEI DRIVER PACK (OPEN HUAWEI 2018) =================
