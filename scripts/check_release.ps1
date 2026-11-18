@@ -17,7 +17,9 @@ function Invoke-CheckedDotnet([string[]]$Arguments) {
 }
 
 Invoke-CheckedDotnet @('build', $project, '--no-restore', '-c', 'Release', '-v', 'quiet')
-Invoke-CheckedDotnet @('build', (Join-Path $root 'PMKLicenseServer/PMKLicenseServer.csproj'), '--no-restore', '-c', 'Release', '-v', 'quiet')
+# The running license server locks bin/Release, so compile the server to a throwaway
+# folder — the gate still checks the source, the app copies the exe from its own build.
+Invoke-CheckedDotnet @('build', (Join-Path $root 'PMKLicenseServer/PMKLicenseServer.csproj'), '--no-restore', '-c', 'Release', '-v', 'quiet', '-o', (Join-Path $output 'server-build-check'))
 Invoke-CheckedDotnet @('build', (Join-Path $root 'PMKLicenseAdmin/PMKLicenseAdmin.csproj'), '--no-restore', '-c', 'Release', '-v', 'quiet')
 Invoke-CheckedDotnet @('run', '--project', (Join-Path $root 'tests/Regression/Regression.csproj'), '--no-restore')
 & (Join-Path $root 'tests/verify-loader-package.ps1')
