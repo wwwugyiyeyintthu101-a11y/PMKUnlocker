@@ -2,8 +2,8 @@
   "schema": 1,
   "bundledInventory": {
     "path": "PMKUnlocker/bundled-tools/integrity.json",
-    "sha256": "ec3d8f8f44d5d16c6a234af39eda7b3d426622763468a11789768788ac1890b3",
-    "entries": 1070
+    "sha256": "f0a5bc6529a3fceba3fda84806898e1fe4cad9011b204fa8df6ddfdacc26dad8",
+    "entries": 1165
   },
   "libraries": [
     {

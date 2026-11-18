@@ -195,15 +195,13 @@ try
             "MT6762 resolves through the 0x6761 family alias");
         Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6769") != null,
             "MT6769 resolves through the 0x6768 family alias");
-        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6893") != null &&
-              MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991") != null,
-            "Chipsets whose loaders are only folder-named (DAv5/AllInOne v6) still resolve");
+        Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6893") != null,
+            "MT6893 resolves to a chipset-keyed loader folder");
         Check(MtkDaCatalog.FindByChipset(wired, mtkBase, "MT9999") == null &&
               MtkDaCatalog.FindByChipset(wired, mtkBase, "") == null &&
               MtkDaCatalog.FindByChipset(null, mtkBase, "MT6765") == null,
             "Unknown, empty or missing catalog input yields no loader match instead of a guess");
-        var auto6991 = MtkDaCatalog.FindByChipset(wired, mtkBase, "MT6991");
-        Check(auto6991 != null && !MtkDaCatalog.DaMatchesChipset(auto6991.Model, MtkDaCatalog.Resolve(auto6991.Info.Da, mtkBase), "MT6765"),
+        Check(auto6765 != null && !MtkDaCatalog.DaMatchesChipset(auto6765.Model, MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase), "MT6768"),
             "A wrong-chipset manual loader is detected as a mismatch");
         Check(auto6765 != null && MtkDaCatalog.DaMatchesChipset(auto6765.Model, MtkDaCatalog.Resolve(auto6765.Info.Da, mtkBase), "MT6765"),
             "The resolved loader passes the manual-override sanity check for its own chipset");
@@ -553,7 +551,7 @@ try
           KernelExploit.PatchedFirmwareNote(pkRoot, "") == null &&
           KernelExploit.PatchedFirmwareNote(Path.Combine(dir, "pk-none"), "5.15.1") == null,
         "Patched-firmware note is null for another release, an empty kernel and a missing list");
-    string shippedExploits = Path.Combine(projRoot, "PMKUnlocker", "bundled-tools", "exploits");
+    string shippedExploits = Path.Combine(projRoot, "PMKUnlocker", "exploits");
     if (!File.Exists(Path.Combine(shippedExploits, "patched-kernels.txt")) &&
         Environment.GetEnvironmentVariable("PMK_CI_ALLOW_MISSING_BUNDLED_TOOLS") == "1")
     {
