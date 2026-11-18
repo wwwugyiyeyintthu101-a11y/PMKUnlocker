@@ -52,15 +52,18 @@ internal static class UpdateChecker
         try
         {
             onStatus?.Invoke(GatePhase.Checking, "Checking for updates...");
-            info = await AwaitCheckForGateAsync(25000);
+            info = await AwaitCheckForGateAsync(35000);
         }
         catch (Exception ex)
         {
             // offline / GitHub timeout — update check မအောင်လို့ tool ကို မပိတ်တော့
             // (customer network မကောင်းရင် အသုံးမပြုနိုင်တာ ကို ရှောင်)
             onStatus?.Invoke(GatePhase.CheckFailed, "Update check failed (offline?) — continuing");
+            string reason = ex is TaskCanceledException || ex is TimeoutException
+                ? "The update server did not answer in time (offline, blocked or very slow network)."
+                : ex.Message;
             Ask(owner,
-                "Update check failed:\n" + ex.Message + "\n\nContinuing without update verification.",
+                "Update check failed:\n" + reason + "\n\nContinuing without update verification.",
                 "Update check", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return true;
         }
@@ -146,9 +149,10 @@ internal static class UpdateChecker
     {
         string repo = Repo;
 
-        // Manifest is a few hundred bytes; a short cap keeps an unreachable GitHub from
-        // stalling the login gate (worst case 3 x 5 s + 2 x 1.5 s < the 25 s gate wait).
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        // Manifest is a few hundred bytes. Measured on this shop network: the first HTTPS
+        // handshake to github.com takes ~11 s in .NET (curl 1.7 s), so a 5 s cap always
+        // failed. Two 15 s attempts + one 1.5 s pause stays under the 35 s gate wait.
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         string json = "";
         for (int attempt = 1; ; attempt++)
         {
@@ -157,10 +161,10 @@ internal static class UpdateChecker
                 json = await http.GetStringAsync(ManifestUrl(repo), ct);
                 break;
             }
-            catch (Exception ex) when (attempt < 3 &&
+            catch (Exception ex) when (attempt < 2 &&
                 (ex is HttpRequestException || ex is TaskCanceledException))
             {
-                // transient GitHub hiccup (release upload ပြီးချင်း 500 / offline blip) — retry 2 ကြိမ်
+                // transient GitHub hiccup (release upload ပြီးချင်း 500 / offline blip) — retry once
                 await Task.Delay(1500, ct);
             }
         }
