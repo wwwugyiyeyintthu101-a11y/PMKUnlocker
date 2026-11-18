@@ -155,8 +155,11 @@ internal static class ShopServices
     internal static string FindTool(string root, string name)
     {
         var tools = LoadTools();
-        if (tools.TryGetValue(name, out string? configured) && File.Exists(configured))
+        if (tools.TryGetValue(name, out string? configured) && File.Exists(configured) &&
+            ConfiguredToolProblem(name, configured) == null)
             return VerifyConfiguredTool(name, configured);
+        // A stale tools.json entry (another build's folder) is never executed — fall through
+        // to the bundled copy, which is hash-checked.
         foreach (string folder in new[] { "", "tools", "samsung", "spd", "python", "mtk", "edl" })
         {
             string candidate = Path.Combine(root, folder, name);
