@@ -84,3 +84,39 @@ begin
             + #13#10#13#10 + 'Continue the install anyway?', mbConfirmation, MB_YESNO) = IDNO then
     Result := False;
 end;
+
+// Two helpers outlive the window they belong to: the adb server (started by the app, never stopped) and the
+// hidden licence server. A running .exe cannot be replaced - Windows answers "DeleteFile failed; code 5;
+// Access is denied" - and the upgrade then stops half-done. adb is asked to shut down through its own client
+// (a daemon shutdown, not a device operation) and the licence server is a local HTTP process with no flash to
+// interrupt. PMKUnlocker.exe itself is deliberately NOT killed here: Inno asks the operator to close it, and a
+// flash in progress must never be terminated by an installer.
+procedure StopBackgroundHelpers();
+var
+  ResultCode: Integer;
+begin
+  if FileExists(ExpandConstant('{app}\adb.exe')) then
+    Exec(ExpandConstant('{app}\adb.exe'), 'kill-server', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM PMKLicenseServer.exe', '', SW_HIDE,
+       ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    StopBackgroundHelpers();
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  // Same reason on the way out: the licence server runs from {app}\server and keeps its files open.
+  if CurUninstallStep = usUninstall then
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM PMKLicenseServer.exe', '', SW_HIDE,
+         ewWaitUntilTerminated, ResultCode);
+    Sleep(500);
+  end;
+end;
