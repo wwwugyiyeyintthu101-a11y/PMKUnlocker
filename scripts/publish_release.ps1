@@ -53,7 +53,8 @@ if (!$commit) { throw 'Cannot read the current commit; run this inside the repos
 $tagCommit = (& git -C $root rev-list -n 1 $Tag 2>$null)
 if (!$tagCommit) { throw "Tag $Tag does not exist locally. Create it on the published commit first." }
 if ($tagCommit.Trim() -ne $commit.Trim()) {
-    Write-Output "WARNING: tag $Tag is at $($tagCommit.Trim()), HEAD is at $($commit.Trim()). The release will publish the tag as-is."
+    Write-Output "NOTE: tag $Tag is at $($tagCommit.Trim()), HEAD is at $($commit.Trim()). The release publishes the tag," 
+    Write-Output '      so a delta of scripts/docs is harmless; if compiled code moved, rebuild, re-tag, then publish.'
 }
 
 $assetBytes = (Get-Item -LiteralPath $installerPath).Length
