@@ -22,6 +22,39 @@ approved tool inventory when cloning; do not replace missing tools with an empty
 manifest. The per-process PowerShell execution setting in the build does not
 change machine-wide execution policy.
 
+## Clean Windows install test
+
+`scripts/check_release.ps1` proves the package is complete. It cannot prove the package runs on a machine that
+has never built it, which is the only machine a shop actually uses. Run this once per release on a Windows VM
+(Hyper-V or VMware, no dev tools, snapshot before starting), and record the result in `release-check.json` by
+flipping `cleanWindowsInstallTested` — never claim it from a green build.
+
+```
+□ snapshot a clean Windows 11 VM (no .NET, no drivers, no PMK folders)
+□ run Setup.exe as a normal user
+     → the .NET 8 Desktop (x86) message appears and setup stops (proves the check is real)
+□ install .NET 8 Desktop x86, run Setup.exe again → install completes, shortcut created
+□ start PMKUnlocker.exe → one UAC prompt, then the login screen (no crash, no silent exit)
+□ %LOCALAPPDATA%\PMKMobileTool is created; pmk_startup.log reaches "login UI tree built"
+□ sign in against the real server (local or HTTPS) — and once with the server stopped, to see the error it shows
+□ plug an ADB phone → adb.exe resolves from the package (Setup panel lists it as found)
+□ plug an MTK phone in BROM → the COM port appears (this is where a missing Preloader/VCOM driver shows up)
+□ NATIVE tab: present only when mtk\boot-profiles was copied in; absent and quiet when it was not
+□ QC tab with no edl.py/python: every button fails with a sentence, never a crash
+□ SPD tab with no spd_dump/unpac: the tab says what to put in the tool folder
+□ close the app → the hidden license server keeps running; reopen → no second server, no port error
+□ uninstall → %LOCALAPPDATA%\Programs\PMKMobileTool is gone; %LOCALAPPDATA%\PMKMobileTool (data) is kept
+□ reinstall over the top → settings and login survive
+```
+
+Two prerequisites that are deliberately *not* bundled, and therefore belong in this test rather than in the
+installer: the MediaTek Preloader/VCOM driver and the Qualcomm QDLoader 9008 driver (`scripts/mtk_driver_report.ps1`
+reports the current state), and the optional Python/`edl.py` and Unisoc `spd_dump`/`unpac` engines.
+
+On the packaged folder itself, `PMKUnlocker.exe --self-check` re-hashes every packed file, resolves each
+required tool, parses the catalogs and audits any installed recipe — no phone, no window, exit 0 or 1. The app
+manifest asks for administrator, so run it from an elevated shell (a non-elevated attempt is a SKIP).
+
 ## CI
 
 `.github/workflows/ci.yml` restores everything, builds the license server and admin,

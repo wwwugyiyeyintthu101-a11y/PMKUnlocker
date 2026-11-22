@@ -57,6 +57,9 @@
   <ItemGroup>
     <Content Include="..\SHOP_SETUP.md" Link="SHOP_SETUP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\LICENSE_SERVER_SETUP.md" Link="LICENSE_SERVER_SETUP.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- What is in the package and what each third-party licence says: it ships beside the exe, and
+         check_release.ps1 refuses a package that lost it. -->
+    <Content Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\REPAIR_NOTES_2026-10-11.md" Link="REPAIR_NOTES_2026-10-11.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Remove="bundled-tools\**\*" />
     <Content Include="bundled-tools\**\*">

@@ -30,7 +30,8 @@ $required = @(
     'PMKUnlocker.exe', 'PMKUnlocker.dll', 'PMKUnlocker.deps.json', 'PMKUnlocker.runtimeconfig.json',
     'pmk_devices.json', 'pmk_qc_loaders.json', 'pmk_codenames.json', 'adb.exe', 'fastboot.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll',
     'fh_loader.exe', 'QSaharaServer.exe', 'samsung/heimdall.exe', 'samsung/libusb-1.0.dll',
-    'libusb-1.0.dll', 'Potato.Fastboot.dll', 'Potato.ImageFlasher.dll', 'LibUsbDotNet.LibUsbDotNet.dll', 'System.IO.Ports.dll'
+    'libusb-1.0.dll', 'Potato.Fastboot.dll', 'Potato.ImageFlasher.dll', 'LibUsbDotNet.LibUsbDotNet.dll', 'System.IO.Ports.dll',
+    'THIRD_PARTY_NOTICES.md'
 )
 $missingFiles = @()
 foreach ($relative in $required) {
