@@ -11,9 +11,9 @@
     <!-- Platform=x86 ဖြစ်ပေမဲ့ output ကို bin\Debug\net8.0-windows မှာ တစ်သမတ်တည်း ထားမယ်
          (CI, BUILDING.md နဲ့ tools က ဒီ path ကို မှီခိုထားတယ်) -->
     <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
-    <Version>7.3.6</Version>
-    <FileVersion>7.3.6.0</FileVersion>
-    <InformationalVersion>7.3.6</InformationalVersion>
+    <Version>7.3.7</Version>
+    <FileVersion>7.3.7.0</FileVersion>
+    <InformationalVersion>7.3.7</InformationalVersion>
     <Product>PMK Mobile Tool</Product>
     <AssemblyTitle>PMK Mobile Tool</AssemblyTitle>
     <ApplicationIcon>pmk.ico</ApplicationIcon>

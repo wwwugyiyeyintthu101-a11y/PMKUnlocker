@@ -35,26 +35,52 @@ Name: "{group}\PMK Mobile Tool"; Filename: "{app}\PMKUnlocker.exe"; WorkingDir: 
 Name: "{autodesktop}\PMK Mobile Tool"; Filename: "{app}\PMKUnlocker.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Code]
-function InitializeSetup(): Boolean;
+// The app is x86, so it needs the 32-bit Desktop runtime - the x64 one cannot run it. That runtime is not
+// always under Program Files (x86): a per-user install (the dotnet-install script, winget, an SDK laid out
+// per user) puts it under %LOCALAPPDATA%\Microsoft, and a machine can run the app only because DOTNET_ROOT(x86)
+// points there. Probing one folder made a working machine look broken, so every place the host will look is
+// probed, and a miss asks instead of refusing: the operator knows their machine.
+function RuntimeInRoot(Root: String): Boolean;
 var
-  RuntimeRoot: String;
+  Base: String;
   Found: TFindRec;
-  HasRuntime: Boolean;
 begin
-  RuntimeRoot := ExpandConstant('{commonpf32}\dotnet\shared\Microsoft.WindowsDesktop.App\8.*');
-  HasRuntime := False;
-  if FindFirst(RuntimeRoot, Found) then
+  Result := False;
+  if Root = '' then Exit;
+  Base := AddBackslash(Root) + 'shared\Microsoft.WindowsDesktop.App';
+  if not DirExists(Base) then Exit;
+  if FindFirst(Base + '\8.*', Found) then
   begin
     try
       repeat
         if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
-          HasRuntime := FileExists(ExpandConstant('{commonpf32}\dotnet\shared\Microsoft.WindowsDesktop.App\') + Found.Name + '\System.Windows.Forms.dll');
-      until HasRuntime or not FindNext(Found);
+          if FileExists(Base + '\' + Found.Name + '\System.Windows.Forms.dll') then
+            Result := True;
+      until Result or not FindNext(Found);
     finally
       FindClose(Found);
     end;
   end;
-  Result := HasRuntime;
-  if not Result then
-    MsgBox('Install Microsoft .NET 8 Desktop Runtime (x86) first, then run this installer again. The x64 runtime alone cannot run this app.', mbError, MB_OK);
+end;
+
+function HasDesktopRuntime(): Boolean;
+begin
+  Result :=
+    RuntimeInRoot(ExpandConstant('{commonpf32}\dotnet')) or
+    RuntimeInRoot(ExpandConstant('{localappdata}\Microsoft\dotnet')) or
+    RuntimeInRoot(ExpandConstant('{localappdata}\Microsoft\dotnet-x86')) or
+    RuntimeInRoot(GetEnv('DOTNET_ROOT(x86)')) or
+    RuntimeInRoot(GetEnv('DOTNET_ROOT'));
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+  if HasDesktopRuntime() then Exit;
+  if MsgBox('PMK Mobile Tool needs the 32-bit (x86) .NET 8 Desktop Runtime, and it was not found in the usual'
+            + #13#10 + 'places. The x64 runtime alone cannot run this app.'
+            + #13#10#13#10 + 'Download (Desktop Runtime, x86):'
+            + #13#10 + 'https://dotnet.microsoft.com/download/dotnet/8.0/runtime/desktop/x86'
+            + #13#10#13#10 + 'Continue the install anyway?', mbConfirmation, MB_YESNO) = IDNO then
+    Result := False;
 end;
