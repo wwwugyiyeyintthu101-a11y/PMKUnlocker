@@ -5667,6 +5667,44 @@ try
           !SpdLoaderPair.SameFolder("fdl1.bin", ""),
         "SPD LOADER PAIR: the mixed-source warning fires only when the two halves really live in different folders");
 
+    // ── Temp root APK install (A8): the verifier restore decision, its value parse and the staging path. ──
+    // The phone-facing call is untestable without a device; these are the parts that decide what it sends, and
+    // the two ways the restore went wrong before it was pinned here: writing the string "null" over a key that
+    // was never set, and echoing a value the ROM handed back straight into a shell command.
+    Check(ApkInstallPolicy.ParseSettingValue("0\r\n") == "0" &&
+          ApkInstallPolicy.ParseSettingValue("\r\n1\r\n\r\n") == "1" &&
+          ApkInstallPolicy.ParseSettingValue("  en-US  ") == "en-US",
+        "APK INSTALL: a settings answer keeps its value and loses the CRLF, the blank lines and the padding");
+    Check(ApkInstallPolicy.ParseSettingValue("null") == "" &&
+          ApkInstallPolicy.ParseSettingValue("NULL\r\n") == "" &&
+          ApkInstallPolicy.ParseSettingValue("") == "" &&
+          ApkInstallPolicy.ParseSettingValue(null) == "",
+        "APK INSTALL: the shell's 'null' means the key was never set, so the value to restore is empty, not the word");
+    Check(ApkInstallPolicy.ParseSettingValue("daemon started\r\n1\r\n") == "1",
+        "APK INSTALL: a banner line ahead of the answer is not mistaken for the value (the last non-empty line wins)");
+    Check(ApkInstallPolicy.RestoreCommand("verifier_verify_adb_installs", "1") ==
+          "shell settings put global verifier_verify_adb_installs 1" &&
+          ApkInstallPolicy.RestoreCommand("verifier_verify_adb_installs", "") ==
+          "shell settings delete global verifier_verify_adb_installs",
+        "APK INSTALL: restore writes the value the phone had, and deletes a key that was never set");
+    Check(ApkInstallPolicy.RestoreCommand("package_verifier_enable", "0; rm -rf /sdcard") ==
+          "shell settings delete global package_verifier_enable" &&
+          !ApkInstallPolicy.IsRestorableValue("0; reboot") &&
+          !ApkInstallPolicy.IsRestorableValue("0 1") &&
+          !ApkInstallPolicy.IsRestorableValue(new string('1', 65)) &&
+          ApkInstallPolicy.IsRestorableValue("1") &&
+          ApkInstallPolicy.IsRestorableValue("en-US"),
+        "APK INSTALL: a value carrying shell syntax is never echoed back — the key falls to its platform default");
+    Check(ApkInstallPolicy.RemoteStagingPath(@"C:\work\DirtyFrag v1.18.apk") ==
+          "/data/local/tmp/pmk_DirtyFrag v1.18.apk" &&
+          ApkInstallPolicy.RemoteStagingPath("KernelSU_v3.3.1.apk") == "/data/local/tmp/pmk_KernelSU_v3.3.1.apk" &&
+          ApkInstallPolicy.RemoteStagingPath(null) == "/data/local/tmp/pmk_",
+        "APK INSTALL: the push target is the file name under /data/local/tmp, never the host path");
+    Check(ApkInstallPolicy.VerifierKeys.Length == 2 &&
+          ApkInstallPolicy.VerifierKeys.Contains("verifier_verify_adb_installs") &&
+          ApkInstallPolicy.VerifierKeys.Contains("package_verifier_enable"),
+        "APK INSTALL: both verifier keys are turned off for the install, so the phone is put back as a pair");
+
     Console.WriteLine($"{passed} regression checks passed.");
     if (skipped > 0) Console.WriteLine($"{skipped} checks skipped (bundled tools not in this checkout).");
 

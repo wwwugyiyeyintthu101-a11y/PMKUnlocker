@@ -100,7 +100,7 @@ namespace PMKUnlocker
         private BootLedger bootLedger = new BootLedger();
         private bool bootLedgerLoaded = false;
         // Partition list က MTK နဲ့ Qualcomm နှစ်ခုလုံးအတွက် ပြတယ် — လက်ရှိ tab ပေါ် မူတည်ပြီး
-        // မှန်တဲ့ tool ကို ရွေးတယ် (MediaTek → mtk.exe / Qualcomm → edl.py)
+        // မှန်တဲ့ tool ကို ရွေးတယ် (MediaTek → mtk.exe / Qualcomm → native firehose)
         private bool IsQualcommTab()
         {
             return (tabControl.SelectedTab == tabQc);

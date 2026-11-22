@@ -141,7 +141,7 @@ namespace PMKUnlocker
         private bool lightTheme = false;
         private readonly HashSet<string> warnedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Qualcomm (EDL 9008) Controls — edl.py (bkerler EDL) ကို သုံးတယ်
+        // Qualcomm (EDL 9008) Controls — the tool speaks Sahara/firehose itself (no python, no edl.py)
         private Button btnQcReadInfo;
         private Button btnQcSaveGpt;
         private Button btnQcFrpRemove;
@@ -298,16 +298,10 @@ namespace PMKUnlocker
         // parser ကို ဘယ် task ထဲမှာ run ဖြစ်နေလဲ သိအောင် — QC/MTK log wording ခွဲသုံးဖို့
         private string currentTaskTitle = "";
 
-        // MTK/QC op ပြီးရင် Auto reboot checkbox ပေါ်မူတည်ပြီး ဖုန်းကို reboot ပြန်ပို့တယ်
-        // (BROM/EDL mode ကနေ Android ပြန်ဝင်အောင်)။
-        private async Task MaybeAutoRebootAsync(string platform, string arguments, string serial)
-        {
-            if (stopRequested) return;
-            bool ok = await ExecuteCommandCleanAsync("python", arguments, "Auto Reboot (" + platform + ")", quiet: true, timeoutSec: 180);
-            if (ok && !stopRequested) _ = WaitAndroidAfterRebootAsync();
-        }
-        // Reboot ပြီးရင် device ပြန် boot လာ/ADB ပြန်တက်လာမလား စောင့်ပြီး log ပြတယ် —
-        // (UI မ block — devicePollTimer က header label ကို ဆက် update နေမယ်)
+        // QC op ပြီးရင် Auto reboot checkbox ပေါ်မူတည်ပြီး ဖုန်းကို reboot ပြန်ပို့တယ်
+        // (EDL mode ကနေ Android ပြန်ဝင်အောင်)။ လမ်းကြောင်းက firehose reset (fh_loader) တစ်ခုတည်း —
+        // အရင် `python edl.py reset` လမ်းကို ဖြုတ်ထားတယ်: checkbox တစ်ခုအတွက် python install ကို
+        // မဖြစ်မနိ လိုအပ်နေစေလို့။
         private async Task WaitAndroidAfterRebootAsync()
         {
             try
@@ -354,7 +348,7 @@ namespace PMKUnlocker
             }
             string rebootPlatform = tabControl.SelectedTab == tabQc ? "QC" : "";
             bool rebootEnabled = forceReboot ?? (rebootPlatform == "QC" && chkQcAutoReboot.Checked);
-            string rebootSerial = "";            workflowFailed = false;
+            workflowFailed = false;
             flashWorkflowRunning = true;
             flashWorkflowContext.Value = true;
             stopRequested = false;
@@ -369,21 +363,13 @@ namespace PMKUnlocker
                 try { await action(); }
                 catch (Exception ex) { workflowFailed = true; Log("[FAIL] Operation stopped: " + ex.Message, Color.Red); }
 
-                // command တကယ် run ပြီးမှ reboot args တွက် — QC ရဲ့ edlScriptPath ဖြေရှင်းချက်က op
-                // အတွင်း/ပြီးမှ ဖြစ်နိုင်လို့ (flash က edl.py မသုံး — အရင် စတဲ့အချိန်က snapshot ယူထားလို့
-                // path အလွတ်ဖြစ်ရင် reboot တိတ်တည်း ပျောက်သွားတဲ့ bug)
-                string rebootArguments = rebootPlatform == "QC" ? BuildQcRebootArgs() : "";
-                bool qcFirehoseFallback = rebootPlatform == "QC" && rebootArguments.Length == 0;
-                if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled &&
-                    (rebootArguments.Length > 0 || qcFirehoseFallback),
+                // The QC auto-reboot is the firehose reset, which needs no runtime beyond the bundled
+                // fh_loader. There is no python fallback to look for any more, so the decision is simply
+                // "QC tab, checkbox on, the op did something, nothing failed, nobody pressed STOP".
+                if (ReviewSafety.ShouldReboot(autoRebootAfter && rebootEnabled && rebootPlatform == "QC",
                     workflowDidOp, workflowFailed, stopRequested))
                 {
-                    if (rebootArguments.Length > 0)
-                    {
-                        await MaybeAutoRebootAsync(rebootPlatform, rebootArguments, rebootSerial);
-                    }
-                    else
-                        await QcFirehoseRebootAsync();   // edl.py မရှိ → fh_loader firehose power reset
+                    await QcFirehoseRebootAsync();
                 }
             }
             finally

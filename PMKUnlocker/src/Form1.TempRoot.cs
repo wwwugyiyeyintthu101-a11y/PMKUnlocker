@@ -1914,19 +1914,20 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
         // Play Protect/verifier ပိတ်လျက် မကျန်ရစ်စေရ။
         private async Task<(bool Ok, string Output)> InstallApkRobustAsync(string local, string package)
         {
-            string prevVerifier = await ReadGlobalSettingAsync("verifier_verify_adb_installs");
-            string prevPackageVerifier = await ReadGlobalSettingAsync("package_verifier_enable");
+            var previous = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string key in ApkInstallPolicy.VerifierKeys)
+                previous[key] = await ReadGlobalSettingAsync(key);
             try
             {
-                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global verifier_verify_adb_installs 0", 8000);
-                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global package_verifier_enable 0", 8000);
+                foreach (string key in ApkInstallPolicy.VerifierKeys)
+                    await ExecuteCommandQuickAsync("adb.exe", "shell settings put global " + key + " 0", 8000);
 
                 string insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
                 if (insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0)
                     return (true, insOut);
 
                 // Fallback — push + pm install (streaming install ကို ROM က ငြင်းတဲ့အခါ ဒီလမ်း ရတယ်)
-                string remote = "/data/local/tmp/pmk_" + Path.GetFileName(local);
+                string remote = ApkInstallPolicy.RemoteStagingPath(local);
                 await AdbRunAsync("push \"" + local + "\" \"" + remote + "\"", 180000);
                 string pmOut = await AdbRunAsync("shell pm install -r \"" + remote + "\"", 300000);
                 bool ok = pmOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -1935,32 +1936,27 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
             }
             finally
             {
-                await RestoreGlobalSettingAsync("verifier_verify_adb_installs", prevVerifier);
-                await RestoreGlobalSettingAsync("package_verifier_enable", prevPackageVerifier);
+                foreach (string key in ApkInstallPolicy.VerifierKeys)
+                    await RestoreGlobalSettingAsync(key, previous[key]);
             }
         }
 
-        /// <summary>`settings get global &lt;key&gt;` ရဲ့ တန်ဖိုး။ မသတ်မှတ်ထားရင် "" (settings က "null" ပြန်တယ်)။</summary>
+        /// <summary>`settings get global &lt;key&gt;` ရဲ့ တန်ဖိုး။ မသတ်မှတ်ထားရင် "" (settings က "null" ပြန်တယ်)။
+        /// ဘယ်လို ပြန်ထားမလဲ ဆိုတာ <see cref="ApkInstallPolicy.ParseSettingValue"/> က ဆုံးဖြတ်တယ် (phone မလိုဘဲ test လုပ်နိုင်)။</summary>
         private async Task<string> ReadGlobalSettingAsync(string key)
         {
             string raw = (await ExecuteCommandQuickAsync("adb.exe", "shell settings get global " + key, 8000)) ?? "";
-            string[] lines = raw.Replace("\r", "").Split('\n');
-            for (int i = lines.Length - 1; i >= 0; i--)
-            {
-                string value = lines[i].Trim();
-                if (value.Length == 0) continue;
-                return value.Equals("null", StringComparison.OrdinalIgnoreCase) ? "" : value;
-            }
-            return "";
+            return ApkInstallPolicy.ParseSettingValue(raw);
         }
 
         /// <summary>မူလတန်ဖိုး ရှိရင် ပြန်ရေး၊ မရှိခဲ့ရင် key ကို ဖျက် — ဖုန်းကို မူလအတိုင်း ပြန်ထားတယ်။</summary>
         private async Task RestoreGlobalSettingAsync(string key, string previous)
         {
-            if (!string.IsNullOrEmpty(previous))
-                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global " + key + " " + previous, 8000);
-            else
-                await ExecuteCommandQuickAsync("adb.exe", "shell settings delete global " + key, 8000);
+            // ဖုန်းက ပြန်ပေးတဲ့ တန်ဖိုးကို shell ထဲ မျက်ကန်း မထည့်ပါ — မထင်မှတ်တဲ့ စာလုံးပါရင် key ကို ဖျက်ပြီး
+            // platform default ကို ပြန်ရောက်စေတယ် (လုံခြုံရေးအရ ဒါက ပိုမှန်တယ်)။
+            if (!string.IsNullOrEmpty(previous) && !ApkInstallPolicy.IsRestorableValue(previous))
+                Log("[!] " + key + " returned an unexpected value; restoring the platform default instead.", Color.Orange);
+            await ExecuteCommandQuickAsync("adb.exe", ApkInstallPolicy.RestoreCommand(key, previous), 8000);
         }
 
         // GhostLock root script က device ပေါ်က KernelSU manager ရဲ့ libksud.so ကို ရှာပြီး kernelsu.ko ကို

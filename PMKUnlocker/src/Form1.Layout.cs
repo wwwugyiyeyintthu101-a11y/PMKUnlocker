@@ -653,7 +653,7 @@ namespace PMKUnlocker
             dgvPartitions.Columns["colSize"].ReadOnly = true;
             dgvPartitions.Columns["colOffset"].ReadOnly = true;
 
-// --- 5. QUALCOMM TAB (EDL 9008 — edl.py / bkerler EDL) ---
+// --- 5. QUALCOMM TAB (EDL 9008 — native Sahara/firehose, fh_loader for firmware) ---
             btnQcReadInfo = Create3DButton("🔍 Read Info / GPT", UiX(0), UiY(0), UiBtnW, UiBtnH, ButtonTheme.Cyan);
             btnQcReadInfo.Click += BtnQcReadInfo_Click;
             if (toolTipMain != null)
@@ -677,7 +677,7 @@ namespace PMKUnlocker
             btnQcReset = Create3DButton("🔄 Reset Device", UiX(0), UiY(1), UiBtnW, UiBtnH, ButtonTheme.Green);
             btnQcReset.Click += BtnQcReset_Click;
 
-            // Firmware flash panel (edl.py) — title label ဖယ် (user request)
+            // Firmware flash panel (fh_loader) — title label ဖယ် (user request)
             txtQcFirmware = new TextBox
             {
                 Location = new Point(UiX(0), 22),
@@ -768,7 +768,7 @@ namespace PMKUnlocker
 
             Panel grpQcRestore = CreateGroupPanel("RESTORE / IMEI REPAIR", UiX(0), UiY(2), 3, btnQcRestoreBackup, btnQcEfsRestore, btnQcImeiReadEfs);
             // SETUP group (📦 EDL Module / 🧩 Firehose Loader) — user request နဲ့ ဖယ်လိုက်
-            // (loader ရွေးဖို့ = အပေါ်က LOADER PICKER၊ edl.py path = auto-find + dialog)
+            // (loader ရွေးဖို့ = အပေါ်က LOADER PICKER)
 
             // ---- Firehose Loader Brand/Model picker (pmk_qc_loaders.json) ----
             // QC tab ရဲ့ အပေါ်ဆုံးတန်း — device list Brand/Model/Detect ကို အစားထိုး

@@ -53,6 +53,9 @@
     <Compile Include="../../PMKUnlocker/src/Qualcomm/GptParser.cs" Link="Qualcomm/GptParser.cs" />
     <Compile Include="../../PMKUnlocker/src/Qualcomm/FirehoseIO.cs" Link="Qualcomm/FirehoseIO.cs" />
     <!-- SPD FDL pairing — one folder must supply both halves, so an incomplete loader folder is assertable. -->
+    <!-- Temp root APK install: which settings keys are turned off and how each one is put back, the settings
+         answer parse, and the /data/local/tmp staging name. Pure decisions, so no phone is needed. -->
+    <Compile Include="../../PMKUnlocker/src/ApkInstallPolicy.cs" Link="ApkInstallPolicy.cs" />
     <Compile Include="../../PMKUnlocker/src/Spreadtrum/SpdLoaderPair.cs" Link="Spreadtrum/SpdLoaderPair.cs" />
   </ItemGroup>
 </Project>

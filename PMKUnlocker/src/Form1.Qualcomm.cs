@@ -203,7 +203,7 @@ namespace PMKUnlocker
             return fileName;
         }
 
-        // ---- Qualcomm: edl.py နဲ့ အစစ် flash ----
+        // ---- Qualcomm: firmware flash via fh_loader rawprogram XML (the native session reads/writes the rest) ----
         private void BtnQcPickFirmware_Click(object sender, EventArgs e)
         {
             using (FolderBrowserDialog fbd = new FolderBrowserDialog
@@ -438,7 +438,8 @@ namespace PMKUnlocker
 
         // Samsung EFS/NV — heimdall က download-mode ကနေ partition ဖတ်လို့မရလို့ ADB root (su + dd) သုံးတယ်
         // ================= EDL MODULE (Qualcomm) =================
-        // edl.py (bkerler EDL) ကို mtk.exe လိုပဲ ခေါ်သုံးတယ် — path ကို pmk_paths.txt မှာ သိမ်းတယ်
+        // pmk_paths.txt slot 0 is the legacy edl.py path: it is still read and written so an operator's file
+        // round-trips, but nothing runs edl.py any more — the QC tab speaks Sahara/firehose itself.
         private string PathsFile
         {
             get { return ShopServices.DataPath("pmk_paths.txt"); }
@@ -590,25 +591,8 @@ namespace PMKUnlocker
             }
         }
 
-        // edl.py ကို အလိုအလျောက် ရှာတယ် — exe ဘေး၊ ပြီးရင် Desktop ပေါ်က ရှိပြီးသား copy တွေ
-        private string FindEdlScript()
-        {
-            return FindFileInToolFolders("edl.py");
-        }
-
-        // QC reboot args — flash က edl.py မသုံးလို့ path မရှိနိုင်; op ပြီးမှ တစ်ခါထပ်ရှာ (tools.json/tool folder)
-        private string BuildQcRebootArgs()
-        {
-            if (string.IsNullOrEmpty(edlScriptPath) || !File.Exists(edlScriptPath))
-            {
-                edlScriptPath = FindEdlScript();
-                if (!string.IsNullOrEmpty(edlScriptPath)) SaveEdlPaths();
-            }
-            return !string.IsNullOrEmpty(edlScriptPath) ? BuildEdlArgs("reset --resetmode=reset") : "";
-        }
-
-        // edl.py (python) မရှိတဲ့အခါ — flash သုံးခဲ့တဲ့ firehose session ကနေ fh_loader နဲ့ power reset
-        // (release ထဲ edl.py မပါလို့ မဖြစ်မနိ QC auto-reboot ပျောက်နေတာကို ကာကွယ်)
+        // QC auto-reboot — the firehose power reset (fh_loader is bundled, so this needs no python).
+        // It runs after a QC operation that left the phone in EDL; the reset releases it back to boot.
         private async Task QcFirehoseRebootAsync()
         {
             try
@@ -631,21 +615,6 @@ namespace PMKUnlocker
             {
                 Log("[!] Auto reboot failed: " + ex.Message, Color.Orange);
             }
-        }
-
-        private string BuildEdlArgs(string command)
-        {
-            string loader = (!string.IsNullOrEmpty(edlLoaderPath) && File.Exists(edlLoaderPath))
-                ? " --loader=\"" + edlLoaderPath + "\"" : "";
-
-            // Header တွင် ရွေးထားသော COM Port ကို ထည့်ပေးခြင်း
-            string portParam = "";
-            if (cmbPorts.SelectedItem != null && cmbPorts.SelectedItem.ToString().StartsWith("COM"))
-            {
-                portParam = " --port=" + cmbPorts.SelectedItem.ToString();
-            }
-
-            return "\"" + edlScriptPath + "\"" + loader + portParam + " " + command;
         }
 
         private async Task RunEdlAsync(string command, string title, bool clearPartitions = false,
