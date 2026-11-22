@@ -1121,6 +1121,8 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                     Log("[i] A reboot or a rebuilt GLK1 profile cannot change a patched kernel.", Color.Gray);
                     return (false, -1);
                 }
+                // root script က manager ရဲ့ libksud.so ကို ရှာပြီး module late-load လုပ်တယ် — မရှိရင် su မရဘဲ ရပ်တယ်
+                await EnsureKernelSuForGhostLockAsync(exploitsRoot);
             }
 
             string local;
@@ -1905,6 +1907,139 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
             return (true, false, -1);
         }
 
+        // Xiaomi/MIUI (HyperOS) မှာ streaming `adb install` ကို Play-Protect verifier ကြောင့်
+        // VERIFICATION_FAILURE ဖြစ်တတ်တယ်။ verifier နှစ်ခုကို install မလုပ်ခင် ခဏပိတ်ပြီး၊ မရရင်
+        // /data/local/tmp သို့ push လုပ်၍ `pm install` နဲ့ တိုက်ရိုက် တင်တယ်။
+        // ဘယ်လမ်းနဲ့ပြီးပြီးပါစေ ဖုန်းရဲ့ မူလတန်ဖိုးကို finally မှာ ပြန်ထားတယ် — customer ဖုန်းမှာ
+        // Play Protect/verifier ပိတ်လျက် မကျန်ရစ်စေရ။
+        private async Task<(bool Ok, string Output)> InstallApkRobustAsync(string local, string package)
+        {
+            string prevVerifier = await ReadGlobalSettingAsync("verifier_verify_adb_installs");
+            string prevPackageVerifier = await ReadGlobalSettingAsync("package_verifier_enable");
+            try
+            {
+                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global verifier_verify_adb_installs 0", 8000);
+                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global package_verifier_enable 0", 8000);
+
+                string insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
+                if (insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return (true, insOut);
+
+                // Fallback — push + pm install (streaming install ကို ROM က ငြင်းတဲ့အခါ ဒီလမ်း ရတယ်)
+                string remote = "/data/local/tmp/pmk_" + Path.GetFileName(local);
+                await AdbRunAsync("push \"" + local + "\" \"" + remote + "\"", 180000);
+                string pmOut = await AdbRunAsync("shell pm install -r \"" + remote + "\"", 300000);
+                bool ok = pmOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
+                await AdbRunAsync("shell rm -f \"" + remote + "\"", 8000);
+                return (ok, insOut + "\n" + pmOut);
+            }
+            finally
+            {
+                await RestoreGlobalSettingAsync("verifier_verify_adb_installs", prevVerifier);
+                await RestoreGlobalSettingAsync("package_verifier_enable", prevPackageVerifier);
+            }
+        }
+
+        /// <summary>`settings get global &lt;key&gt;` ရဲ့ တန်ဖိုး။ မသတ်မှတ်ထားရင် "" (settings က "null" ပြန်တယ်)။</summary>
+        private async Task<string> ReadGlobalSettingAsync(string key)
+        {
+            string raw = (await ExecuteCommandQuickAsync("adb.exe", "shell settings get global " + key, 8000)) ?? "";
+            string[] lines = raw.Replace("\r", "").Split('\n');
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                string value = lines[i].Trim();
+                if (value.Length == 0) continue;
+                return value.Equals("null", StringComparison.OrdinalIgnoreCase) ? "" : value;
+            }
+            return "";
+        }
+
+        /// <summary>မူလတန်ဖိုး ရှိရင် ပြန်ရေး၊ မရှိခဲ့ရင် key ကို ဖျက် — ဖုန်းကို မူလအတိုင်း ပြန်ထားတယ်။</summary>
+        private async Task RestoreGlobalSettingAsync(string key, string previous)
+        {
+            if (!string.IsNullOrEmpty(previous))
+                await ExecuteCommandQuickAsync("adb.exe", "shell settings put global " + key + " " + previous, 8000);
+            else
+                await ExecuteCommandQuickAsync("adb.exe", "shell settings delete global " + key, 8000);
+        }
+
+        // GhostLock root script က device ပေါ်က KernelSU manager ရဲ့ libksud.so ကို ရှာပြီး kernelsu.ko ကို
+        // late-load လုပ်တယ်။ manager မရှိရင် run က "KernelSU module load pending" မှာ ရပ်ပြီး adb shell က
+        // root မရဘူး။ ဒါကြောင့် exploit မစမီ bundled (hash-pinned) KernelSU APK ကို install ပေးတယ်။
+        // Install မရရင် exploit ကို မရပ်ပါ — root အလုပ်မလုပ်တာကို log မှာ ရှင်းရှင်းပြပါမယ်။
+        private async Task EnsureKernelSuForGhostLockAsync(string exploitsRoot)
+        {
+            const string package = "me.weishu.kernelsu";
+            try
+            {
+                if (await ApkInstalledAsync(package))
+                {
+                    Log("[i] KernelSU manager present — GhostLock can late-load kernelsu.ko.", Color.Gray);
+                    return;
+                }
+
+                string apk = "";
+                ExploitManifest manifest = KernelExploit.LoadManifest(Path.Combine(exploitsRoot, "manifest.json"));
+                foreach (ExploitEntry entry in manifest.Exploits)
+                {
+                    if (entry.Packages == null) continue;
+                    foreach (ExploitPackage pkg in entry.Packages)
+                    {
+                        if (!string.Equals(pkg.Package, package, StringComparison.Ordinal)) continue;
+                        try { apk = KernelExploit.PackageFullPath(exploitsRoot, entry, pkg); }
+                        catch (Exception exPkg) { Log("[!] KernelSU APK rejected: " + exPkg.Message, Color.Orange); }
+                        break;
+                    }
+                    if (apk.Length > 0) break;
+                }
+
+                if (apk.Length == 0 || !File.Exists(apk))
+                {
+                    Log("[!] KernelSU manager APK not bundled — GhostLock will stop at 'KernelSU module load pending' " +
+                        "and adb shell stays unrooted.", Color.Orange);
+                    return;
+                }
+
+                Log("[*] Install KernelSU manager · " + Path.GetFileName(apk) + " (ksud provider for GhostLock)...",
+                    Color.Cyan);
+                (bool ok, string insOut) = await InstallApkRobustAsync(apk, package);
+                if (ok)
+                {
+                    Log("[OK] KernelSU manager installed — GhostLock can late-load kernelsu.ko.", Color.LightGreen);
+                    return;
+                }
+                Log("[!] KernelSU manager install failed — GhostLock root will stay without su.", Color.OrangeRed);
+                foreach (string raw in (insOut ?? "").Replace("\r", "").Split('\n'))
+                    if (raw.Trim().Length > 0) Log("    " + raw.Trim(), Color.OrangeRed);
+            }
+            catch (Exception ex)
+            {
+                Log("[!] KernelSU manager step skipped: " + ex.Message, Color.Orange);
+            }
+        }
+
+        // MIUI/HyperOS ရဲ့ "Install via USB" (DISALLOW_INSTALL_USB) က adb/pm install ကို ပိတ်တယ်။
+        // Mi account မလိုဘဲ တင်နိုင်တဲ့လမ်း = sideload (package installer / File Manager) မှတစ်ဆင့်တင်။
+        // "Install unknown apps" ကို allow ပေးရုံပါ — "Install via USB"/Mi account လုံးဝ မလိုပါ။
+        private async Task<bool> SideloadApkAsync(ExploitPackage spec, string local)
+        {
+            string label = string.IsNullOrWhiteSpace(spec.Package) ? Path.GetFileName(local) : spec.Package;
+            string remote = "/sdcard/Download/" + Path.GetFileName(local);
+            Log("[*] Sideload " + Path.GetFileName(local) + " → " + remote + " ...", Color.Cyan);
+            await AdbRunAsync("push \"" + local + "\" \"" + remote + "\"", 180000);
+            // Package installer ကို တိုက်ရိုက် ဖွင့် — install screen တစ်ခါတည်း ပေါ်လာမယ် (frptool လို)။
+            string uri = "file://" + remote;
+            string startOut = await AdbRunAsync("shell am start -W -a android.intent.action.VIEW " +
+                "-d \"" + uri + "\" -t application/vnd.android.package-archive --user 0", 30000);
+            if (startOut.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0)
+                Log("[i] Installer ဖွင့်လို့မရ — ဖုန်းရဲ့ File Manager ကနေ " + remote +
+                    " ကို ကိုယ်တိုင် ဖွင့်ပါ။", Color.Orange);
+            Log("[sideload] ဖုန်းပေါ်ပေါ်လာတဲ့ 'Install' ကို နှိပ်ပါ — 'Install via USB'/Mi account မလိုပါ။",
+                Color.Orange);
+            if (string.IsNullOrWhiteSpace(spec.Package)) return true;
+            return await WaitForManualInstallAsync(spec.Package, label, 300);
+        }
+
         private async Task<(bool Root, double Sec)> TryApkUiExploitAsync(string exploitsRoot, ExploitEntry ex, DeviceFingerprint fp)
         {
             ApkUiSpec ui = ex.Ui ?? new ApkUiSpec();
@@ -1942,8 +2077,8 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
             bool manual = !inputOk;
             if (manual)
             {
-                Log("[i] Manual mode — tool က touch မထိုးပါ။ ဖုန်းပေါ်မှာ ပြသပေးတဲ့အတိုင်း " +
-                    "သင်ကိုယ်တိုင် tap လုပ်ပါ။", Color.Cyan);
+                Log("[i] Manual mode — tool က touch မထိုးပါ။ (DFRoot headless ဖြစ်လို့ input injection မလိုပါ)", Color.Cyan);
+                Log("[i] APK တစ်ခုချင်းစီအတွက် install screen ကို အလိုအလျောက် ဖွင့်ပေးမယ် — 'Install' ကိုပဲ နှိပ်ပါ။", Color.Cyan);
                 Log("[i] ဖုန်း screen ကို unlock လုပ်ထားပြီး လက်ထဲမှာ ကိုင်ထားပါ။", Color.Gray);
             }
 
@@ -1958,17 +2093,9 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                         Log("[i] " + label + " already installed — skip.", Color.Gray);
                         continue;
                     }
-                    string remote = "/sdcard/Download/" + Path.GetFileName(local);
-                    Log("[*] Push " + Path.GetFileName(local) + " → " + remote + "...", Color.Cyan);
-                    await AdbRunAsync("push \"" + local + "\" \"" + remote + "\"", 180000);
-                    Log("[manual] ဖုန်းရဲ့ File Manager ကနေ " + remote + " ကို install လုပ်ပါ " +
-                        "(လိုရင် Install unknown apps ကို ခွင့်ပြုပါ)။", Color.Orange);
-                    if (string.IsNullOrWhiteSpace(spec.Package))
-                    {
-                        Log("[i] Package id unknown — push ပြီးပါပြီ၊ install လုပ်ပြီးမှ ဆက်ပါ။", Color.Gray);
-                        continue;
-                    }
-                    if (!await WaitForManualInstallAsync(spec.Package, label, 300)) return (false, -1);
+                    // Manual mode (INJECT_EVENTS ပိတ်ထားတဲ့အခါ) — push လုပ်ပြီး package installer ကို
+                    // တိုက်ရိုက် ဖွင့်။ install screen တစ်ခါတည်း ပေါ်တာမို့ File Manager ကိုယ်တိုင် ရှာစရာ မလို။
+                    if (!await SideloadApkAsync(spec, local)) return (false, -1);
                 }
             }
             else
@@ -1979,10 +2106,7 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                     bool present = !string.IsNullOrWhiteSpace(spec.Package) && await ApkInstalledAsync(spec.Package);
                     Log("[*] Install " + Path.GetFileName(local) + " · " + label + (present ? " (already installed)" : "") + "...",
                         Color.Cyan);
-                    // No -g: Android 16 shell lacks INSTALL_GRANT_RUNTIME_PERMISSIONS, and both
-                    // APKs declare no runtime permissions anyway.
-                    string insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
-                    bool insOk = insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
+                    (bool insOk, string insOut) = await InstallApkRobustAsync(local, spec.Package);
                     if (!insOk)
                     {
                         if (present && insOut.IndexOf("INSTALL_FAILED_UPDATE_INCOMPATIBLE", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1992,8 +2116,7 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                                 // ကျွန်တော်တို့ရဲ့ headless build ကို လိုအပ်တယ် — signature မတူလို့ uninstall ပြီး အသစ်ပြန်တင်ရမယ်
                                 Log("[i] " + label + " installed က signature မတူလို့ replace လုပ်မယ် (uninstall → install).", Color.Orange);
                                 await AdbRunAsync("uninstall " + spec.Package, 60000);
-                                insOut = await AdbRunAsync("install -r \"" + local + "\"", 300000);
-                                insOk = insOut.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0;
+                                (insOk, insOut) = await InstallApkRobustAsync(local, spec.Package);
                                 if (!insOk)
                                 {
                                     Log("[!] Headless APK install failed: " + label, Color.OrangeRed);
@@ -2012,11 +2135,14 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                             foreach (string raw in (insOut ?? "").Replace("\r", "").Split('\n'))
                                 if (raw.Trim().Length > 0) Log("    " + raw.Trim(), Color.OrangeRed);
                             if (insOut.IndexOf("USER_RESTRICTED", StringComparison.OrdinalIgnoreCase) >= 0)
-                                Log("[i] MIUI/HyperOS blocks adb install — Developer options → 'Install via USB' " +
-                                    "(and 'USB debugging (Security settings)') ကို ဖွင့်ပြီး ထပ်လုပ်ပါ။", Color.Orange);
-                            else if (insOut.IndexOf("VERIFICATION", StringComparison.OrdinalIgnoreCase) >= 0)
-                                Log("[i] Install verification rejected the APK — allow USB installs for this PC, then retry.",
+                            {
+                                Log("[i] MIUI/HyperOS 'Install via USB' ပိတ်ထားတယ် — Mi account မလိုဘဲ sideload နဲ့ တင်မယ်။",
                                     Color.Orange);
+                                if (await SideloadApkAsync(spec, local)) continue;
+                                return (false, -1);
+                            }
+                            else if (insOut.IndexOf("VERIFICATION", StringComparison.OrdinalIgnoreCase) >= 0)
+                                Log("[i] Install verification rejected the APK — sideload နဲ့ ထပ်လုပ်ပါ။", Color.Orange);
                             return (false, -1);
                         }
                     }
@@ -2349,10 +2475,9 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                 probe.IndexOf("SecurityException", StringComparison.OrdinalIgnoreCase) < 0)
                 return true;
             Log("[!] ADB input injection is blocked on this phone (INJECT_EVENTS).", Color.OrangeRed);
-            Log("[i] Developer options → 'USB debugging (Security settings)' / 'USB调试（安全设置）' " +
-                "ကို ဖွင့်ပါ (SIM ထည့်ပြီး Mi account ဝင်ရနိုင်)။", Color.Orange);
-            Log("[i] မဖွင့်နိုင်ရင် manual mode နဲ့ ဆက်ပါမယ် — APK install နဲ့ tap တွေကို " +
-                "ဖုန်းပေါ်မှာ သင်ကိုယ်တိုင် လုပ်ရပါမယ်။", Color.Gray);
+            Log("[i] 'USB debugging (Security settings)' ဖွင့်ထားရင် tool က အလိုအလျောက် tap လုပ်နိုင်မယ်။ " +
+                "မဖွင့်နိုင်ရင် manual mode နဲ့ ဆက်မယ် — APK install screen ကို အလိုအလျောက် ဖွင့်ပေးတာမို့ " +
+                "'Install' ကိုပဲ နှိပ်ပါ (Mi account မလိုပါ)။", Color.Gray);
             return false;
         }
 
