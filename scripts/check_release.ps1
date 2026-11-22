@@ -75,6 +75,31 @@ $manifest = @(Get-ChildItem -LiteralPath $output -Recurse -File | Sort-Object Fu
     }
 })
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'file-manifest.json') -Encoding utf8
+# The published folder proves itself, not only the build: --self-check re-hashes every packed entry,
+# resolves each required tool, parses the catalogs and audits any installed recipe. No phone is touched.
+# The app manifest asks for administrator, so a non-elevated shell cannot start it; that is reported as a
+# skip and never as a pass.
+$selfCheckExe = Join-Path $output 'PMKUnlocker.exe'
+$selfCheckLog = Join-Path $output 'self-check.log'
+$selfCheckVerdict = 'skipped'
+$selfCheckRan = $false
+try {
+    $selfCheckProcess = Start-Process -FilePath $selfCheckExe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
+    $selfCheckRan = $true
+    $selfCheckVerdict = if ($selfCheckProcess.ExitCode -eq 0) { 'passed' } else { "failed (exit $($selfCheckProcess.ExitCode))" }
+}
+catch {
+    $selfCheckVerdict = if ($_.Exception.Message -match 'elevation') { 'skipped (needs an elevated shell)' }
+                        else { 'skipped (' + $_.Exception.Message + ')' }
+}
+if ($selfCheckRan) {
+    $selfCheckWritten = Join-Path $env:LOCALAPPDATA 'PMKMobileTool/pmk_selfcheck.log'
+    if (Test-Path -LiteralPath $selfCheckWritten) { Copy-Item -LiteralPath $selfCheckWritten -Destination $selfCheckLog -Force }
+}
+if ($selfCheckVerdict -like 'failed*') {
+    throw "Packaged self-check $selfCheckVerdict - read $selfCheckLog"
+}
+
 $report = [ordered]@{
     version = $version
     checkedAt = (Get-Date).ToString('o')
@@ -83,6 +108,7 @@ $report = [ordered]@{
     requiredFilesVerified = $required.Count
     deviceCatalogEntries = $deviceCounts
     qualcommLoaders = $loaderCheck
+    packagedSelfCheck = $selfCheckVerdict
     missingBundledDependencies = $missing
     selfContainedRuntime = Test-Path -LiteralPath (Join-Path $output 'hostfxr.dll')
     hardwareTested = $false
@@ -94,5 +120,6 @@ $report = [ordered]@{
 $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'release-check.json') -Encoding utf8
 Write-Output "Candidate: $output"
 Write-Output "Build, regression tests, and $($required.Count) required files: PASS"
+Write-Output "Packaged self-check: $selfCheckVerdict"
 Write-Output "Missing bundled dependencies: $($missing -join ', ')"
 Write-Output 'Distribution readiness: NOT YET VERIFIED (see release-check.json).'

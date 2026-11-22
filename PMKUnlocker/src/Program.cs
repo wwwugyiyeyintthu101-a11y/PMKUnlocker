@@ -25,8 +25,13 @@ namespace PMKUnlocker
         }
 
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            // A packaged folder is checked without opening a window or touching a phone — see SelfCheck.
+            // It runs before the login gate on purpose: a broken package should say so, not ask for a password.
+            if (args != null && args.Any(a => string.Equals(a, SelfCheck.Flag, StringComparison.OrdinalIgnoreCase)))
+                return SelfCheck.Run(args);
+
             StartupMark("process entered");
             Application.ThreadException += (s, e) => LogCrash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
@@ -71,7 +76,7 @@ namespace PMKUnlocker
                 using (var login = new LoginForm())
                 {
                     StartupMark("login UI tree built");
-                    if (login.ShowDialog() != DialogResult.OK) return;
+                    if (login.ShowDialog() != DialogResult.OK) return 0;
                     licEmail = login.LoginEmail;
                     licPlan = login.LoginPlan;
                     licExp = login.LoginExpiresAt;
@@ -89,7 +94,7 @@ namespace PMKUnlocker
                     gateUi.DialogResult = DialogResult.OK;
                     gateUi.Close();
                 };
-                if (gateUi.ShowDialog() != DialogResult.OK) return;
+                if (gateUi.ShowDialog() != DialogResult.OK) return 0;
                 StartupMark("update gate passed");
             }
 
@@ -101,6 +106,7 @@ namespace PMKUnlocker
             // libusb-1.0 (the MTK raw-USB backend) runs a foreground event thread: once a native MTK session has
             // opened it, the window closes but the process would never exit. Measured on a probe, not assumed.
             MediaTek.MtkUsbTransport.ReleaseLibUsbSession();
+            return 0;
         }
 
         // PMKLicenseServer — လက်ရှိ run နေရင် မထောင် (manual start ကို မထိ)၊ remote URL
