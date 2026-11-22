@@ -4,6 +4,17 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The installer ships a trimmed, self-contained build. Requests and responses are
+         serialized with reflection (anonymous result objects cannot use source generation),
+         so reflection must stay enabled in a trimmed publish or every API call throws
+         NotSupportedException: JsonTypeInfo metadata ... was not provided. -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
+
+  <!-- Request/response models are deserialized reflectively; without this the trimmer
+       strips their constructors and every API call fails at runtime. -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="PMKLicenseServer" />
+  </ItemGroup>
 
 </Project>

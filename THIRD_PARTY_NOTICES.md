@@ -34,6 +34,7 @@ Two rules govern this file:
 | `tools/mtkclient/mtk.exe` and `tools/mtkclient/payloads/*` | `tools/mtkclient/` | mtkclient CLI (bkerler/mtkclient, MIT) built by PMK | The **client** is MIT (upstream states it) and `mtkclient-lock.json` records the exact upstream commit and every file hash. The **payload/DA images** it carries are a separate question — see §2. Ship the MIT notice with the binary. |
 | `mtk/loaders/**` (MTK DA/auth catalog) | `mtk/loaders` | OEM DA/auth files | **UNVERIFIED** — OEM/vendor blobs. PMK's own note in `ROADMAP §10` leaves this open: ship, drop, or re-source. |
 | `edl/loaders/**` (1,062 Qualcomm firehose loaders) | `edl/loaders` | OEM firehose loaders | **UNVERIFIED** — same as above; these are vendor-signed images, not open-source artefacts. |
+| `server/**` (licence server, self-contained) | `server/` | PMK's own `PMKLicenseServer` plus the .NET 10 runtime it is published against | Code is PMK's own. The bundled .NET runtime files (`coreclr.dll`, `hostfxr.dll`, `System.*.dll`, `Microsoft.AspNetCore.*.dll`) are **MIT** (dotnet/runtime, dotnet/aspnetcore) — ship `LICENSE.txt` from the runtime with them, or point the operator at https://github.com/dotnet/runtime/blob/main/LICENSE.TXT. Publishing self-contained is what removes the "install .NET 10 ASP.NET Core Runtime" step. |
 
 `integrity.json` pins the SHA-256 of every file above, so this list and the hash manifest describe the same set;
 `PMKUnlocker.exe --self-check` re-verifies the set on the packaged folder.
@@ -45,7 +46,8 @@ Two rules govern this file:
 | Python 3 + `edl.py` (bkerler/edl) | No longer required by any PMK code path (the QC tab and the QC auto-reboot speak Sahara/firehose themselves as of 7.3.6). | Listed in the Setup panel as an optional operator tool. If an operator adds it, their own licence obligations apply. |
 | `spd_dump.exe`, `unpac.exe` (Unisoc) | SPD PAC unpack + flash | Not bundled; the SPD tab says so when opened. |
 | `fh_loader`/`QSaharaServer` when run from another install | Qualcomm flashing | Same binaries as §1; the four files above are what PMK actually redistributes. |
-| Microsoft .NET 8 Desktop Runtime (x86), .NET 10 ASP.NET Core Runtime | runtime for the app and the local licence server | Installed by the operator or by Microsoft's installer; PMK does not redistribute it. The installer checks for .NET 8 Desktop only. |
+| Microsoft .NET 8 Desktop Runtime (x86) | runtime for the desktop app | Not redistributed: installed by the operator or by Microsoft's installer, and the installer checks for it (Program Files, per-user `%LOCALAPPDATA%\Microsoft\dotnet`, `DOTNET_ROOT(x86)`). |
+| .NET 10 runtime for the licence server | runtime | **Bundled** in `server/` by the self-contained publish (see §1) — nothing to install. A shop that runs the server from source or from a framework-dependent build still needs the .NET 10 ASP.NET Core Runtime. |
 
 ## 3. Build-time tools (not redistributed)
 

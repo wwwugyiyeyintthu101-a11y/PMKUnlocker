@@ -136,29 +136,68 @@ elseif ($Notes) {
     Write-Output 'Release    : body updated'
 }
 
-# 2. Assets. A same-named asset cannot be replaced in place, so it is deleted first (the id is what matters,
-#    not the name), which keeps "re-run the script" idempotent.
+# 2. Assets. GitHub has no replace-in-place, so an upload is delete-then-post, and that order has a real
+#    failure mode: if the post dies after the delete, the release is left without the asset. So an asset whose
+#    digest already matches the local file is left alone (a re-run touches nothing), the post is retried, and
+#    the result is read back - state 'uploaded' and the API's own digest - before it counts.
 $uploadBase = ($release.upload_url -split '\{')[0]
+$uploaded = 0
 foreach ($asset in @(
     @{ Path = $installerPath; Name = $installerName; Type = 'application/octet-stream' },
     @{ Path = $updatePath; Name = 'update.json'; Type = 'application/json' }
 )) {
+    $wantDigest = 'sha256:' + (Get-FileHash -LiteralPath $asset.Path -Algorithm SHA256).Hash.ToLowerInvariant()
     $existing = @($release.assets | Where-Object { $_.name -eq $asset.Name })
+    $alreadyGood = @($existing | Where-Object { $_.state -eq 'uploaded' -and $_.digest -eq $wantDigest })
+    if ($alreadyGood.Count -gt 0) {
+        Write-Output "Asset      : already correct $($asset.Name)"
+        continue
+    }
+
     foreach ($old in $existing) {
         Invoke-GitHub 'DELETE' "$api/releases/assets/$($old.id)" $null | Out-Null
-        Write-Output "Asset      : replaced $($asset.Name)"
     }
     $uri = '{0}?name={1}' -f $uploadBase, [uri]::EscapeDataString($asset.Name)
-    Invoke-RestMethod -Method 'POST' -Uri $uri -Headers $headers -ContentType $asset.Type `
-        -InFile $asset.Path -TimeoutSec 1800 | Out-Null
-    if ($existing.Count -eq 0) { Write-Output "Asset      : uploaded $($asset.Name)" }
+    $result = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $result = Invoke-RestMethod -Method 'POST' -Uri $uri -Headers $headers -ContentType $asset.Type `
+                -InFile $asset.Path -TimeoutSec 1500
+            if ($result.state -eq 'uploaded' -and (!$result.digest -or $result.digest -eq $wantDigest)) { break }
+            Write-Output "Asset      : $($asset.Name) came back '$($result.state)' - retrying"
+        }
+        catch {
+            Write-Output "Asset      : upload attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying"
+        }
+        $result = $null
+        Start-Sleep -Seconds 10
+    }
+    if (!$result) { throw "Uploading $($asset.Name) failed three times. The release is now missing this asset; re-run this script." }
+    Write-Output "Asset      : uploaded $($asset.Name) ($($result.size) bytes)"
+    $uploaded++
 }
+if ($uploaded -eq 0) { Write-Output 'Assets     : both already matched, nothing was re-uploaded' }
 
-# 3. Prove it from the public side: releases/latest is what UpdateChecker.cs reads.
-$latest = Invoke-RestMethod -Uri "https://github.com/$Repo/releases/latest/download/update.json" -UseBasicParsing
-$latestVersion = ($latest | ConvertFrom-Json).version
+# 3. Prove it from the public side: releases/latest is what UpdateChecker.cs reads. Invoke-RestMethod parses
+#    JSON into an object, but the CDN can also hand back the raw body, so both shapes are handled; a fresh
+#    release can take a few seconds to become "latest", so this is tried a few times before it is called a failure.
+$latestVersion = ''
+for ($attempt = 1; $attempt -le 4; $attempt++) {
+    try {
+        $latest = Invoke-RestMethod -Uri "https://github.com/$Repo/releases/latest/download/update.json" -UseBasicParsing -TimeoutSec 60
+        $latestVersion = if ($latest -is [string]) { ($latest | ConvertFrom-Json).version } else { $latest.version }
+        if ($latestVersion) { break }
+    }
+    catch {
+        $latestVersion = ''
+    }
+    Start-Sleep -Seconds 5
+}
+if (!$latestVersion) {
+    throw "Published, but releases/latest/download/update.json could not be read. Check the release on GitHub; the repository may be private."
+}
 if ($latestVersion -ne $update.version) {
-    throw "Published, but releases/latest/download/update.json still says $latestVersion (expected $($update.version)). The repository may be private, or the CDN has not caught up - re-check in a minute."
+    throw "Published, but releases/latest/download/update.json still says $latestVersion (expected $($update.version)). Re-check in a minute."
 }
 
 Write-Output ''

@@ -103,7 +103,11 @@ void TightenAcl(string path, bool directory)
 
 string adminKeyHash = "";
 string configuredKey = builder.Configuration["AdminKey"] ?? "";
-string keyFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json"))!, "adminkey.txt");
+// %LOCALAPPDATA% & co. are expanded here so the installer can ship one appsettings.json that lands
+// in the operator's own profile instead of an admin-only ProgramData folder.
+string dataFileConfigured = Environment.ExpandEnvironmentVariables(
+    (builder.Configuration["DataFile"] ?? "licenses.json").Trim());
+string keyFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataFileConfigured))!, "adminkey.txt");
 Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
 TightenAcl(Path.GetDirectoryName(keyFile)!, directory: true);
 
@@ -136,10 +140,25 @@ else
         TightenAcl(keyFile, directory: false);
         Console.WriteLine("=== Admin key generated (only its hash is stored in " + keyFile + ") ===");
         Console.WriteLine("Admin key (save it now — it cannot be read back): " + generated);
+        // The app launches this server with no console window, so printing the key once would lose it.
+        // Keep the one-time plaintext next to the hash (same convention as the admin tool) and make
+        // it discoverable instead.
+        try
+        {
+            string adminKeyOut = Path.Combine(Path.GetDirectoryName(keyFile)!,
+                "admin-key-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".txt");
+            File.WriteAllText(adminKeyOut,
+                "PMK admin key (generated " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ").\r\n" +
+                "Move it to a password manager, then delete this file. Never put it back into a backup zip.\r\n\r\n" +
+                generated + "\r\n");
+            Console.WriteLine("Admin key written to " + adminKeyOut);
+        }
+        catch (Exception ex) { Console.WriteLine("Could not write the admin key file: " + ex.Message); }
     }
 }
-string dataFile = Path.GetFullPath(builder.Configuration["DataFile"] ?? "licenses.json");
+string dataFile = Path.GetFullPath(dataFileConfigured);
 Directory.CreateDirectory(Path.GetDirectoryName(dataFile)!);
+Console.WriteLine("License data file: " + dataFile);
 TightenAcl(dataFile, directory: false);
 
 // Optional password-reset mailer — smtp.json sits next to licenses.json. Without it the server still

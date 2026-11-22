@@ -36,7 +36,9 @@ flipping `cleanWindowsInstallTested` — never claim it from a green build.
 □ install .NET 8 Desktop x86, run Setup.exe again → install completes, shortcut created
 □ start PMKUnlocker.exe → one UAC prompt, then the login screen (no crash, no silent exit)
 □ %LOCALAPPDATA%\PMKMobileTool is created; pmk_startup.log reaches "login UI tree built"
-□ sign in against the real server (local or HTTPS) — and once with the server stopped, to see the error it shows
+□ sign in against the real server (local or HTTPS) — the bundled `server\` starts on first launch; and once
+  with the server stopped, to see the error it shows
+□ %LOCALAPPDATA%\PMKMobileTool\license-server\ has licenses.json + admin-key-<time>.txt after first launch
 □ plug an ADB phone → adb.exe resolves from the package (Setup panel lists it as found)
 □ plug an MTK phone in BROM → the COM port appears (this is where a missing Preloader/VCOM driver shows up)
 □ NATIVE tab: present only when mtk\boot-profiles was copied in; absent and quiet when it was not
@@ -54,6 +56,27 @@ reports the current state), and the optional Python/`edl.py` and Unisoc `spd_dum
 On the packaged folder itself, `PMKUnlocker.exe --self-check` re-hashes every packed file, resolves each
 required tool, parses the catalogs and audits any installed recipe — no phone, no window, exit 0 or 1. The app
 manifest asks for administrator, so run it from an elevated shell (a non-elevated attempt is a SKIP).
+
+## The bundled licence server
+
+`check_release.ps1` publishes `PMKLicenseServer` **self-contained and trimmed** (win-x64, ~28 MB) into
+`release-candidates/<id>/server/`, and the installer copies that folder as-is. An installed tool therefore has
+its server next to it, `PMKUnlocker.exe` starts it on launch, and a shop PC needs no .NET runtime of its own.
+
+- data and keys live in `%LOCALAPPDATA%\PMKMobileTool\license-server\` — `licenses.json`, `adminkey.txt`
+  (hash only), and `admin-key-<timestamp>.txt` (the one-time plaintext, written because a hidden server has no
+  console to print it to)
+- the shipped `server\appsettings.json` names that folder as `DataFile` and the server expands `%LOCALAPPDATA%`
+  at startup, so a non-admin operator can write it. A shared/locked-down install can override the path:
+  `PMKLicenseServer.exe --DataFile=C:\ProgramData\PMKMobileTool\licenses.json`
+- first start generates the admin key; that plaintext file is the only copy, so move it to a password manager
+  and delete it. `http://127.0.0.1:5260/admin` is the management UI
+- the check is a proof, not a file listing: it runs the shipped `server\PMKLicenseServer.exe` against a
+  throwaway `%LOCALAPPDATA%` on a free port, requires `licenses.json` and the admin-key file to appear there,
+  then drives `admin/upsert` → `login` → `admin/list` and records the result as `bundledLicenseServer` in
+  `release-check.json`. A trimmed publish drops reflection metadata unless it is rooted — that was a real
+  failure mode here (`JsonTypeInfo metadata ... was not provided`), hence `TrimmerRootAssembly` in the
+  server's csproj; keep the smoke test covering it.
 
 ## CI
 

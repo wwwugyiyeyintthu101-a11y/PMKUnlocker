@@ -152,11 +152,11 @@ namespace PMKUnlocker
                 for (int i = 0; i < 30 && !IsPortOpen(port); i++) Thread.Sleep(100);
 
                 // Server ဖိုင်ရှိပေမဲ့ port မတက်ရင် အကြောင်းရင်းကို startup log မှာ ချရေးတယ် —
-                // ဒါမရှိရင် login ကျရုံနဲ့ ဘာကြောင့်လဲ မသိနိုင်ဘူး (များသောအားဖြင့် .NET 10 ASP.NET
-                // runtime မရှိတာ (server က net10.0) သို့မဟုတ် admin မဟုတ်လို့ ProgramData မရေးနိုင်တာ)။
+                // ဒါမရှိရင် login ကျရုံနဲ့ ဘာကြောင့်လဲ မသိနိုင်ဘူး (များသောအားဖြင့် DataFile က ရေးလို့မရတဲ့
+                // folder ဖြစ်နေတာ၊ ဒါမှမဟုတ် server ဖိုင် မပြည့်စုံတာ)။
                 if (!IsPortOpen(port))
                     StartupMark("license server started but port " + port + " did not open (" + exe +
-                                ") - the server needs the .NET 10 ASP.NET runtime and, for the ProgramData data file, admin");
+                                ") - check that server\\appsettings.json names a writable data folder");
             }
             catch (Exception ex)
             {
