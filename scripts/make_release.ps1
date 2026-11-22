@@ -69,7 +69,10 @@ Write-Output "Installer : $($setup.FullName)"
 Write-Output "SHA-256   : $hash"
 Write-Output "Manifest  : $updatePath"
 Write-Output ''
-Write-Output "Next steps:"
+Write-Output 'Next steps:'
 Write-Output "  1. git tag v$verCore && git push origin v$verCore"
-Write-Output "  2. GitHub -> Releases -> New release on tag v$verCore"
+Write-Output '  2. scripts\publish_release.ps1   (reads update.json, creates or replaces the release on that tag,'
+Write-Output '     uploads the installer and update.json, then verifies releases/latest. Needs $env:GITHUB_TOKEN;'
+Write-Output '     add -DryRun to see the plan without sending anything, and re-run it to finish a half-done publish.)'
+Write-Output "  3. Or do it by hand: GitHub -> Releases -> New release on tag v$verCore"
 Write-Output "     upload: $($setup.Name)  +  update.json   (repo must be PUBLIC)"
