@@ -17,6 +17,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Large uploads over this link fail with "The underlying connection was closed" unless the client stops
+# asking for 100-continue before a 200 MB body (the proxy in between answers badly) and pins TLS 1.2.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+[Net.ServicePointManager]::Expect100Continue = $false
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -67,7 +71,7 @@ Write-Output "Manifest   : update.json"
 if ($DryRun) {
     Write-Output ''
     Write-Output 'DRY RUN - nothing was sent. Without -DryRun this would:'
-    Write-Output "  1. POST /repos/$Repo/releases  tag_name=$Tag  draft=false"
+    Write-Output "  1. POST /repos/$Repo/releases  tag_name=$Tag  draft=true, then PATCH draft=false after the assets verify"
     Write-Output "     (if it already exists: reuse it, keeping its current body unless -Notes is given)"
     Write-Output "  2. upload $installerName and update.json, replacing same-named assets"
     Write-Output '  3. print the release URL and verify releases/latest/download/update.json'
@@ -86,25 +90,36 @@ $headers = @{
 }
 $api = "https://api.github.com/repos/$Repo"
 
+# This link resets connections often enough that a single attempt is not a publish strategy. A transport error
+# (no HTTP response) and a 5xx are retried; a real 4xx answer is not, because retrying cannot fix it.
 function Invoke-GitHub([string]$Method, [string]$Uri, [object]$Body) {
     $params = @{ Method = $Method; Uri = $Uri; Headers = $headers }
     if ($null -ne $Body) {
         $params.Body = ($Body | ConvertTo-Json -Depth 5)
         $params.ContentType = 'application/json'
     }
-    try {
-        return Invoke-RestMethod @params
-    }
-    catch {
-        $detail = ''
-        if ($_.Exception.Response) {
-            try {
-                $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $detail = $reader.ReadToEnd()
-            }
-            catch { }
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        try {
+            return Invoke-RestMethod @params
         }
-        throw "GitHub $Method $Uri failed: $($_.Exception.Message.Trim()) $detail"
+        catch {
+            $status = 0
+            $detail = ''
+            if ($_.Exception.Response) {
+                try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+                try {
+                    $reader = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $detail = $reader.ReadToEnd()
+                }
+                catch { }
+            }
+            $retryable = ($status -eq 0 -or $status -ge 500)
+            if (!$retryable -or $attempt -eq 4) {
+                throw "GitHub $Method $Uri failed (attempt $attempt, HTTP $status): $($_.Exception.Message.Trim()) $detail"
+            }
+            Write-Output "GitHub      : $Method $($Uri -replace [regex]::Escape($api), '') attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying"
+            Start-Sleep -Seconds (5 * $attempt)
+        }
     }
 }
 
@@ -119,17 +134,22 @@ catch {
     if ($_.Exception.Message -notmatch '404') { throw }
 }
 
+# A release is created as a DRAFT and only switched live after both assets uploaded and verified. That order
+# matters: GitHub's releases/latest is the newest non-draft release, so an empty release created before a failed
+# upload makes releases/latest/download/update.json 404 for every installed client - auto-update dead, including
+# for the old version. A draft is invisible to that lookup, so a failed run leaves nothing to clean up.
+$stayDraft = $false
 if (!$release) {
     $body = @{
         tag_name         = $Tag
         name             = $Tag
         body             = if ($Notes) { $Notes } else { $update.notes }
-        draft            = $false
+        draft            = $true
         prerelease       = $false
         generate_release_notes = $false
     }
     $release = Invoke-GitHub 'POST' "$api/releases" $body
-    Write-Output "Release    : created (#$($release.id))"
+    Write-Output "Release    : created as a draft (#$($release.id)) - it goes live after the assets verify"
 }
 elseif ($Notes) {
     $release = Invoke-GitHub 'PATCH' "$api/releases/$($release.id)" @{ body = $Notes }
@@ -159,7 +179,7 @@ foreach ($asset in @(
     }
     $uri = '{0}?name={1}' -f $uploadBase, [uri]::EscapeDataString($asset.Name)
     $result = $null
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {
             $result = Invoke-RestMethod -Method 'POST' -Uri $uri -Headers $headers -ContentType $asset.Type `
                 -InFile $asset.Path -TimeoutSec 1500
@@ -172,11 +192,21 @@ foreach ($asset in @(
         $result = $null
         Start-Sleep -Seconds 10
     }
-    if (!$result) { throw "Uploading $($asset.Name) failed three times. The release is now missing this asset; re-run this script." }
+    if (!$result) {
+        throw "Uploading $($asset.Name) failed five times. The release was left as a DRAFT, so releases/latest still serves the previous version; re-run this script to finish."
+    }
     Write-Output "Asset      : uploaded $($asset.Name) ($($result.size) bytes)"
     $uploaded++
 }
 if ($uploaded -eq 0) { Write-Output 'Assets     : both already matched, nothing was re-uploaded' }
+
+# 2b. Everything is uploaded and digest-checked - publish the draft now, and only now. A re-run against a release
+#     that is already live simply confirms it.
+if ($release.draft) {
+    $release = Invoke-GitHub 'PATCH' "$api/releases/$($release.id)" @{ draft = $false }
+    Write-Output 'Release    : published (draft -> live)'
+    Start-Sleep -Seconds 3
+}
 
 # 3. Prove it from the public side: releases/latest is what UpdateChecker.cs reads. Invoke-RestMethod parses
 #    JSON into an object, but the CDN can also hand back the raw body, so both shapes are handled; a fresh
