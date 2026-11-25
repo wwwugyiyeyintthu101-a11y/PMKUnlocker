@@ -540,19 +540,29 @@ public class LoginForm : Form
         });
         panelBody.Controls.Add(panelCard);
 
-        // Prefill remember-me
+        // Prefill remember-me: email + (နောက် version မှာ သိမ်းထားတယ်ဆိုရင်) password blob + prefill password
         if (LocalLogin.TryRemembered(out string saved, out string savedSecret, out bool savedIsToken))
         {
             if (!string.IsNullOrEmpty(saved)) txtEmail.Text = saved;
-            if (savedIsToken)
+            if (!savedIsToken && !string.IsNullOrEmpty(savedSecret))
             {
-                // token mode — startup မှာ auto-login ကြိုးစားပြီး မရမှ ဒီ screen ရောက်တာ (password မသိမ်းထား)
+                // legacy password blob — prefill
+                txtPassword.Text = savedSecret;
+                txtPassword.UseSystemPasswordChar = true;
                 chkRemember.Checked = true;
             }
-            else if (!string.IsNullOrEmpty(savedSecret))
+            else
             {
-                // password blob — prefill (auto-login မရှိ — Login နှိပ်မှ ဝင်ရ)
-                txtPassword.Text = savedSecret;
+                // token mode — startup မှာ auto-login မလုပ်တော့ (login screen အမြဲပြ), password က prefill file က
+                chkRemember.Checked = true;
+            }
+        }
+        if (LocalLogin.TryPrefillPassword(out string prefillEmail, out string prefillPassword))
+        {
+            if (string.IsNullOrWhiteSpace(txtEmail.Text) && !string.IsNullOrEmpty(prefillEmail)) txtEmail.Text = prefillEmail;
+            if (!string.IsNullOrEmpty(prefillPassword))
+            {
+                txtPassword.Text = prefillPassword;
                 txtPassword.UseSystemPasswordChar = true;
                 chkRemember.Checked = true;
             }
@@ -822,10 +832,19 @@ public class LoginForm : Form
             }
 
             string email2 = txtEmail.Text.Trim();
-            // Remember me → server auto-login token ကိုပဲ DPAPI နဲ့ သိမ်း (password မသိမ်းရ)
-            if (chkRemember.Checked && !string.IsNullOrEmpty(loginRes.AutoToken))
-                LocalLogin.SaveRememberedToken(email2, loginRes.AutoToken);
-            else LocalLogin.ClearRemembered();
+            // Remember me → server auto-login token ကို DPAPI နဲ့ သိမ်းတယ် + prefill password ကိုလည်း
+            // သီးခြား DPAPI blob နဲ့ သိမ်းတယ် (login screen အမြဲပြ — ဖွင့်တိုင်း password ကို prefill)။
+            // Remember me မညီရင် နှစ်ခုလုံး ဖျက်။
+            if (chkRemember.Checked)
+            {
+                if (!string.IsNullOrEmpty(loginRes.AutoToken)) LocalLogin.SaveRememberedToken(email2, loginRes.AutoToken);
+                LocalLogin.SavePrefillPassword(email2, txtPassword.Text);
+            }
+            else
+            {
+                LocalLogin.ClearRemembered();
+                LocalLogin.ClearPrefillPassword();
+            }
 
             CompleteLogin(email2, loginRes);
             await Task.Delay(300); // brief success pause

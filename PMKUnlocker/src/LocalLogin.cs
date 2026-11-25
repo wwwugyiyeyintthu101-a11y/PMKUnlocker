@@ -75,6 +75,45 @@ internal static class LocalLogin
         try { if (File.Exists(SessionPath)) File.Delete(SessionPath); } catch { }
     }
 
+    // Prefill password storage (operator request): the login screen always shows, and the remembered
+    // password is filled in so the operator only presses Sign In. It is a separate DPAPI blob from the
+    // remember-me token: the token is what the server honours, this is only what the box pre-fills.
+    // DPAPI CurrentUser means another Windows account cannot read it — anyone sitting at the same
+    // Windows account can, which is the trade the shop asked for knowingly.
+    private static string PrefillPasswordPath => ShopServices.DataPath("pmk_saved_password.bin");
+
+    internal static void SavePrefillPassword(string email, string password)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password)) { ClearPrefillPassword(); return; }
+        string plain = email.Trim() + "\n" + password;
+        byte[] blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), null, DataProtectionScope.CurrentUser);
+        File.WriteAllBytes(PrefillPasswordPath, blob);
+    }
+
+    // Returns the saved prefill password only when it belongs to the same email.
+    internal static bool TryPrefillPassword(out string email, out string password)
+    {
+        email = "";
+        password = "";
+        try
+        {
+            if (!File.Exists(PrefillPasswordPath)) return false;
+            string plain = Encoding.UTF8.GetString(ProtectedData.Unprotect(
+                File.ReadAllBytes(PrefillPasswordPath), null, DataProtectionScope.CurrentUser));
+            int nl = plain.IndexOf('\n');
+            if (nl <= 0) return false;
+            email = plain[..nl].Trim();
+            password = plain[(nl + 1)..];
+            return email.Length > 0 && password.Length > 0;
+        }
+        catch { return false; }
+    }
+
+    internal static void ClearPrefillPassword()
+    {
+        try { if (File.Exists(PrefillPasswordPath)) File.Delete(PrefillPasswordPath); } catch { }
+    }
+
     internal static string? SavedRememberedEmail()
     {
         return TryRemembered(out string email, out _, out _) ? email : null;
