@@ -286,5 +286,64 @@ public partial class Form1
             catch (Exception ex) { MessageBox.Show(ex.Message); }
         };
         support.Controls.Add(records); support.Controls.Add(saveRecords); tabs.TabPages.Add(support);
+
+        // The sub-tab tree was built with WinForms defaults (white pages, pale labels) while the rest
+        // of the tool is dark, so this tab looked broken and was hard to read. Walk the whole tree
+        // and give every control the canonical dark palette from UiTheme.
+        ThemeShopControls(page);
+    }
+
+    private static void ThemeShopControls(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            switch (c)
+            {
+                case DataGridView dgv:
+                    ThemeShopGrid(dgv);
+                    break;
+                case ListBox lb:
+                    lb.BorderStyle = BorderStyle.FixedSingle;
+                    lb.BackColor = UiTheme.Sunken;
+                    lb.ForeColor = UiTheme.TextBody;
+                    break;
+                case ComboBox cb:
+                    cb.FlatStyle = FlatStyle.Flat;
+                    cb.BackColor = UiTheme.Raised;
+                    cb.ForeColor = UiTheme.TextPrimary;
+                    break;
+                case Button b:
+                    b.FlatStyle = FlatStyle.Flat;
+                    b.FlatAppearance.BorderColor = UiTheme.Border;
+                    b.FlatAppearance.MouseOverBackColor = UiTheme.BorderStrong;
+                    b.BackColor = UiTheme.Raised;
+                    b.ForeColor = UiTheme.TextPrimary;
+                    break;
+                case Label l:
+                    l.BackColor = Color.Transparent;
+                    l.ForeColor = UiTheme.TextBody;
+                    break;
+                default:
+                    c.BackColor = UiTheme.Card;
+                    c.ForeColor = UiTheme.TextBody;
+                    break;
+            }
+            if (c.HasChildren) ThemeShopControls(c);
+        }
+    }
+
+    private static void ThemeShopGrid(DataGridView dgv)
+    {
+        dgv.EnableHeadersVisualStyles = false;
+        dgv.BackgroundColor = UiTheme.Raised;
+        dgv.BorderStyle = BorderStyle.None;
+        dgv.GridColor = UiTheme.Border;
+        dgv.DefaultCellStyle.BackColor = UiTheme.Raised;
+        dgv.DefaultCellStyle.ForeColor = UiTheme.TextPrimary;
+        dgv.DefaultCellStyle.SelectionBackColor = UiTheme.AccentBrandDeep;
+        dgv.DefaultCellStyle.SelectionForeColor = UiTheme.TextPrimary;
+        dgv.ColumnHeadersDefaultCellStyle.BackColor = UiTheme.Border;
+        dgv.ColumnHeadersDefaultCellStyle.ForeColor = UiTheme.AccentBrandSoft;
+        dgv.RowHeadersVisible = false;
     }
 }
