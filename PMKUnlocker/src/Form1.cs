@@ -137,7 +137,7 @@ namespace PMKUnlocker
         // Header: platform + theme status
         private Label lblPlatformStatus;
         private Label lblBattery;
-        private Button btnThemeToggle;
+        // btnThemeToggle was removed with the Dark/Light switch — the tool is dark-only now.
         private bool lightTheme = false;
         private readonly HashSet<string> warnedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

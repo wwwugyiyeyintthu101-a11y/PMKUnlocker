@@ -113,10 +113,9 @@ namespace PMKUnlocker
             if (toolTipMain != null)
                 Tip(lblBattery, "ADB device battery level (auto-refresh with device poll)");
 
-            btnThemeToggle = Create3DButton("🌙 Dark", 660, 12, 90, 34, ButtonTheme.Purple);
-            btnThemeToggle.Click += (s, e) => ToggleTheme();
-            if (toolTipMain != null)
-                Tip(btnThemeToggle, "Switch between Dark and Light theme.");
+            // The Dark/Light toggle was removed: the tool is dark-only now, so the header has room for
+            // the controls that matter and one fewer mode to test. Old settings files that still carry
+            // LightTheme=1 are ignored (the key was dropped from the settings writer too).
 
             // Login email + ကျန်ရက် + clock — header ညာဘက် stack (overlap မဖြစ်အောင်)
             lblLicenseInfo = MakeLicenseLabel();
@@ -174,7 +173,7 @@ namespace PMKUnlocker
             panelRightInfo.Controls.Add(panelLicenseBadge); // Top
             panelTopHeader.Controls.Add(panelRightInfo);
 
-            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery, btnThemeToggle });
+            panelTopHeader.Controls.AddRange(new Control[] { lblPort, cmbPorts, btnRefreshPorts, btnOpenDeviceManager, btnDrivers, lblDeviceModeStatus, lblPlatformStatus, lblBattery });
 
             // ================= 2. TAB CONTROL =================
             // အပေါ်ဘက် split panel ထဲမှာ ဖြည့်ထားတယ် (window resize လုပ်ရင် အလိုအလျောက် လိုက်ပြောင်း)
@@ -1544,14 +1543,6 @@ namespace PMKUnlocker
             this.Controls.Add(rootLayout);
         }
 
-        // ================= THEME TOGGLE =================
-        private void ToggleTheme()
-        {
-            lightTheme = !lightTheme;
-            ApplyTheme();
-            SaveSettings();
-        }
-
         private void SyncPlatformBar()
         {
             if (platformBtns == null) return;
@@ -1698,10 +1689,11 @@ namespace PMKUnlocker
 
         private void ApplyTheme()
         {
+            // Dark-only: the toggle was removed (operator request). The light branches below are dead
+            // code that never runs because lightTheme stays false; they are left in place so a future
+            // light mode only needs the flag flipped, not a rewrite.
             // window-less modal dialog (ConfirmDialog) ကို လက်ရှိ theme နဲ့ တူအောင်
             ConfirmDialog.DarkMode = !lightTheme;
-
-            if (btnThemeToggle != null) btnThemeToggle.Text = lightTheme ? "🌙 Dark" : "☀ Light";
 
             // Light mode: pure white တွေ မသုံးဘဲ soft blue-gray / muted tone (မတောက်အောင်)
             Color formBg = lightTheme ? Color.FromArgb(222, 228, 240) : Color.FromArgb(18, 20, 24);

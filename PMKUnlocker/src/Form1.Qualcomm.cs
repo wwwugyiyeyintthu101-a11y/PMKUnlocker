@@ -523,7 +523,8 @@ namespace PMKUnlocker
                 Set(chkQcAutoReboot, "QcAutoReboot");
                 Set(chkSamBackupPit, "SamBackupPit");
                 Set(chkSamAutoReboot, "SamAutoReboot");
-                if (map.TryGetValue("LightTheme", out string lt)) { lightTheme = AsBool(lt); ApplyTheme(); }
+                // LightTheme key intentionally not read any more — the tool is dark-only and an old
+                // settings file that still carries LightTheme=1 must not re-enable it.
 
                 // String settings — last COM port / splitter
                 // Firmware folder paths ကို မသိမ်းတော့ — ဖွင့်တိုင်း clean (user request)
@@ -563,13 +564,12 @@ namespace PMKUnlocker
                 Line(chkQcAutoReboot, "QcAutoReboot", sb);
                 Line(chkSamBackupPit, "SamBackupPit", sb);
                 Line(chkSamAutoReboot, "SamAutoReboot", sb);
-                sb.Append("LightTheme=").Append(lightTheme ? "1" : "0").AppendLine();
                 // MtkFirmware / QcFirmware ကို ရေးတော့မပါ — ပိတ်ရင် path အဟောင်း ဖျက်သွားမယ်
                 Str("LastPort", cmbPorts?.SelectedItem?.ToString() ?? "", sb);
                 Str("SplitterDistance", userAdjustedSplit ? splitMain.SplitterDistance.ToString() : "", sb);
                 // panel-written keys (MtkNvBackupRoot …) — whole-file rewrite မှာ မပျက်အောင် preserve
                 var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "QcBackupEfsFirst", "QcSkipUserdata", "QcResetFrpAfter", "QcAutoReboot", "SamBackupPit", "SamAutoReboot", "LightTheme", "LastPort", "SplitterDistance" };
+                    { "QcBackupEfsFirst", "QcSkipUserdata", "QcResetFrpAfter", "QcAutoReboot", "SamBackupPit", "SamAutoReboot", "LastPort", "SplitterDistance" };
                 try
                 {
                     if (File.Exists(SettingsFile))
