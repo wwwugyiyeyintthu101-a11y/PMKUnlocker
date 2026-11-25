@@ -48,10 +48,10 @@ public class LoginForm : Form
     private static readonly Color PageBg      = Color.FromArgb(12, 116, 144);
     private static readonly Color CardBg      = Color.FromArgb(16, 42, 52);
     private static readonly Color StatusBg    = Color.FromArgb(7, 89, 110);
-    private static readonly Color TextDark    = Color.FromArgb(235, 235, 245);
-    private static readonly Color TextMuted   = Color.FromArgb(150, 150, 170);
-    private static readonly Color BorderCol   = Color.FromArgb(70, 75, 95);
-    private static readonly Color InputBg     = Color.FromArgb(41, 38, 92);
+    private static readonly Color TextDark    = Color.FromArgb(238, 244, 248);
+    private static readonly Color TextMuted   = Color.FromArgb(178, 192, 206);
+    private static readonly Color BorderCol   = Color.FromArgb(48, 96, 110);
+    private static readonly Color InputBg     = Color.FromArgb(10, 34, 44);
     private static readonly Color Success     = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger      = Color.FromArgb(255, 110, 110);
 
@@ -358,7 +358,7 @@ public class LoginForm : Form
             Text = "Sign in to continue to PMK Mobile Tool",
             Location = new Point(left + 70, 56),
             AutoSize = true,
-            ForeColor = Color.FromArgb(165, 172, 202),
+            ForeColor = Color.FromArgb(190, 202, 216),
             Font = new Font("Segoe UI", 9.5f)
         };
 
@@ -367,7 +367,7 @@ public class LoginForm : Form
             Text = "EMAIL ID",
             Location = new Point(left, 106),
             AutoSize = true,
-            ForeColor = Color.FromArgb(158, 164, 196),
+            ForeColor = Color.FromArgb(198, 208, 222),
             Font = FLbl
         };
         txtEmail = MakeField(left, 128, fieldW, 42, "user@gmail.com", out var emailWrap);
@@ -377,7 +377,7 @@ public class LoginForm : Form
             Text = "PASSWORD",
             Location = new Point(left, 188),
             AutoSize = true,
-            ForeColor = Color.FromArgb(158, 164, 196),
+            ForeColor = Color.FromArgb(198, 208, 222),
             Font = FLbl
         };
         txtPassword = MakeField(left, 210, fieldW - 78, 42, PasswordPlaceholder, out var passWrap);
@@ -670,7 +670,7 @@ public class LoginForm : Form
             TextAlign = HorizontalAlignment.Center,
             Text = placeholder
         };
-        tb.ForeColor = Color.FromArgb(120, 120, 140);
+        tb.ForeColor = Color.FromArgb(132, 152, 166);
         tb.GotFocus += (_, _) =>
         {
             wrap.Tag = true;
@@ -681,7 +681,7 @@ public class LoginForm : Form
         {
             wrap.Tag = false;
             wrap.Invalidate();
-            if (string.IsNullOrWhiteSpace(tb.Text)) { tb.Text = placeholder; tb.ForeColor = Color.FromArgb(120, 120, 140); }
+            if (string.IsNullOrWhiteSpace(tb.Text)) { tb.Text = placeholder; tb.ForeColor = Color.FromArgb(132, 152, 166); }
         };
         wrap.Paint += (_, e) =>
         {

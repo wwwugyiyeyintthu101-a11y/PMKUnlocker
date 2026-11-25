@@ -10,10 +10,10 @@ public class PasswordResetForm : Form
     private bool busy;
 
     private static readonly Color CardBg = Color.FromArgb(16, 42, 52);
-    private static readonly Color InputBg = Color.FromArgb(41, 38, 92);
+    private static readonly Color InputBg = Color.FromArgb(10, 34, 44);
     private static readonly Color Accent = Color.FromArgb(34, 211, 238);
-    private static readonly Color TextDark = Color.FromArgb(235, 235, 245);
-    private static readonly Color TextMuted = Color.FromArgb(165, 172, 202);
+    private static readonly Color TextDark = Color.FromArgb(238, 244, 248);
+    private static readonly Color TextMuted = Color.FromArgb(178, 192, 206);
     private static readonly Color Success = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger = Color.FromArgb(255, 110, 110);
 
