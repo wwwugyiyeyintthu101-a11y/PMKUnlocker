@@ -558,7 +558,7 @@ namespace PMKUnlocker
                     Text = "USB / COM driver status — known VIDs (MediaTek, Qualcomm, Samsung, Unisoc, HiSilicon)",
                     Location = new Point(12, 10),
                     AutoSize = true,
-                    ForeColor = lightTheme ? Color.FromArgb(58, 102, 208) : Color.FromArgb(86, 145, 250),
+                    ForeColor = lightTheme ? Color.FromArgb(124, 58, 237) : Color.FromArgb(139, 92, 246),
                     Font = new Font("Segoe UI", 9f, FontStyle.Bold)
                 };
 

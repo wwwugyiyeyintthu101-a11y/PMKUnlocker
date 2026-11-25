@@ -610,13 +610,13 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
             Color formBg = dark ? Color.FromArgb(18, 20, 24) : Color.FromArgb(222, 228, 240);
             Color listBg = dark ? Color.FromArgb(26, 29, 35) : Color.FromArgb(243, 246, 252);
             Color listFg = dark ? Color.Gainsboro : Color.FromArgb(35, 38, 48);
-            Color titleC = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
+            Color titleC = dark ? Color.FromArgb(139, 92, 246) : Color.FromArgb(124, 58, 237);
             Color hintC = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(70, 80, 95);
-            Color okBg = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
+            Color okBg = dark ? Color.FromArgb(139, 92, 246) : Color.FromArgb(124, 58, 237);
             Color cancelBg = dark ? Color.FromArgb(60, 66, 76) : Color.FromArgb(150, 158, 170);
             Color greenC = dark ? Color.FromArgb(0, 220, 140) : Color.FromArgb(0, 130, 70);
             Color redC = dark ? Color.FromArgb(255, 110, 80) : Color.FromArgb(200, 60, 30);
-            Color cyanC = dark ? Color.FromArgb(86, 145, 250) : Color.FromArgb(58, 102, 208);
+            Color cyanC = dark ? Color.FromArgb(139, 92, 246) : Color.FromArgb(124, 58, 237);
 
             using var dlg = new Form
             {
@@ -679,7 +679,7 @@ Log("[!] Provision settings not applied — Android 11+ may need temp root (Magi
                 using (var fb = new SolidBrush(fg))
                     e.Graphics.DrawString(list.Items[e.Index].ToString(), list.Font, fb, e.Bounds.X + 4, e.Bounds.Y + 4);
                 if ((e.State & DrawItemState.Focus) != 0)
-                    using (var p = new Pen(Color.FromArgb(86, 145, 250)))
+                    using (var p = new Pen(Color.FromArgb(139, 92, 246)))
                         e.Graphics.DrawRectangle(p, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
             };
             var cancel = new Button

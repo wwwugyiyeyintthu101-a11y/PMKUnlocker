@@ -35,12 +35,13 @@ namespace PMKUnlocker
         public static readonly Color TextSecondary = Color.FromArgb(150, 165, 185);
 
         // ---- accents ----
-        public static readonly Color AccentBlue = Color.FromArgb(86, 145, 250);      // links, headers, selection
-        public static readonly Color AccentBlueDeep = Color.FromArgb(58, 102, 208);  // pressed / darker variant
-        public static readonly Color AccentCyan = Color.FromArgb(0, 180, 255);       // info/log highlights
-        public static readonly Color AccentPurple = Color.FromArgb(139, 92, 246);    // brand (login screen)
-        public static readonly Color AccentPurpleHover = Color.FromArgb(124, 58, 237);
-        public static readonly Color AccentPurpleSoft = Color.FromArgb(167, 139, 250);
+        // The brand accent is purple everywhere (login screen, header, tabs, links). The blue set
+        // that used to live here was retired in favour of these; cyan stays a log/info colour and
+        // is not used for interactive elements.
+        public static readonly Color AccentBrand = Color.FromArgb(139, 92, 246);     // tabs, links, headers, selection
+        public static readonly Color AccentBrandDeep = Color.FromArgb(124, 58, 237); // pressed / darker variant
+        public static readonly Color AccentBrandSoft = Color.FromArgb(167, 139, 250);// hover rings, selected borders
+        public static readonly Color AccentCyan = Color.FromArgb(0, 180, 255);       // log/info text highlights
 
         // ---- status (log and badges) ----
         public static readonly Color Success = Color.LightGreen;

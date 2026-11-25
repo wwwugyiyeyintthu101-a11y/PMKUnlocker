@@ -942,7 +942,7 @@ namespace PMKUnlocker
                         Location = new Point(120, 11),
                         Size = new Size(770, 18),
                         AutoEllipsis = true,
-                        ForeColor = Color.FromArgb(86, 145, 250),
+                        ForeColor = Color.FromArgb(139, 92, 246),
                         Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                     };
                     Button det = Create3DButton("🔍 Detect", 15, 7, 96, 26, ButtonTheme.Cyan);
@@ -970,7 +970,7 @@ namespace PMKUnlocker
                     Text = title + "  (" + total + " models)",
                     Location = new Point(15, y - 19),
                     AutoSize = true,
-                    ForeColor = Color.FromArgb(86, 145, 250),
+                    ForeColor = Color.FromArgb(139, 92, 246),
                     Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                 };
 
@@ -1021,7 +1021,7 @@ namespace PMKUnlocker
                     Location = new Point(513, y + 4),
                     Size = new Size(175, 18),
                     AutoEllipsis = true,
-                    ForeColor = Color.FromArgb(86, 145, 250),
+                    ForeColor = Color.FromArgb(139, 92, 246),
                     Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
                 };
 
@@ -1110,7 +1110,7 @@ namespace PMKUnlocker
                     {
                         // MTK: model ဘာမှ မရွေးရသေးရင် "Auto Detect" — တခြား tab တွေ "—"
                         lbChip.Text = page == tabMtk ? "Auto Detect" : "—";
-                        lbChip.ForeColor = Color.FromArgb(86, 145, 250);
+                        lbChip.ForeColor = Color.FromArgb(139, 92, 246);
                         opsStrip.Visible = false;
                         SetPickerOffset(page, PickerOff(page, false));
                         return;

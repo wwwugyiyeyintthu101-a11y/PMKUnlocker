@@ -42,9 +42,9 @@ public class LoginForm : Form
     private static readonly Color Accent      = Color.FromArgb(139, 92, 246);
     private static readonly Color AccentHover = Color.FromArgb(124, 58, 237);
     private static readonly Color AccentDark  = Color.FromArgb(167, 139, 250);
-    private static readonly Color Cyan        = Color.FromArgb(86, 145, 250);    // badge blue
-    private static readonly Color TitleTop    = Color.FromArgb(86, 145, 250);    // page gradient start (badge blue)
-    private static readonly Color TitleBot    = Color.FromArgb(139, 92, 246);    // page gradient end (badge violet)
+    private static readonly Color Cyan        = Color.FromArgb(167, 139, 250);    // badge highlight (brand soft purple)
+    private static readonly Color TitleTop    = Color.FromArgb(167, 139, 250);    // page gradient start (soft)
+    private static readonly Color TitleBot    = Color.FromArgb(124, 58, 237);    // page gradient end (deep)
     private static readonly Color PageBg      = Color.FromArgb(112, 66, 224);
     private static readonly Color CardBg      = Color.FromArgb(33, 31, 74);
     private static readonly Color StatusBg    = Color.FromArgb(72, 47, 156);
@@ -210,9 +210,9 @@ public class LoginForm : Form
             using var p = new Pen(Color.FromArgb(40, 139, 92, 246));
             g.DrawLine(p, 0, 0, panelStatus.Width, 0);
             // steady status dot (no blinking)
-            using (var dg = new SolidBrush(Color.FromArgb(55, 86, 145, 250)))
+            using (var dg = new SolidBrush(Color.FromArgb(55, 139, 92, 246)))
                 g.FillEllipse(dg, 5, 13, 10, 10);
-            using (var dd = new SolidBrush(Color.FromArgb(220, 86, 145, 250)))
+            using (var dd = new SolidBrush(Color.FromArgb(220, 139, 92, 246)))
                 g.FillEllipse(dd, 8, 16, 4, 4);
         };
         lblStatus = new Label
@@ -680,7 +680,7 @@ public class LoginForm : Form
             bool on = wrap.Tag is true;
             if (on)
             {
-                using var glow = new Pen(Color.FromArgb(45, 86, 145, 250), 5f);
+                using var glow = new Pen(Color.FromArgb(45, 139, 92, 246), 5f);
                 DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
             }
             using var p = new Pen(on ? Cyan : Color.FromArgb(74, 70, 138), on ? 2f : 1.3f);

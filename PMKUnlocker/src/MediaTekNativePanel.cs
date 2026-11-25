@@ -206,7 +206,7 @@ public partial class Form1
             Location = new Point(UiX(0), UiY(6)),
             Size = new Size(856, 20),
             Text = "",
-            ForeColor = Color.FromArgb(86, 145, 250),
+            ForeColor = Color.FromArgb(139, 92, 246),
             Font = new Font("Segoe UI", 8f),
             AutoEllipsis = true
         };
