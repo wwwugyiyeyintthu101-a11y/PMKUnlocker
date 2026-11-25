@@ -192,13 +192,13 @@ namespace PMKUnlocker
             tabControl.ItemSize = new Size(0, 1);
             tabControl.SizeMode = TabSizeMode.Fixed;
 
-            tabAdb = new TabPage("ADB") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabFb = new TabPage("Fastboot") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabMtk = new TabPage("MediaTek") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabQc = new TabPage("Qualcomm") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabSamsung = new TabPage("Samsung") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabSpd = new TabPage("Spreadtrum") { BackColor = Color.FromArgb(28, 31, 38) };
-            tabHisi = new TabPage("HiSilicon") { BackColor = Color.FromArgb(28, 31, 38) };
+            tabAdb = new TabPage("ADB") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabFb = new TabPage("Fastboot") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabMtk = new TabPage("MediaTek") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabQc = new TabPage("Qualcomm") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabSamsung = new TabPage("Samsung") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabSpd = new TabPage("Spreadtrum") { BackColor = Color.FromArgb(26, 29, 35) };
+            tabHisi = new TabPage("HiSilicon") { BackColor = Color.FromArgb(26, 29, 35) };
 
             tabControl.TabPages.AddRange(new TabPage[] { tabAdb, tabFb, tabMtk, tabQc, tabSamsung, tabSpd, tabHisi });
 
@@ -493,7 +493,7 @@ namespace PMKUnlocker
                 ForeColor = Color.FromArgb(220, 226, 236),
                 BackgroundColor = Color.FromArgb(30, 33, 40),
                 BorderStyle = BorderStyle.FixedSingle,
-                GridColor = Color.FromArgb(45, 50, 60),
+                GridColor = Color.FromArgb(45, 49, 58),
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false,
@@ -509,7 +509,7 @@ namespace PMKUnlocker
             dgvMiParts.DefaultCellStyle.BackColor = Color.FromArgb(30, 33, 40);
             dgvMiParts.DefaultCellStyle.SelectionBackColor = Color.FromArgb(60, 84, 130);
             dgvMiParts.DefaultCellStyle.SelectionForeColor = Color.White;
-            dgvMiParts.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(38, 44, 54);
+            dgvMiParts.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(38, 42, 50);
             dgvMiParts.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             dgvMiParts.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8f, FontStyle.Bold);
             var miColChk = new DataGridViewCheckBoxColumn
@@ -610,7 +610,7 @@ namespace PMKUnlocker
             dgvPartitions = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                BackgroundColor = Color.FromArgb(20, 22, 26),
+                BackgroundColor = Color.FromArgb(18, 20, 24),
                 ForeColor = Color.White,
                 GridColor = Color.FromArgb(45, 49, 58),
                 RowHeadersVisible = false,
@@ -624,12 +624,12 @@ namespace PMKUnlocker
                 ContextMenuStrip = ctxPartitionMenu
             };
             dgvPartitions.CellMouseDown += DgvPartitions_CellMouseDown;
-            dgvPartitions.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
+            dgvPartitions.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
             dgvPartitions.DefaultCellStyle.ForeColor = Color.White;
             dgvPartitions.DefaultCellStyle.SelectionBackColor = Color.FromArgb(86, 145, 250);
             dgvPartitions.DefaultCellStyle.SelectionForeColor = Color.White;
             dgvPartitions.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
-            dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(35, 40, 50);
+            dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(35, 38, 48);
             dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(86, 145, 250);
             dgvPartitions.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             dgvPartitions.ColumnHeadersHeight = 32;
@@ -804,10 +804,10 @@ namespace PMKUnlocker
                 DrawMode = TabDrawMode.Normal,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold)
             };
-            qcModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(28, 31, 38) });
-            qcModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(28, 31, 38) });
-            qcModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(28, 31, 38) });
-            qcModes.TabPages.Add(new TabPage("FLASH") { BackColor = Color.FromArgb(28, 31, 38) });
+            qcModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(26, 29, 35) });
+            qcModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(26, 29, 35) });
+            qcModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(26, 29, 35) });
+            qcModes.TabPages.Add(new TabPage("FLASH") { BackColor = Color.FromArgb(26, 29, 35) });
             foreach (TabPage tp in qcModes.TabPages)
             {
                 tp.Padding = new Padding(8);
@@ -1287,7 +1287,7 @@ namespace PMKUnlocker
             panelPartition = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(20, 22, 26)
+                BackColor = Color.FromArgb(18, 20, 24)
             };
 
             panelPartitionHeader = new Panel { Dock = DockStyle.Top, Height = 24, BackColor = Color.FromArgb(26, 29, 35) };
@@ -1399,7 +1399,7 @@ namespace PMKUnlocker
                     // 8 button ဆိုတာ ညာဘက် panel (~900px) ထဲ ဆံ့အောင် width/margin ကို ချိန်ထားတယ်
                     Size = new Size(106, 32),
                     FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(38, 44, 54),
+                    BackColor = Color.FromArgb(38, 42, 50),
                     ForeColor = Color.White,
                     Font = new Font("Segoe UI", 8.75f, FontStyle.Bold),
                     Margin = new Padding(0, 0, 3, 2),
@@ -1569,7 +1569,7 @@ namespace PMKUnlocker
                 }
                 else
                 {
-                    platformBtns[i].BackColor = sel ? Color.FromArgb(86, 145, 250) : Color.FromArgb(38, 44, 54);
+                    platformBtns[i].BackColor = sel ? Color.FromArgb(86, 145, 250) : Color.FromArgb(38, 42, 50);
                     platformBtns[i].ForeColor = Color.White;
                     platformBtns[i].FlatAppearance.BorderColor = sel ? Color.FromArgb(129, 169, 255) : Color.FromArgb(70, 80, 95);
                 }
@@ -1706,7 +1706,7 @@ namespace PMKUnlocker
             // Light mode: pure white တွေ မသုံးဘဲ soft blue-gray / muted tone (မတောက်အောင်)
             Color formBg = lightTheme ? Color.FromArgb(222, 228, 240) : Color.FromArgb(18, 20, 24);
             Color headerBg = lightTheme ? Color.FromArgb(208, 215, 231) : Color.FromArgb(26, 29, 35);
-            Color tabBg = lightTheme ? Color.FromArgb(230, 235, 245) : Color.FromArgb(28, 31, 38);
+            Color tabBg = lightTheme ? Color.FromArgb(230, 235, 245) : Color.FromArgb(26, 29, 35);
             Color text = lightTheme ? Color.FromArgb(35, 38, 48) : Color.White;
             Color panelBg = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(23, 26, 32);
             Color logBg = lightTheme ? Color.FromArgb(228, 234, 246) : Color.FromArgb(10, 11, 14);
@@ -1737,7 +1737,7 @@ namespace PMKUnlocker
             if (panelProgress != null) { panelProgress.BackColor = chromeBg2; EnsureThemePaint(panelProgress); }
             if (platformBar != null) { platformBar.BackColor = chromeBg; EnsureThemePaint(platformBar); }
             if (splitMain != null) splitMain.BackColor = splitBg;
-            if (panelPartition != null) { panelPartition.BackColor = lightTheme ? Color.FromArgb(224, 230, 242) : Color.FromArgb(20, 22, 26); EnsureThemePaint(panelPartition); }
+            if (panelPartition != null) { panelPartition.BackColor = lightTheme ? Color.FromArgb(224, 230, 242) : Color.FromArgb(18, 20, 24); EnsureThemePaint(panelPartition); }
             if (panelPartitionHeader != null) { panelPartitionHeader.BackColor = chromeBg2; EnsureThemePaint(panelPartitionHeader); }
             if (panelPartBtns != null) { panelPartBtns.BackColor = chromeBg2; EnsureThemePaint(panelPartBtns); }
             if (tabControl != null) tabControl.BackColor = formBg;
@@ -1844,10 +1844,10 @@ namespace PMKUnlocker
 
             if (dgvPartitions != null)
             {
-                dgvPartitions.BackgroundColor = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(20, 22, 26);
-                dgvPartitions.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(28, 31, 38);
+                dgvPartitions.BackgroundColor = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(18, 20, 24);
+                dgvPartitions.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(26, 29, 35);
                 dgvPartitions.DefaultCellStyle.ForeColor = text;
-                dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 40, 50);
+                dgvPartitions.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 38, 48);
                 dgvPartitions.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
             }
 
@@ -1856,10 +1856,10 @@ namespace PMKUnlocker
             {
                 if (c is DataGridView dgv && dgv != dgvPartitions)
                 {
-                    dgv.BackgroundColor = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(28, 31, 38);
-                    dgv.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(35, 40, 50);
+                    dgv.BackgroundColor = lightTheme ? Color.FromArgb(226, 232, 243) : Color.FromArgb(26, 29, 35);
+                    dgv.DefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(35, 38, 48);
                     dgv.DefaultCellStyle.ForeColor = text;
-                    dgv.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 40, 50);
+                    dgv.ColumnHeadersDefaultCellStyle.BackColor = lightTheme ? Color.FromArgb(212, 219, 234) : Color.FromArgb(35, 38, 48);
                     dgv.ColumnHeadersDefaultCellStyle.ForeColor = lightTheme ? Color.FromArgb(94, 66, 186) : Color.FromArgb(86, 145, 250);
                 }
                 else if (c is ListBox lb && lb != null)
@@ -1985,7 +1985,7 @@ namespace PMKUnlocker
                     borderColor = Color.FromArgb(175, 100, 240);
                     break;
                 default:
-                    gradStops = new[] { Color.FromArgb(70, 78, 92), Color.FromArgb(45, 50, 60), Color.FromArgb(30, 33, 40) };
+                    gradStops = new[] { Color.FromArgb(70, 78, 92), Color.FromArgb(45, 49, 58), Color.FromArgb(30, 33, 40) };
                     borderColor = Color.FromArgb(80, 88, 102);
                     break;
             }

@@ -579,7 +579,7 @@ namespace PMKUnlocker
                     Multiline = true,
                     ScrollBars = ScrollBars.Vertical,
                     ReadOnly = true,
-                    BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(24, 27, 33),
+                    BackColor = lightTheme ? Color.FromArgb(240, 244, 251) : Color.FromArgb(23, 26, 32),
                     ForeColor = lightTheme ? Color.FromArgb(35, 38, 48) : Color.FromArgb(200, 220, 240),
                     Font = new Font("Consolas", 8.5f),
                     BorderStyle = BorderStyle.FixedSingle

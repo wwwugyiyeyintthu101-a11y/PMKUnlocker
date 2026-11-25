@@ -131,10 +131,10 @@ public partial class Form1
             DrawMode = TabDrawMode.Normal,
             Font = new Font("Segoe UI", 9f, FontStyle.Bold)
         };
-        mtkModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(28, 31, 38) });
-        mtkModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(28, 31, 38) });
-        mtkModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(28, 31, 38) });
-        mtkModes.TabPages.Add(new TabPage("FLASH") { BackColor = Color.FromArgb(28, 31, 38) });
+        mtkModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(26, 29, 35) });
+        mtkModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(26, 29, 35) });
+        mtkModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(26, 29, 35) });
+        mtkModes.TabPages.Add(new TabPage("FLASH") { BackColor = Color.FromArgb(26, 29, 35) });
         foreach (TabPage tp in mtkModes.TabPages)
         {
             tp.Padding = new Padding(8);
@@ -212,13 +212,13 @@ public partial class Form1
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             RowHeadersVisible = false,
-            BackgroundColor = Color.FromArgb(28, 31, 38),
+            BackgroundColor = Color.FromArgb(26, 29, 35),
             BorderStyle = BorderStyle.FixedSingle,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
             Font = new Font("Segoe UI", 8.5f)
         };
-        mediaTekInfoGrid.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
+        mediaTekInfoGrid.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
         mediaTekInfoGrid.DefaultCellStyle.ForeColor = Color.Gainsboro;
         mediaTekInfoGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(86, 145, 250);
         mediaTekInfoGrid.DefaultCellStyle.SelectionForeColor = Color.White;
@@ -431,13 +431,13 @@ public partial class Form1
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             RowHeadersVisible = false,
-            BackgroundColor = Color.FromArgb(28, 31, 38),
+            BackgroundColor = Color.FromArgb(26, 29, 35),
             BorderStyle = BorderStyle.FixedSingle,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
             Font = new Font("Segoe UI", 8.5f)
         };
-        mediaTekGrid.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
+        mediaTekGrid.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
         mediaTekGrid.DefaultCellStyle.ForeColor = Color.Gainsboro;
         mediaTekGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(86, 145, 250);
         mediaTekGrid.DefaultCellStyle.SelectionForeColor = Color.White;
@@ -528,7 +528,7 @@ public partial class Form1
             var text = new TextBox { Location = new Point(60, 2), Size = new Size(160, 24), Text = get(), ReadOnly = true, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 8f) };
             text.TextChanged += (_, _) => set(text.Text.Trim());
             rowPanel.Controls.Add(text);
-            var browse = new Button { Text = "…", Location = new Point(225, 2), Size = new Size(28, 24), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(45, 50, 60), ForeColor = Color.White };
+            var browse = new Button { Text = "…", Location = new Point(225, 2), Size = new Size(28, 24), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(45, 49, 58), ForeColor = Color.White };
             browse.Click += (_, _) => { using var pick = new OpenFileDialog { Filter = filter }; if (pick.ShowDialog(this) == DialogResult.OK) text.Text = pick.FileName; };
             rowPanel.Controls.Add(browse);
             return rowPanel;

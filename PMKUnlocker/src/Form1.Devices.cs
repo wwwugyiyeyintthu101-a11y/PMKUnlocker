@@ -1042,7 +1042,7 @@ namespace PMKUnlocker
                     Location = new Point(15, y + 26),
                     Size = new Size(Math.Max(150, page.ClientSize.Width - 30), 30),
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                    BackColor = Color.FromArgb(24, 27, 33),
+                    BackColor = Color.FromArgb(23, 26, 32),
                     Visible = false
                 };
                 Panel opsView = new Panel
@@ -1083,7 +1083,7 @@ namespace PMKUnlocker
                         Dock = DockStyle.Right,
                         Width = 20,
                         FlatStyle = FlatStyle.Flat,
-                        BackColor = Color.FromArgb(38, 44, 54),
+                        BackColor = Color.FromArgb(38, 42, 50),
                         ForeColor = Color.FromArgb(150, 165, 185),
                         Font = new Font("Segoe UI", 9f),
                         Margin = new Padding(0),

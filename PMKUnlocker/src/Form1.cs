@@ -253,7 +253,7 @@ namespace PMKUnlocker
 
         // file row color တွေ — light/dark theme အလိုက်
         private Color RowLabelBg => lightTheme ? Color.FromArgb(216, 223, 237) : Color.FromArgb(30, 34, 41);
-        private Color RowFieldBg => lightTheme ? Color.FromArgb(245, 248, 253) : Color.FromArgb(24, 27, 33);
+        private Color RowFieldBg => lightTheme ? Color.FromArgb(245, 248, 253) : Color.FromArgb(23, 26, 32);
         private Color RowLabelText => lightTheme ? Color.FromArgb(45, 52, 66) : Color.FromArgb(205, 216, 232);
         private Color RowHint => lightTheme ? Color.FromArgb(56, 64, 78) : Color.FromArgb(185, 200, 224);
         private Color RowLoaded => lightTheme ? Color.FromArgb(0, 105, 50) : Color.LightGreen;

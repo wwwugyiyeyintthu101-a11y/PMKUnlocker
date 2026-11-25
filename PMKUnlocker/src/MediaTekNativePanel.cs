@@ -63,7 +63,7 @@ public partial class Form1
         catch (Exception ex) { NativeSay("[!] Native DA: recipe folder could not be listed (" + ex.Message + ")"); return; }
         if (profiles.Count == 0) return;      // no recipe installed => no tab. The licensing decision stays PMK's.
 
-        TabPage nativeTab = new("NATIVE") { BackColor = Color.FromArgb(28, 31, 38) };
+        TabPage nativeTab = new("NATIVE") { BackColor = Color.FromArgb(26, 29, 35) };
         nativeTab.Padding = new Padding(8);
         nativeTab.ForeColor = Color.Gainsboro;
         mtkModes.TabPages.Add(nativeTab);
@@ -353,8 +353,8 @@ public partial class Form1
         colNativeErase = new DataGridViewButtonColumn { Name = "nativeErase", HeaderText = "Erase", Text = "Erase", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, Width = 48, AutoSizeMode = DataGridViewAutoSizeColumnMode.None };
         foreach (DataGridViewButtonColumn col in new[] { colNativeRead, colNativeWrite, colNativeErase })
         {
-            col.DefaultCellStyle.BackColor = Color.FromArgb(28, 31, 38);
-            col.DefaultCellStyle.SelectionBackColor = Color.FromArgb(28, 31, 38);
+            col.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
+            col.DefaultCellStyle.SelectionBackColor = Color.FromArgb(26, 29, 35);
             mediaTekGrid.Columns.Add(col);
         }
         mediaTekGrid.CellContentClick += NativeGridCellClick;
