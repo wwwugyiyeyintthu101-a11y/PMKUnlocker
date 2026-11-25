@@ -173,7 +173,7 @@ internal static class ConfirmDialog
             Color fg = dark ? Color.White : Color.FromArgb(30, 32, 40);
             Color btnBg = dark ? Color.FromArgb(45, 49, 58) : Color.FromArgb(228, 232, 241);
             Color btnBorder = dark ? Color.FromArgb(72, 78, 92) : Color.FromArgb(176, 184, 200);
-            Color accent = dark ? Color.FromArgb(139, 92, 246) : Color.FromArgb(124, 58, 237);
+            Color accent = dark ? Color.FromArgb(34, 211, 238) : Color.FromArgb(8, 145, 178);
             Font textFont = TextFont.Value;
 
             Text = caption;

@@ -9,9 +9,9 @@ public class PasswordResetForm : Form
     private readonly Label lblStatus;
     private bool busy;
 
-    private static readonly Color CardBg = Color.FromArgb(33, 31, 74);
+    private static readonly Color CardBg = Color.FromArgb(16, 42, 52);
     private static readonly Color InputBg = Color.FromArgb(41, 38, 92);
-    private static readonly Color Accent = Color.FromArgb(139, 92, 246);
+    private static readonly Color Accent = Color.FromArgb(34, 211, 238);
     private static readonly Color TextDark = Color.FromArgb(235, 235, 245);
     private static readonly Color TextMuted = Color.FromArgb(165, 172, 202);
     private static readonly Color Success = Color.FromArgb(80, 220, 140);
@@ -36,7 +36,7 @@ public class PasswordResetForm : Form
             Location = new Point(22, 18),
             AutoSize = true,
             Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(167, 139, 250)
+            ForeColor = Color.FromArgb(103, 232, 249)
         };
         var lblInfo = new Label
         {

@@ -609,7 +609,7 @@ namespace PMKUnlocker
                     Text = "OK",
                     Location = new Point(252, 128),
                     Size = new Size(88, 34),
-                    BackColor = Color.FromArgb(139, 92, 246),
+                    BackColor = Color.FromArgb(34, 211, 238),
                     ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
                     DialogResult = DialogResult.OK

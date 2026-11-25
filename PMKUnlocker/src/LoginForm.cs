@@ -39,15 +39,15 @@ public class LoginForm : Form
     public int LoginDaysLeft { get; private set; }
 
     // Palette — dark theme (Form1 နဲ့ လိုက်)
-    private static readonly Color Accent      = Color.FromArgb(139, 92, 246);
-    private static readonly Color AccentHover = Color.FromArgb(124, 58, 237);
-    private static readonly Color AccentDark  = Color.FromArgb(167, 139, 250);
-    private static readonly Color Cyan        = Color.FromArgb(167, 139, 250);    // badge highlight (brand soft purple)
-    private static readonly Color TitleTop    = Color.FromArgb(167, 139, 250);    // page gradient start (soft)
-    private static readonly Color TitleBot    = Color.FromArgb(124, 58, 237);    // page gradient end (deep)
-    private static readonly Color PageBg      = Color.FromArgb(112, 66, 224);
-    private static readonly Color CardBg      = Color.FromArgb(33, 31, 74);
-    private static readonly Color StatusBg    = Color.FromArgb(72, 47, 156);
+    private static readonly Color Accent      = Color.FromArgb(34, 211, 238);
+    private static readonly Color AccentHover = Color.FromArgb(8, 145, 178);
+    private static readonly Color AccentDark  = Color.FromArgb(103, 232, 249);
+    private static readonly Color Cyan        = Color.FromArgb(103, 232, 249);    // badge highlight (brand soft purple)
+    private static readonly Color TitleTop    = Color.FromArgb(103, 232, 249);    // page gradient start (soft)
+    private static readonly Color TitleBot    = Color.FromArgb(8, 145, 178);    // page gradient end (deep)
+    private static readonly Color PageBg      = Color.FromArgb(12, 116, 144);
+    private static readonly Color CardBg      = Color.FromArgb(16, 42, 52);
+    private static readonly Color StatusBg    = Color.FromArgb(7, 89, 110);
     private static readonly Color TextDark    = Color.FromArgb(235, 235, 245);
     private static readonly Color TextMuted   = Color.FromArgb(150, 150, 170);
     private static readonly Color BorderCol   = Color.FromArgb(70, 75, 95);
@@ -135,7 +135,7 @@ public class LoginForm : Form
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             // PMK logo tile
             var tile = new Rectangle(18, 12, 40, 40);
-            using (var tl = new System.Drawing.Drawing2D.LinearGradientBrush(tile, Cyan, Color.FromArgb(124, 58, 237), 45f))
+            using (var tl = new System.Drawing.Drawing2D.LinearGradientBrush(tile, Cyan, Color.FromArgb(8, 145, 178), 45f))
                 FillRounded(g, tl, tile, 10);
             using (var tg = new System.Drawing.Drawing2D.LinearGradientBrush(
                 new Rectangle(tile.X, tile.Y, tile.Width, tile.Height),
@@ -207,12 +207,12 @@ public class LoginForm : Form
         {
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using var p = new Pen(Color.FromArgb(40, 139, 92, 246));
+            using var p = new Pen(Color.FromArgb(40, 34, 211, 238));
             g.DrawLine(p, 0, 0, panelStatus.Width, 0);
             // steady status dot (no blinking)
-            using (var dg = new SolidBrush(Color.FromArgb(55, 139, 92, 246)))
+            using (var dg = new SolidBrush(Color.FromArgb(55, 34, 211, 238)))
                 g.FillEllipse(dg, 5, 13, 10, 10);
-            using (var dd = new SolidBrush(Color.FromArgb(220, 139, 92, 246)))
+            using (var dd = new SolidBrush(Color.FromArgb(220, 34, 211, 238)))
                 g.FillEllipse(dd, 8, 16, 4, 4);
         };
         lblStatus = new Label
@@ -298,15 +298,15 @@ public class LoginForm : Form
                 panelCard.ClientRectangle, Color.FromArgb(36, 34, 84), Color.FromArgb(24, 22, 56), 90f))
                 g.FillRectangle(lg, panelCard.ClientRectangle);
             // giant PMK watermark (subtle — GDI+ honors alpha)
-            using (var wm = new SolidBrush(Color.FromArgb(8, 167, 139, 250)))
+            using (var wm = new SolidBrush(Color.FromArgb(8, 103, 232, 249)))
             using (var sf = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Far })
                 g.DrawString("PMK", FWm, wm, new RectangleF(0, panelCard.Height - 170, panelCard.Width - 24, 170), sf);
             // soft static halo behind Sign In button
-            DrawGlow(g, new Rectangle(6, 284, 418, 74), Color.FromArgb(58, 139, 92, 246));
+            DrawGlow(g, new Rectangle(6, 284, 418, 74), Color.FromArgb(58, 34, 211, 238));
             // PMK badge (glow + gradient tile)
             var badge = new Rectangle(32, 22, 54, 54);
-            DrawGlow(g, new Rectangle(14, 4, 90, 90), Color.FromArgb(40, 139, 92, 246));
-            using (var bl = new System.Drawing.Drawing2D.LinearGradientBrush(badge, Cyan, Color.FromArgb(124, 58, 237), 45f))
+            DrawGlow(g, new Rectangle(14, 4, 90, 90), Color.FromArgb(40, 34, 211, 238));
+            using (var bl = new System.Drawing.Drawing2D.LinearGradientBrush(badge, Cyan, Color.FromArgb(8, 145, 178), 45f))
                 FillRounded(g, bl, badge, 14);
             using (var bg2 = new System.Drawing.Drawing2D.LinearGradientBrush(
                 new Rectangle(badge.X, badge.Y, badge.Width, badge.Height),
@@ -459,11 +459,11 @@ public class LoginForm : Form
             }
             else if (btnHover)
             {
-                c1 = Color.FromArgb(167, 139, 250); c2 = Color.FromArgb(124, 58, 237); bd = Color.FromArgb(196, 181, 253);
+                c1 = Color.FromArgb(103, 232, 249); c2 = Color.FromArgb(8, 145, 178); bd = Color.FromArgb(165, 243, 252);
             }
             else
             {
-                c1 = Color.FromArgb(139, 92, 246); c2 = Color.FromArgb(109, 40, 217); bd = Color.FromArgb(167, 139, 250);
+                c1 = Color.FromArgb(34, 211, 238); c2 = Color.FromArgb(6, 105, 130); bd = Color.FromArgb(103, 232, 249);
             }
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
                 btnLogin.ClientRectangle, c1, c2, 90f))
@@ -680,7 +680,7 @@ public class LoginForm : Form
             bool on = wrap.Tag is true;
             if (on)
             {
-                using var glow = new Pen(Color.FromArgb(45, 139, 92, 246), 5f);
+                using var glow = new Pen(Color.FromArgb(45, 34, 211, 238), 5f);
                 DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
             }
             using var p = new Pen(on ? Cyan : Color.FromArgb(74, 70, 138), on ? 2f : 1.3f);

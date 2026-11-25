@@ -1253,7 +1253,7 @@ namespace PMKUnlocker
                 if (lblQcLoaderStatus != null)
                 {
                     lblQcLoaderStatus.Text = "Auto Detect (saved / auto loader)";
-                    lblQcLoaderStatus.ForeColor = Color.FromArgb(139, 92, 246);
+                    lblQcLoaderStatus.ForeColor = Color.FromArgb(34, 211, 238);
                 }
                 return;
             }
@@ -1612,7 +1612,7 @@ namespace PMKUnlocker
                 edlLoaderPath = "";
                 SaveEdlPaths();
                 lblQcLoaderStatus.Text = "Auto Detect (no manual loader selected)";
-                lblQcLoaderStatus.ForeColor = Color.FromArgb(139, 92, 246);
+                lblQcLoaderStatus.ForeColor = Color.FromArgb(34, 211, 238);
                 return;
             }
 

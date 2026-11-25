@@ -97,12 +97,12 @@ public partial class Form1
             Tag = "grp"
         };
         EnsureThemePaint(grpMtkPicker);
-        var lblMtkTitle = new Label { Text = "🔌 MediaTek Device Picker", Location = new Point(9, 13), AutoSize = true, ForeColor = Color.FromArgb(139, 92, 246), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+        var lblMtkTitle = new Label { Text = "🔌 MediaTek Device Picker", Location = new Point(9, 13), AutoSize = true, ForeColor = Color.FromArgb(34, 211, 238), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
         var lblBrandTag = new Label { Text = "Brand:", Location = new Point(175, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
         cmbMtkBrand = new ComboBox { Location = new Point(225, 10), Size = new Size(150, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
         var lblModelTag = new Label { Text = "Model:", Location = new Point(390, 14), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
         cmbMtkModel = new ComboBox { Location = new Point(440, 10), Size = new Size(180, 26), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f) };
-        lblMtkDeviceStatus = new Label { Text = "Auto Detect (no manual DA selected)", Location = new Point(630, 14), AutoSize = false, Size = new Size(240, 20), ForeColor = Color.FromArgb(139, 92, 246), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
+        lblMtkDeviceStatus = new Label { Text = "Auto Detect (no manual DA selected)", Location = new Point(630, 14), AutoSize = false, Size = new Size(240, 20), ForeColor = Color.FromArgb(34, 211, 238), Font = new Font("Segoe UI", 7.5f), AutoEllipsis = true };
 
         // Row 2: DA / Auth / Preloader
         var txtMtkDa = MtkFileRow("DA Agent", () => mtkDaPath, p => mtkDaPath = p, "Download agent|*.bin;*.img|All files|*.*");
@@ -200,7 +200,7 @@ public partial class Form1
             Text = "📋  PARTITIONS (live GPT)  —  tick, then Read / Write / Erase",
             Location = new Point(0, 104),
             AutoSize = true,
-            ForeColor = Color.FromArgb(139, 92, 246),
+            ForeColor = Color.FromArgb(34, 211, 238),
             Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
         };
         infoTab.Controls.Add(lblInfoPartitions);
@@ -220,10 +220,10 @@ public partial class Form1
         };
         mediaTekInfoGrid.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
         mediaTekInfoGrid.DefaultCellStyle.ForeColor = Color.Gainsboro;
-        mediaTekInfoGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(139, 92, 246);
+        mediaTekInfoGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(34, 211, 238);
         mediaTekInfoGrid.DefaultCellStyle.SelectionForeColor = Color.White;
         mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(23, 26, 32);
-        mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(139, 92, 246);
+        mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(34, 211, 238);
         mediaTekInfoGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
         SetDoubleBuffered(mediaTekInfoGrid);
         mediaTekInfoGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "selected", HeaderText = "✓", Width = 34, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
@@ -349,7 +349,7 @@ public partial class Form1
             Tag = "grp"
         };
         EnsureThemePaint(grpImeiWrite);
-        var lblImeiWriteTitle = new Label { Text = "📝 IMEI WRITE (DA)", Location = new Point(9, 8), AutoSize = true, ForeColor = Color.FromArgb(139, 92, 246), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Tag = "accent" };
+        var lblImeiWriteTitle = new Label { Text = "📝 IMEI WRITE (DA)", Location = new Point(9, 8), AutoSize = true, ForeColor = Color.FromArgb(34, 211, 238), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Tag = "accent" };
         var lblImei1 = new Label { Text = "IMEI 1:", Location = new Point(9, 38), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
         var txtImei1 = new TextBox { Location = new Point(70, 34), Size = new Size(150, 24), MaxLength = 15, BackColor = Color.FromArgb(38, 42, 50), ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 9f) };
         var lblImei2 = new Label { Text = "IMEI 2:", Location = new Point(240, 38), AutoSize = true, ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8.5f) };
@@ -439,10 +439,10 @@ public partial class Form1
         };
         mediaTekGrid.DefaultCellStyle.BackColor = Color.FromArgb(26, 29, 35);
         mediaTekGrid.DefaultCellStyle.ForeColor = Color.Gainsboro;
-        mediaTekGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(139, 92, 246);
+        mediaTekGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(34, 211, 238);
         mediaTekGrid.DefaultCellStyle.SelectionForeColor = Color.White;
         mediaTekGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(23, 26, 32);
-        mediaTekGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(139, 92, 246);
+        mediaTekGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(34, 211, 238);
         mediaTekGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
         // A row click repaints the whole row (nine cells, three of them owner-drawn buttons). Without this the grid
         // erases and redraws cell by cell, which is what made selecting a partition feel heavy on a full GPT.
@@ -573,7 +573,7 @@ public partial class Form1
                 lblMtkDeviceStatus.Text = brand == MtkAutoCatalogMode
                     ? "Catalog DA — run Read Info first"
                     : "Auto Detect (mtkclient built-in DA)";
-                lblMtkDeviceStatus.ForeColor = Color.FromArgb(139, 92, 246);
+                lblMtkDeviceStatus.ForeColor = Color.FromArgb(34, 211, 238);
             }
             return;
         }
@@ -600,7 +600,7 @@ public partial class Form1
             : string.IsNullOrWhiteSpace(mtkDaPath) ? brand + " " + model + " · Auto Detect (BROM bypass)"
             : brand + " " + model + " · DA not found";
         lblMtkDeviceStatus.ForeColor = daOk ? Color.LightGreen
-            : string.IsNullOrWhiteSpace(mtkDaPath) ? Color.FromArgb(139, 92, 246) : Color.Orange;
+            : string.IsNullOrWhiteSpace(mtkDaPath) ? Color.FromArgb(34, 211, 238) : Color.Orange;
     }
 
     // ================= LOADER AUTO-DETECT (chipset seen in a log → catalog DA/Auth/Preloader) =================
@@ -659,7 +659,7 @@ public partial class Form1
         else
         {
             lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
-            lblMtkDeviceStatus.ForeColor = Color.FromArgb(139, 92, 246);
+            lblMtkDeviceStatus.ForeColor = Color.FromArgb(34, 211, 238);
             Log("  * DA catalog · " + chip + "\r\n      " + DescribeMatch(match) +
                 "\r\n      not applied — built-in DA stays default" +
                 "\r\n      choose \"" + MtkAutoCatalogMode + "\" to use it" +
@@ -710,7 +710,7 @@ public partial class Form1
         else
         {
             lblMtkDeviceStatus.Text = chip + " · built-in DA (catalog: " + match.Model + ")";
-            lblMtkDeviceStatus.ForeColor = Color.FromArgb(139, 92, 246);
+            lblMtkDeviceStatus.ForeColor = Color.FromArgb(34, 211, 238);
             Log("  * DA catalog · " + chip + " (ADB)\r\n      " + DescribeMatch(match) +
                 "\r\n      not applied — built-in DA stays default" +
                 "\r\n      choose \"" + MtkAutoCatalogMode + "\" to use it" +
