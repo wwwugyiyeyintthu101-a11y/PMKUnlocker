@@ -445,7 +445,6 @@ namespace PMKUnlocker
             catch (Exception ex) { Debug.WriteLine("Settings migration: " + ex.Message); }
             LoadEdlPaths();
             SetupProfessionalUI();
-            BuildShopPanel();
             LoadSettings();       // checkbox state တွေ ပြန်ဖတ် (SetupProfessionalUI ပြီးမှ — control တွေ ဖန်တီးပြီးမှ)
             // saved theme မရှိရင် ApplyTheme() မခေါ်လို့ dialog ကို default (dark) ကို တိုက်ရိုက် sync
             ConfirmDialog.DarkMode = !lightTheme;

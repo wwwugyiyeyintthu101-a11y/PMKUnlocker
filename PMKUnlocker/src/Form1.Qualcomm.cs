@@ -189,7 +189,7 @@ namespace PMKUnlocker
             string local = FindFileInToolFolders(logicalName);
             if (!string.IsNullOrEmpty(local)) return local;
             if (shopToolNames.Contains(logicalName, StringComparer.OrdinalIgnoreCase))
-                throw new FileNotFoundException("Configure " + logicalName + " in Setup / Backups > Tool setup.");
+                throw new FileNotFoundException("Tool not found: " + logicalName + " - put it in the tool folder beside PMKUnlocker.exe.");
             foreach (string folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
             {
                 try

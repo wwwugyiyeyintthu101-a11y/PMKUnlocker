@@ -800,9 +800,13 @@ namespace PMKUnlocker
                 Location = new Point(15, 93),
                 Size = new Size(880, 300),
                 Appearance = TabAppearance.Normal,
-                DrawMode = TabDrawMode.Normal,
+                // Same owner-drawn header as the MediaTek sub-tabs: teal selected tab on dark.
+                DrawMode = TabDrawMode.OwnerDrawFixed,
+                ItemSize = new Size(96, 26),
+                SizeMode = TabSizeMode.Fixed,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold)
             };
+            qcModes.DrawItem += TabControl_DrawItem;
             qcModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(26, 29, 35) });
             qcModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(26, 29, 35) });
             qcModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(26, 29, 35) });
@@ -1385,9 +1389,8 @@ namespace PMKUnlocker
                 BackColor = Color.FromArgb(22, 25, 30),
                 Padding = new Padding(6, 7, 0, 0)   // raised border + button gap
             };
-            // နောက်ဆုံး "Setup" က ShopPanel က ထည့်တဲ့ "Setup / Backups" tab (index 7) —
-            // platform bar မရှိခဲ့ရင် အဲဒီ tab ကို ဘယ်ကမှ ရောက်လို့မရဘူး
-            string[] platformNames = { "ADB", "Fastboot", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon", "⚙ Setup" };
+            // platform bar — tab ၇ ခု (Setup tab ကို operator ဖယ်ခိုင်းလို့ မပါတော့ဘူး)
+            string[] platformNames = { "ADB", "Fastboot", "MediaTek", "Qualcomm", "Samsung", "Spreadtrum", "HiSilicon" };
             platformBtns = new List<Button>();
             for (int i = 0; i < platformNames.Length; i++)
             {
@@ -1873,9 +1876,10 @@ namespace PMKUnlocker
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            TabPage page = tabControl.TabPages[e.Index];
-            Rectangle bounds = tabControl.GetTabRect(e.Index);
-            bool isSelected = (tabControl.SelectedIndex == e.Index);
+            TabControl tc = (TabControl)sender;
+            TabPage page = tc.TabPages[e.Index];
+            Rectangle bounds = tc.GetTabRect(e.Index);
+            bool isSelected = (tc.SelectedIndex == e.Index);
 
             Color backColor = isSelected ? Color.FromArgb(34, 211, 238) : Color.FromArgb(32, 35, 42);
             Color textColor = isSelected ? Color.White : Color.Gainsboro;

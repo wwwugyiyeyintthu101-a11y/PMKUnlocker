@@ -15,7 +15,7 @@ internal static class ShopServices
     {
         var serials = DeviceSerials(output, adb);
         string selected = string.IsNullOrEmpty(preferred)
-            ? serials.Length == 1 ? serials[0] : throw new InvalidOperationException("Select one connected device in Setup / Backups > Device selection.")
+            ? serials.Length == 1 ? serials[0] : throw new InvalidOperationException("More than one phone is connected - unplug the extra one (single-device auto-select is the only selector now).")
             : serials.Contains(preferred) ? preferred : throw new InvalidOperationException("Selected device is not connected. No command sent.");
         if (!System.Text.RegularExpressions.Regex.IsMatch(selected, @"^[A-Za-z0-9_.:\-\[\]]+$"))
             throw new InvalidDataException("Unsupported device serial format.");

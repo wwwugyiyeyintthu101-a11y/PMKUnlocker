@@ -128,9 +128,14 @@ public partial class Form1
             // ended at ~444, so the line under the grid was never painted. 522 gives it 40 px of room.
             Size = new Size(880, 522),
             Appearance = TabAppearance.Normal,
-            DrawMode = TabDrawMode.Normal,
+            // The default tab header renders in Windows silver on the dark page - owner-draw it with
+            // the same teal-on-dark style as the platform bar (TabControl_DrawItem is shared).
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            ItemSize = new Size(96, 26),
+            SizeMode = TabSizeMode.Fixed,
             Font = new Font("Segoe UI", 9f, FontStyle.Bold)
         };
+        mtkModes.DrawItem += TabControl_DrawItem;
         mtkModes.TabPages.Add(new TabPage("INFO") { BackColor = Color.FromArgb(26, 29, 35) });
         mtkModes.TabPages.Add(new TabPage("UNLOCK") { BackColor = Color.FromArgb(26, 29, 35) });
         mtkModes.TabPages.Add(new TabPage("BACKUP") { BackColor = Color.FromArgb(26, 29, 35) });
