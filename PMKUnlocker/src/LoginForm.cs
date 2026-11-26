@@ -45,13 +45,13 @@ public class LoginForm : Form
     private static readonly Color Cyan        = Color.FromArgb(103, 232, 249);    // badge highlight (brand soft purple)
     private static readonly Color TitleTop    = Color.FromArgb(103, 232, 249);    // page gradient start (soft)
     private static readonly Color TitleBot    = Color.FromArgb(8, 145, 178);    // page gradient end (deep)
-    private static readonly Color PageBg      = Color.FromArgb(12, 116, 144);
-    private static readonly Color CardBg      = Color.FromArgb(16, 42, 52);
-    private static readonly Color StatusBg    = Color.FromArgb(7, 89, 110);
+    private static readonly Color PageBg      = Color.FromArgb(16, 18, 24);     // flat dark — DFT-style, no gradient wash
+    private static readonly Color CardBg      = Color.FromArgb(23, 26, 33);
+    private static readonly Color StatusBg    = Color.FromArgb(16, 18, 24);
     private static readonly Color TextDark    = Color.FromArgb(238, 244, 248);
     private static readonly Color TextMuted   = Color.FromArgb(178, 192, 206);
-    private static readonly Color BorderCol   = Color.FromArgb(48, 96, 110);
-    private static readonly Color InputBg     = Color.FromArgb(10, 34, 44);
+    private static readonly Color BorderCol   = Color.FromArgb(46, 54, 66);
+    private static readonly Color InputBg     = Color.FromArgb(28, 32, 40);
     private static readonly Color Success     = Color.FromArgb(80, 220, 140);
     private static readonly Color Danger      = Color.FromArgb(255, 110, 110);
 
@@ -126,9 +126,11 @@ public class LoginForm : Form
         {
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelTitle.ClientRectangle, TitleTop, TitleBot, 0f))
-                g.FillRectangle(lg, panelTitle.ClientRectangle);
+            // flat dark header — the card carries the design, not a gradient wash
+            using (var lb = new SolidBrush(PageBg))
+                g.FillRectangle(lb, panelTitle.ClientRectangle);
+            using (var lp = new Pen(Color.FromArgb(28, 32, 40)))
+                g.DrawLine(lp, 0, panelTitle.Height - 1, panelTitle.Width, panelTitle.Height - 1);
             // title text
             TextRenderer.DrawText(g, "PMK Mobile Tool", FTitle,
                 new Rectangle(68, 6, 300, 52), Color.White,
@@ -260,19 +262,37 @@ public class LoginForm : Form
         {
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (var bg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelBody.ClientRectangle, TitleTop, TitleBot, 0f))
+            using (var bg = new SolidBrush(PageBg))
                 g.FillRectangle(bg, panelBody.ClientRectangle);
-            // subtle dot grid (tech texture, visible around card)
-            using (var db = new SolidBrush(Color.FromArgb(20, 255, 255, 255)))
+            // circuit-line decoration (DFT-style): sparse horizontal traces with endpoint nodes,
+            // teal at low alpha, deterministic so double-buffering redraws the same picture
+            int seed = 20261122;
+            var rnd = new Random(seed);
+            using (var trace = new Pen(Color.FromArgb(26, 34, 211, 238), 1f))
+            using (var node = new SolidBrush(Color.FromArgb(60, 34, 211, 238)))
+            {
+                for (int i = 0; i < 26; i++)
+                {
+                    int yy = 18 + rnd.Next(Math.Max(1, panelBody.Height - 40));
+                    int x1 = rnd.Next(Math.Max(1, panelBody.Width / 3));
+                    int x2 = x1 + 60 + rnd.Next(Math.Max(1, panelBody.Width / 2));
+                    if (x2 > panelBody.Width - 14) x2 = panelBody.Width - 14;
+                    if (x2 <= x1 + 40) continue;
+                    int midX = x1 + (x2 - x1) / 3;
+                    g.DrawLine(trace, x1, yy, midX, yy);
+                    g.DrawLine(trace, x2, yy, midX, yy);
+                    g.DrawLine(trace, midX, yy, midX, yy + (rnd.Next(2) == 0 ? 14 : -14));
+                    g.FillEllipse(node, x1 - 2, yy - 2, 4, 4);
+                    g.FillEllipse(node, x2 - 2, yy - 2, 4, 4);
+                }
+            }
+            // subtle dot grid kept, dimmed
+            using (var db = new SolidBrush(Color.FromArgb(12, 255, 255, 255)))
             {
                 for (int xx = 10; xx < panelBody.Width; xx += 24)
                     for (int yy = 10; yy < panelBody.Height; yy += 24)
                         g.FillEllipse(db, xx, yy, 2, 2);
             }
-            // soft glow sheen on the gradient (calm — no pulsing)
-            DrawGlow(g, new Rectangle(panelBody.Width - 150, -90, 270, 270), Color.FromArgb(40, 255, 255, 255));
-            DrawGlow(g, new Rectangle(-80, panelBody.Height - 110, 230, 230), Color.FromArgb(32, 170, 210, 255));
             // card drop shadow (deeper — raised plate)
             var cr = panelCard.Bounds;
             if (cr.Width > 4)
@@ -295,7 +315,7 @@ public class LoginForm : Form
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
-                panelCard.ClientRectangle, Color.FromArgb(36, 34, 84), Color.FromArgb(24, 22, 56), 90f))
+                panelCard.ClientRectangle, Color.FromArgb(25, 28, 36), Color.FromArgb(21, 24, 31), 90f))
                 g.FillRectangle(lg, panelCard.ClientRectangle);
             // giant PMK watermark (subtle — GDI+ honors alpha)
             using (var wm = new SolidBrush(Color.FromArgb(8, 103, 232, 249)))
@@ -693,7 +713,7 @@ public class LoginForm : Form
                 using var glow = new Pen(Color.FromArgb(45, 34, 211, 238), 5f);
                 DrawRounded(g, glow, new Rectangle(2, 2, wrap.Width - 5, wrap.Height - 5), 12);
             }
-            using var p = new Pen(on ? Cyan : Color.FromArgb(74, 70, 138), on ? 2f : 1.3f);
+            using var p = new Pen(on ? Cyan : Color.FromArgb(56, 64, 78), on ? 2f : 1.3f);
             DrawRounded(g, p, new Rectangle(1, 1, wrap.Width - 3, wrap.Height - 3), 12);
             // inner bevel — sunken field (dark top, light bottom)
             using (var dTop = new Pen(Color.FromArgb(75, 0, 0, 0)))
