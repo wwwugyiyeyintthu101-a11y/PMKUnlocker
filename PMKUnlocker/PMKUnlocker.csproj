@@ -22,9 +22,12 @@
   </PropertyGroup>
 
   <!-- The app auto-starts server\PMKLicenseServer.exe on launch. A local dev run (bin\Release)
-       has no installed server next to it, so a local build copies the built server there —
-       otherwise the login screen answers "license server is unavailable". The release path
-       (check_release.ps1 publish) is unaffected: it ships a self-contained trimmed server
+       has no installed server next to it, so a local build copies the framework-dependent server
+       there (the dev machine has the .NET 10 SDK) — otherwise the login screen answers
+       "license server is unavailable". Do NOT mix this with the self-contained publish: a
+       framework-dependent deps.json/runtimeconfig.json dropped into a self-contained folder
+       breaks the host's app-local search ("No frameworks were found"). The release path
+       (check_release.ps1 publish) is unaffected: it ships the self-contained trimmed server
        into the candidate, and CI builds with SkipToolIntegrity=true and never runs the app. -->
   <Target Name="CopyLicenseServerForLocalRun" AfterTargets="Build"
           Condition="'$(SkipToolIntegrity)' != 'true'">
