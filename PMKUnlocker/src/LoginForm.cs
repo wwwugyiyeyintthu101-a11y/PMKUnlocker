@@ -39,13 +39,15 @@ public class LoginForm : Form
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             // pill = two end circles + a rect (the hand-built arc path rendered with a bulge)
             var pill = new Rectangle(0, 1, 44, 22);
-            using (var bg = new SolidBrush(Checked ? Color.FromArgb(34, 211, 238) : Color.FromArgb(56, 64, 78)))
+            // OFF must read as clearly OFF on the dark card: a light grey pill + white knob, not
+            // near-invisible dark grey. ON = brand teal.
+            using (var bg = new SolidBrush(Checked ? Color.FromArgb(34, 211, 238) : Color.FromArgb(102, 112, 132)))
             {
                 g.FillEllipse(bg, pill.X, pill.Y, 22, 22);
                 g.FillEllipse(bg, pill.X + 22, pill.Y, 22, 22);
                 g.FillRectangle(bg, pill.X + 11, pill.Y, 22, 22);
             }
-            using (var rim = new Pen(Color.FromArgb(36, 42, 52), 1f))
+            using (var rim = new Pen(Checked ? Color.FromArgb(8, 145, 178) : Color.FromArgb(150, 160, 178), 1.4f))
             {
                 g.DrawEllipse(rim, pill.X - 0.5f, pill.Y + 0.5f, 21, 21);
                 g.DrawEllipse(rim, pill.X + 21.5f, pill.Y + 0.5f, 21, 21);
