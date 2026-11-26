@@ -37,14 +37,24 @@ public class LoginForm : Form
         {
             var g = e.Graphics;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            // pill = two end circles + a rect (the hand-built arc path rendered with a bulge)
             var pill = new Rectangle(0, 1, 44, 22);
             using (var bg = new SolidBrush(Checked ? Color.FromArgb(34, 211, 238) : Color.FromArgb(56, 64, 78)))
-                g.FillPath(bg, RoundedPath(pill, 11));
+            {
+                g.FillEllipse(bg, pill.X, pill.Y, 22, 22);
+                g.FillEllipse(bg, pill.X + 22, pill.Y, 22, 22);
+                g.FillRectangle(bg, pill.X + 11, pill.Y, 22, 22);
+            }
+            using (var rim = new Pen(Color.FromArgb(36, 42, 52), 1f))
+            {
+                g.DrawEllipse(rim, pill.X - 0.5f, pill.Y + 0.5f, 21, 21);
+                g.DrawEllipse(rim, pill.X + 21.5f, pill.Y + 0.5f, 21, 21);
+            }
             int kx = Checked ? pill.Right - 20 : 2;
             using (var knob = new SolidBrush(Color.White))
                 g.FillEllipse(knob, kx, 3, 18, 18);
             TextRenderer.DrawText(g, "Remember me", new Font("Segoe UI", 9.5f),
-                new Rectangle(54, 0, Width - 54, Height), ForeColor,
+                new Rectangle(56, 0, Width - 56, Height), ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
         }
         private static System.Drawing.Drawing2D.GraphicsPath RoundedPath(Rectangle r, int radius)
