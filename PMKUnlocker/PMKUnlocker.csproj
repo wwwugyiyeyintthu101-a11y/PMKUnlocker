@@ -21,6 +21,25 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <!-- The app auto-starts server\PMKLicenseServer.exe on launch. A local dev run (bin\Release)
+       has no installed server next to it, so a local build copies the built server there —
+       otherwise the login screen answers "license server is unavailable". The release path
+       (check_release.ps1 publish) is unaffected: it ships a self-contained trimmed server
+       into the candidate, and CI builds with SkipToolIntegrity=true and never runs the app. -->
+  <Target Name="CopyLicenseServerForLocalRun" AfterTargets="Build"
+          Condition="'$(SkipToolIntegrity)' != 'true'">
+    <ItemGroup>
+      <LicenseServerFiles Include="$(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.exe;
+                                        $(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.dll;
+                                        $(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.deps.json;
+                                        $(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.runtimeconfig.json;
+                                        $(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\appsettings.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LicenseServerFiles)" DestinationFiles="@(LicenseServerFiles->'$(OutDir)server\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\PMKLicenseServer\bin\Release\net10.0\PMKLicenseServer.exe')" />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
