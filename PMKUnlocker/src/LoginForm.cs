@@ -7,7 +7,57 @@ public class LoginForm : Form
     private const string PasswordPlaceholder = "Password";
     private TextBox txtEmail;
     private TextBox txtPassword;
-    private CheckBox chkRemember;
+    private ToggleSwitch chkRemember;
+
+    // DFT-style toggle switch — Remember me. Same Checked/Enabled surface as the CheckBox it
+    // replaced, so the rest of the form keeps compiling unchanged.
+    private sealed class ToggleSwitch : Control
+    {
+        private bool _checked;
+        public bool Checked
+        {
+            get => _checked;
+            set { if (_checked != value) { _checked = value; Invalidate(); } }
+        }
+        public ToggleSwitch()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
+            Size = new Size(150, 24);
+            Cursor = Cursors.Hand;
+            TabStop = false;
+        }
+        protected override void OnClick(EventArgs e)
+        {
+            if (Enabled) { Checked = !Checked; Invalidate(); }
+            base.OnClick(e);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var pill = new Rectangle(0, 1, 44, 22);
+            using (var bg = new SolidBrush(Checked ? Color.FromArgb(34, 211, 238) : Color.FromArgb(56, 64, 78)))
+                g.FillPath(bg, RoundedPath(pill, 11));
+            int kx = Checked ? pill.Right - 20 : 2;
+            using (var knob = new SolidBrush(Color.White))
+                g.FillEllipse(knob, kx, 3, 18, 18);
+            TextRenderer.DrawText(g, "Remember me", new Font("Segoe UI", 9.5f),
+                new Rectangle(54, 0, Width - 54, Height), ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+        private static System.Drawing.Drawing2D.GraphicsPath RoundedPath(Rectangle r, int radius)
+        {
+            var p = new System.Drawing.Drawing2D.GraphicsPath();
+            p.AddArc(r.X, r.Y, radius * 2, radius * 2, 180, 180);
+            p.AddArc(r.Right - radius * 2, r.Y, radius * 2, radius * 2, 270, 180);
+            p.AddArc(r.Right - radius * 2, r.Bottom - radius * 2 - 1, radius * 2, radius * 2, 0, 180);
+            p.AddArc(r.X, r.Bottom - radius * 2 - 1, radius * 2, radius * 2, 90, 180);
+            p.CloseFigure();
+            return p;
+        }
+    }
     private Button btnLogin;
     private LinkLabel lnkRegister;
     private LinkLabel lnkForgot;
@@ -45,7 +95,7 @@ public class LoginForm : Form
     private static readonly Color Cyan        = Color.FromArgb(103, 232, 249);    // badge highlight (brand soft purple)
     private static readonly Color TitleTop    = Color.FromArgb(103, 232, 249);    // page gradient start (soft)
     private static readonly Color TitleBot    = Color.FromArgb(8, 145, 178);    // page gradient end (deep)
-    private static readonly Color PageBg      = Color.FromArgb(16, 18, 24);     // flat dark — DFT-style, no gradient wash
+    private static readonly Color PageBg      = Color.FromArgb(18, 21, 28);     // flat dark — DFT-style, no gradient wash
     private static readonly Color CardBg      = Color.FromArgb(23, 26, 33);
     private static readonly Color StatusBg    = Color.FromArgb(16, 18, 24);
     private static readonly Color TextDark    = Color.FromArgb(238, 244, 248);
@@ -339,7 +389,7 @@ public class LoginForm : Form
             TextRenderer.DrawText(g, "PMK", FBdg, badge, Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             var rc = new Rectangle(0, 0, panelCard.Width - 1, panelCard.Height - 1);
-            using (var p = new Pen(Color.FromArgb(116, 118, 196), 1.4f))
+            using (var p = new Pen(Color.FromArgb(58, 66, 80), 1.4f))
                 DrawRounded(g, p, rc, 16);
             using (var acc = new System.Drawing.Drawing2D.LinearGradientBrush(
                 new Rectangle(0, 0, panelCard.Width, 4), Accent, Cyan, 0f))
@@ -355,7 +405,7 @@ public class LoginForm : Form
                 g.ResetTransform();
                 var hgb = hp.GetBounds();
                 using (var hb2 = new System.Drawing.Drawing2D.LinearGradientBrush(
-                    hgb, Color.White, Color.FromArgb(186, 167, 250), 12f))
+                    hgb, Color.White, Color.FromArgb(154, 235, 246), 12f))
                     g.FillPath(hb2, hp);
             }
         };
@@ -422,15 +472,12 @@ public class LoginForm : Form
         txtPassword.LostFocus += (_, _) =>
             txtPassword.UseSystemPasswordChar = !chkShow.Checked && txtPassword.Text != PasswordPlaceholder;
 
-        chkRemember = new CheckBox
+        chkRemember = new ToggleSwitch
         {
-            Text = "Remember me",
-            Location = new Point(left, 266),
-            AutoSize = true,
+            Location = new Point(left, 264),
+            Size = new Size(150, 24),
             ForeColor = TextDark,
-            Font = new Font("Segoe UI", 9.5f),
-            Checked = false,
-            Cursor = Cursors.Hand
+            Checked = false
         };
 
         // password မေ့ရင် reset link (email) — server SMTP / admin link နဲ့
@@ -473,23 +520,25 @@ public class LoginForm : Form
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             var rc = new Rectangle(0, 0, btnLogin.Width - 1, btnLogin.Height - 1);
             Color c1, c2, bd;
+            // DFT Pro look — flat dark plate with the teal outline; the accent lives on the border,
+            // not the fill ("Check Account" style).
             if (!btnLogin.Enabled)
             {
-                c1 = Color.FromArgb(70, 74, 92); c2 = Color.FromArgb(54, 58, 74); bd = Color.FromArgb(90, 95, 115);
+                c1 = Color.FromArgb(38, 43, 54); c2 = Color.FromArgb(34, 38, 48); bd = Color.FromArgb(64, 72, 88);
             }
             else if (btnHover)
             {
-                c1 = Color.FromArgb(103, 232, 249); c2 = Color.FromArgb(8, 145, 178); bd = Color.FromArgb(165, 243, 252);
+                c1 = Color.FromArgb(22, 30, 38); c2 = Color.FromArgb(18, 26, 33); bd = Color.FromArgb(103, 232, 249);
             }
             else
             {
-                c1 = Color.FromArgb(34, 211, 238); c2 = Color.FromArgb(6, 105, 130); bd = Color.FromArgb(103, 232, 249);
+                c1 = Color.FromArgb(28, 32, 40); c2 = Color.FromArgb(24, 28, 36); bd = Color.FromArgb(34, 211, 238);
             }
             using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(
                 btnLogin.ClientRectangle, c1, c2, 90f))
                 g.FillRectangle(lg, btnLogin.ClientRectangle);
             using (var gl = new System.Drawing.Drawing2D.LinearGradientBrush(
-                new Rectangle(0, 0, btnLogin.Width, 20), Color.FromArgb(45, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+                new Rectangle(0, 0, btnLogin.Width, 20), Color.FromArgb(18, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
                 g.FillRectangle(gl, 2, 2, btnLogin.Width - 4, 18);
             // 3D: dark bottom band (lifted look)
             using (var shd = new System.Drawing.Drawing2D.LinearGradientBrush(
@@ -675,7 +724,7 @@ public class LoginForm : Form
             Location = new Point(x, y),
             Size = new Size(w, h),
             BackColor = InputBg,
-            Padding = new Padding(14, 8, 14, 2)   // top-aligned edit text → push down to field center
+            Padding = new Padding(18, 8, 14, 2)   // left-aligned edit text, DFT-style
         };
         SetDoubleBuffered(wrap);
         wrap.Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, w, h, 24, 24));
@@ -687,7 +736,7 @@ public class LoginForm : Form
             BackColor = InputBg,
             ForeColor = TextDark,
             MaxLength = 120,
-            TextAlign = HorizontalAlignment.Center,
+            TextAlign = HorizontalAlignment.Left,
             Text = placeholder
         };
         tb.ForeColor = Color.FromArgb(132, 152, 166);
