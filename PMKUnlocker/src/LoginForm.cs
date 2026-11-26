@@ -173,7 +173,7 @@ public class LoginForm : Form
         SuspendLayout();
 
         Text = "PMK Mobile Tool [ PMK ] v" + UpdateChecker.CurrentVersion;
-        ClientSize = new Size(490, 540);
+        ClientSize = new Size(560, 540);
         FormBorderStyle = FormBorderStyle.None;   // native title bar removed (custom title panel only)
         MaximizeBox = false;
         MinimizeBox = true;
@@ -432,8 +432,8 @@ public class LoginForm : Form
         }
 
         // layout inside card (absolute but well spaced)
-        int left = 32;
-        int fieldW = 366;
+        int left = 40;
+        int fieldW = 456;   // window 560 wide - 2×40 margins, fields stretch with it
 
         var lblSub = new Label
         {
